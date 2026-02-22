@@ -366,7 +366,7 @@ impl Thread {
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
     ) -> Result<(SessionId, Self), Error> {
         let mut app = AppServerProcess::spawn("codex").await?;
-        app.initialize("codex-acp", "Codex ACP").await?;
+        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
 
         let start = app
             .thread_start(ThreadStartParams {
@@ -434,7 +434,7 @@ impl Thread {
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
     ) -> Result<Self, Error> {
         let mut app = AppServerProcess::spawn("codex").await?;
-        app.initialize("codex-acp", "Codex ACP").await?;
+        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
 
         let resume = app
             .thread_resume(ThreadResumeParams {
@@ -788,7 +788,7 @@ impl Thread {
         cursor: Option<String>,
     ) -> Result<ListSessionsResponse, Error> {
         let mut app = AppServerProcess::spawn("codex").await?;
-        app.initialize("codex-acp", "Codex ACP").await?;
+        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
 
         let response = app
             .thread_list(ThreadListParams {

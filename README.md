@@ -1,6 +1,7 @@
 # ACP-адаптер для Codex (CAS)
 
 Используйте [Codex](https://github.com/openai/codex) из [ACP-совместимых](https://agentclientprotocol.com) клиентов (например, [Zed](https://zed.dev)) через CAS-реализацию.
+Проект вдохновлен codex-acp, но реализует собственный CAS-мост и UX-поведение.
 
 ## Статус проекта
 
@@ -32,7 +33,7 @@ OPENAI_API_KEY=sk-... codex-acp
 Или через npm:
 
 ```bash
-npx @zed-industries/codex-acp
+npx @qweasd123tg/codex-acp-cas
 ```
 
 ## Локальный CAS workflow

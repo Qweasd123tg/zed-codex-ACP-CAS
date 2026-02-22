@@ -2,11 +2,11 @@
 name = "codex-acp"
 version = "0.1.0"
 edition = "2024"
-authors = ["Zed <hi@zed.dev>"]
+authors = ["Qweasd123tg"]
 license = "Apache-2.0"
 description = "An ACP-compatible coding agent powered by Codex"
-repository = "https://github.com/zed-industries/codex-acp"
-homepage = "https://github.com/zed-industries/codex-acp"
+repository = "https://github.com/Qweasd123tg/zed-codex-acp-CAS"
+homepage = "https://github.com/Qweasd123tg/zed-codex-acp-CAS"
 
 [[bin]]
 name = "codex-acp"

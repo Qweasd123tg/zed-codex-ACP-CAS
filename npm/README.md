@@ -1,6 +1,7 @@
 # ACP adapter for Codex
 
 Use [Codex](https://github.com/openai/codex) from [ACP-compatible](https://agentclientprotocol.com) clients such as [Zed](https://zed.dev)!
+This package is maintained as CAS fork implementation.
 
 This tool implements an ACP adapter around the Codex CLI, supporting:
 
@@ -38,11 +39,11 @@ Read the docs on [External Agent](https://zed.dev/docs/ai/external-agents) suppo
 
 ### Other clients
 
-[Submit a PR](https://github.com/zed-industries/codex-acp/pulls) to add yours!
+[Submit a PR](https://github.com/Qweasd123tg/zed-codex-acp-CAS/pulls) to add yours!
 
 #### Installation
 
-Install the adapter from the latest release for your architecture and OS: https://github.com/zed-industries/codex-acp/releases
+Install the adapter from the latest release for your architecture and OS: https://github.com/Qweasd123tg/zed-codex-acp-CAS/releases
 
 You can then use `codex-acp` as a regular ACP agent:
 
@@ -53,7 +54,7 @@ OPENAI_API_KEY=sk-... codex-acp
 Or via npm:
 
 ```
-npx @zed-industries/codex-acp
+npx @qweasd123tg/codex-acp-cas
 ```
 
 ## License
