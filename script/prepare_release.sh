@@ -119,15 +119,12 @@ if [[ "$CARGO_VERSION" != "$VERSION" ]]; then
   rm -f Cargo.toml.bak
 fi
 
-echo "[release] update npm/package.json to version $VERSION"
-bash npm/publish/update-base-package.sh "$VERSION" >/dev/null
-
 if [[ "$CHECKS_MODE" != "none" ]]; then
   echo "[release] running checks: $CHECKS_MODE"
   bash script/run_live_checks.sh "$CHECKS_MODE"
 fi
 
-git add Cargo.toml npm/package.json
+git add Cargo.toml
 if ! git diff --cached --quiet; then
   git commit -m "Release $TAG"
 else

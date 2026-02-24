@@ -20,10 +20,6 @@ run_full() {
   cargo clippy --all-targets --all-features -- -D warnings
   echo "[checks] cargo test"
   cargo test
-  echo "[checks] bash npm/testing/validate.sh"
-  bash npm/testing/validate.sh
-  echo "[checks] node npm/testing/test-platform-detection.js"
-  node npm/testing/test-platform-detection.js
 }
 
 case "$MODE" in

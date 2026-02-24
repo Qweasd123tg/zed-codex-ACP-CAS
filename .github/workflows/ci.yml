@@ -12,29 +12,8 @@ env:
 
 jobs:
   test:
-    name: Test - ${{ matrix.os }} ${{ matrix.target }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            target: aarch64-apple-darwin
-          - os: macos-14
-            target: x86_64-apple-darwin
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-musl
-          - os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-          - os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-musl
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: windows-11-arm
-            target: aarch64-pc-windows-msvc
-
-    runs-on: ${{ matrix.os }}
+    name: Test - Linux x86_64 GNU
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
@@ -42,40 +21,34 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-unknown-linux-gnu
 
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: ~/.cargo/registry
-          key: ${{ matrix.os }}-${{ matrix.target }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ matrix.os }}-${{ matrix.target }}-cargo-registry-
+            ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-registry-
 
       - name: Cache cargo index
         uses: actions/cache@v4
         with:
           path: ~/.cargo/git
-          key: ${{ matrix.os }}-${{ matrix.target }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-git-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ matrix.os }}-${{ matrix.target }}-cargo-git-
+            ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-git-
 
       - name: Cache target directory
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ matrix.os }}-${{ matrix.target }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-target-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ matrix.os }}-${{ matrix.target }}-cargo-target-
-
-      - if: ${{ matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-unknown-linux-musl'}}
-        name: Install musl build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools pkg-config
+            ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-target-
 
       - name: Run tests
-        run: cargo test --release --target ${{ matrix.target }}
+        run: cargo test --release --target x86_64-unknown-linux-gnu
 
   lint:
     name: Lint
@@ -110,21 +83,3 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
-
-  npm-validation:
-    name: NPM Package Validation
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "lts/*"
-
-      - name: Run validation script
-        run: bash npm/testing/validate.sh
-
-      - name: Run platform detection tests
-        run: node npm/testing/test-platform-detection.js

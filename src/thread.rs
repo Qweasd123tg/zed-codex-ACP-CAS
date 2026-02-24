@@ -3731,10 +3731,6 @@ fn command_looks_like_verification(command: &str) -> bool {
         "cargo check",
         "go test",
         "pytest",
-        "npm test",
-        "pnpm test",
-        "yarn test",
-        "bun test",
         "dotnet test",
         "mvn test",
         "gradle test",
@@ -4766,7 +4762,7 @@ mod tests {
     #[test]
     fn detects_verification_commands() {
         assert!(command_looks_like_verification("cargo test -q"));
-        assert!(command_looks_like_verification("npm test -- run"));
+        assert!(command_looks_like_verification("go test ./..."));
         assert!(command_looks_like_verification("ruff check ."));
         assert!(!command_looks_like_verification("rg --files"));
         assert!(!command_looks_like_verification("cat README.md"));

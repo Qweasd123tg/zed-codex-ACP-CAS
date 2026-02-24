@@ -32,12 +32,6 @@
 OPENAI_API_KEY=sk-... codex-acp
 ```
 
-Или через npm:
-
-```bash
-npx @qweasd123tg/codex-acp-cas
-```
-
 ## Локальный CAS workflow
 
 - Быстрые проверки: `bash script/run_live_checks.sh quick`
@@ -45,9 +39,25 @@ npx @qweasd123tg/codex-acp-cas
 - Сборка+установка+smoke-test: `bash script/build_install_cas.sh`
 - Отдельный smoke-test: `bash script/smoke_test_cas.sh "$HOME/.local/bin/codex-acp-cas"`
 
+## Обновление references
+
+- Ручное обновление всех reference-репозиториев:
+  `bash script/update_references.sh`
+- Обновление один раз в день (если уже обновлялось сегодня по UTC, скрипт завершится без действий):
+  `bash script/update_references.sh --daily`
+- Обновление одного reference-репо:
+  `bash script/update_references.sh --repo zed`
+
+Скрипт подтягивает изменения из `origin`, определяет версию (`tag`/`describe`/commit) и переименовывает папку в формат `<имя>@<версия>`, например `codex-acp-upstream@v0.9.4`. Для удобства он оставляет стабильный симлинк без версии: `references/codex-acp-upstream -> references/codex-acp-upstream@v0.9.4`.
+
+Пример cron (ежедневно в 04:20 UTC):
+`20 4 * * * cd /home/qweasd123tg/Code/zed\ codex\ app\ server && bash script/update_references.sh --daily >> /tmp/cas-update-references.log 2>&1`
+
 ## Релизы и версии
 
 Проект использует **независимую SemVer-схему CAS** (не привязанную к тегам upstream), например `0.1.0`, `0.1.1`.
+Официальная поддерживаемая платформа релизов: **Fedora x86_64**.
+Остальные платформы считаются best-effort: можно собрать самостоятельно, но сопровождение и фиксы не гарантируются.
 
 Подготовка релиза:
 
@@ -59,7 +69,7 @@ git push origin v0.1.0
 
 Рекомендуется пушить именно нужный релизный тег (`vX.Y.Z`) и не использовать `git push --tags`, чтобы не отправлять лишние теги из локального репозитория.
 
-GitHub Actions релизного контура собирает **только Linux-артефакт** (`x86_64-unknown-linux-gnu`).
+GitHub Actions релизного контура собирает **только Linux GNU x86_64** (`x86_64-unknown-linux-gnu`) для Fedora-сценария.
 
 ## Лицензия
 
