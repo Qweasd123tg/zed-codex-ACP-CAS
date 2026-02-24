@@ -19,6 +19,7 @@ use agent_client_protocol::{
 };
 use codex_app_server_protocol::{
     AskForApproval as AppAskForApproval, CommandExecutionApprovalDecision,
+    CollabAgentState, CollabAgentStatus, CollabAgentTool, CollabAgentToolCallStatus,
     CommandAction,
     CommandExecutionOutputDeltaNotification, CommandExecutionRequestApprovalParams,
     CommandExecutionRequestApprovalResponse, CommandExecutionStatus,
@@ -2329,6 +2330,32 @@ async fn handle_item_started(inner: &mut ThreadInner, payload: ItemStartedNotifi
                 )
                 .await;
         }
+        ThreadItem::CollabAgentToolCall {
+            id,
+            tool,
+            status,
+            sender_thread_id,
+            receiver_thread_ids,
+            prompt,
+            agents_states,
+        } => {
+            maybe_advance_fallback_plan(inner, &turn_id, FallbackPlanPhase::Implementing).await;
+            inner.started_tool_calls.insert(id.clone());
+            inner
+                .client
+                .send_tool_call(
+                    ToolCall::new(ToolCallId::new(id), collab_tool_title(&tool, false))
+                        .kind(collab_tool_kind())
+                        .status(map_collab_status(status, true))
+                        .content(collab_tool_content(
+                            &sender_thread_id,
+                            &receiver_thread_ids,
+                            prompt.as_deref(),
+                            &agents_states,
+                        )),
+                )
+                .await;
+        }
         ThreadItem::WebSearch { id, query, .. } => {
             maybe_advance_fallback_plan(inner, &turn_id, FallbackPlanPhase::Implementing).await;
             inner.started_tool_calls.insert(id.clone());
@@ -2474,6 +2501,38 @@ async fn handle_item_completed(
             inner
                 .client
                 .send_tool_call_update(ToolCallUpdate::new(ToolCallId::new(id.clone()), fields))
+                .await;
+            inner.started_tool_calls.remove(&id);
+        }
+        ThreadItem::CollabAgentToolCall {
+            id,
+            tool,
+            status,
+            sender_thread_id,
+            receiver_thread_ids,
+            prompt,
+            agents_states,
+        } => {
+            let completed = !matches!(status, CollabAgentToolCallStatus::InProgress);
+            inner
+                .client
+                .send_tool_call_update(ToolCallUpdate::new(
+                    ToolCallId::new(id.clone()),
+                    ToolCallUpdateFields::new()
+                        .title(collab_tool_title(&tool, completed))
+                        .status(map_collab_status(status, false))
+                        .content(collab_tool_content(
+                            &sender_thread_id,
+                            &receiver_thread_ids,
+                            prompt.as_deref(),
+                            &agents_states,
+                        ))
+                        .raw_output(serde_json::json!({
+                            "senderThreadId": sender_thread_id,
+                            "receiverThreadIds": receiver_thread_ids,
+                            "agentsStates": agents_states,
+                        })),
+                ))
                 .await;
             inner.started_tool_calls.remove(&id);
         }
@@ -3338,6 +3397,30 @@ async fn replay_thread_item(client: &SessionClient, workspace_cwd: &Path, item: 
                 .send_tool_call_update(ToolCallUpdate::new(ToolCallId::new(id), fields))
                 .await;
         }
+        ThreadItem::CollabAgentToolCall {
+            id,
+            tool,
+            status,
+            sender_thread_id,
+            receiver_thread_ids,
+            prompt,
+            agents_states,
+        } => {
+            let completed = !matches!(status, CollabAgentToolCallStatus::InProgress);
+            client
+                .send_tool_call(
+                    ToolCall::new(ToolCallId::new(id), collab_tool_title(&tool, completed))
+                        .kind(collab_tool_kind())
+                        .status(map_collab_status(status, false))
+                        .content(collab_tool_content(
+                            &sender_thread_id,
+                            &receiver_thread_ids,
+                            prompt.as_deref(),
+                            &agents_states,
+                        )),
+                )
+                .await;
+        }
         ThreadItem::WebSearch { id, query, .. } => {
             client
                 .send_tool_call(
@@ -3378,7 +3461,6 @@ async fn replay_thread_item(client: &SessionClient, workspace_cwd: &Path, item: 
         ThreadItem::ContextCompaction { .. } => {
             client.send_agent_thought("Context compacted.").await;
         }
-        _ => {}
     }
 }
 
@@ -3570,6 +3652,69 @@ fn command_tool_kind(command: &str, command_actions: &[CommandAction]) -> ToolKi
     // Keep command cards in the generic collapsible tool UI (non-terminal card),
     // so users can expand and inspect raw command input on demand.
     ToolKind::Think
+}
+
+fn collab_tool_kind() -> ToolKind {
+    ToolKind::Think
+}
+
+fn collab_tool_title(tool: &CollabAgentTool, completed: bool) -> &'static str {
+    match (tool, completed) {
+        (CollabAgentTool::SpawnAgent, true) => "Agent spawned",
+        (CollabAgentTool::SpawnAgent, false) => "Spawn agent",
+        (CollabAgentTool::SendInput, true) => "Agent input sent",
+        (CollabAgentTool::SendInput, false) => "Send input to agent",
+        (CollabAgentTool::Wait, true) => "Waiting finished",
+        (CollabAgentTool::Wait, false) => "Waiting for agents",
+        (CollabAgentTool::CloseAgent, true) => "Agent closed",
+        (CollabAgentTool::CloseAgent, false) => "Close agent",
+    }
+}
+
+fn collab_tool_content(
+    sender_thread_id: &str,
+    receiver_thread_ids: &[String],
+    prompt: Option<&str>,
+    agents_states: &HashMap<String, CollabAgentState>,
+) -> Vec<ToolCallContent> {
+    let mut lines = vec![format!("Sender: {sender_thread_id}")];
+    if !receiver_thread_ids.is_empty() {
+        lines.push(format!("Receivers: {}", receiver_thread_ids.join(", ")));
+    }
+
+    if let Some(prompt) = prompt.map(str::trim).filter(|prompt| !prompt.is_empty()) {
+        lines.push(format!("Prompt: {}", normalize_preview(prompt)));
+    }
+
+    if !agents_states.is_empty() {
+        lines.push("Agent statuses:".to_string());
+        let mut statuses = agents_states.iter().collect::<Vec<_>>();
+        statuses.sort_by(|(left, _), (right, _)| left.cmp(right));
+        for (thread_id, state) in statuses {
+            let mut line = format!(
+                "- {thread_id}: {}",
+                collab_agent_status_label(&state.status)
+            );
+            if let Some(message) = state.message.as_deref().map(str::trim).filter(|m| !m.is_empty())
+            {
+                line.push_str(&format!(" ({})", normalize_preview(message)));
+            }
+            lines.push(line);
+        }
+    }
+
+    vec![lines.join("\n").into()]
+}
+
+fn collab_agent_status_label(status: &CollabAgentStatus) -> &'static str {
+    match status {
+        CollabAgentStatus::PendingInit => "pending_init",
+        CollabAgentStatus::Running => "running",
+        CollabAgentStatus::Completed => "completed",
+        CollabAgentStatus::Errored => "errored",
+        CollabAgentStatus::Shutdown => "shutdown",
+        CollabAgentStatus::NotFound => "not_found",
+    }
 }
 
 fn command_tool_placeholder_content() -> Vec<ToolCallContent> {
@@ -3958,6 +4103,18 @@ fn map_mcp_status(status: McpToolCallStatus, assume_in_progress: bool) -> ToolCa
     match status {
         McpToolCallStatus::Completed => ToolCallStatus::Completed,
         McpToolCallStatus::InProgress | McpToolCallStatus::Failed => ToolCallStatus::Failed,
+    }
+}
+
+fn map_collab_status(status: CollabAgentToolCallStatus, assume_in_progress: bool) -> ToolCallStatus {
+    if assume_in_progress {
+        return ToolCallStatus::InProgress;
+    }
+    match status {
+        CollabAgentToolCallStatus::Completed => ToolCallStatus::Completed,
+        CollabAgentToolCallStatus::InProgress | CollabAgentToolCallStatus::Failed => {
+            ToolCallStatus::Failed
+        }
     }
 }
 
@@ -4849,6 +5006,42 @@ mod tests {
         assert_eq!(
             command_tool_kind("/bin/bash -lc 'echo done'", &[]),
             ToolKind::Think
+        );
+    }
+
+    #[test]
+    fn collab_tool_titles_are_human_readable() {
+        assert_eq!(
+            collab_tool_title(&CollabAgentTool::SpawnAgent, false),
+            "Spawn agent"
+        );
+        assert_eq!(
+            collab_tool_title(&CollabAgentTool::SpawnAgent, true),
+            "Agent spawned"
+        );
+        assert_eq!(
+            collab_tool_title(&CollabAgentTool::Wait, false),
+            "Waiting for agents"
+        );
+        assert_eq!(
+            collab_tool_title(&CollabAgentTool::Wait, true),
+            "Waiting finished"
+        );
+    }
+
+    #[test]
+    fn collab_status_mapping_matches_tool_call_statuses() {
+        assert_eq!(
+            map_collab_status(CollabAgentToolCallStatus::InProgress, true),
+            ToolCallStatus::InProgress
+        );
+        assert_eq!(
+            map_collab_status(CollabAgentToolCallStatus::Completed, false),
+            ToolCallStatus::Completed
+        );
+        assert_eq!(
+            map_collab_status(CollabAgentToolCallStatus::Failed, false),
+            ToolCallStatus::Failed
         );
     }
 
