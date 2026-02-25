@@ -50,10 +50,7 @@ pub(super) fn build_prompt_items(prompt: Vec<ContentBlock>) -> Vec<UserInput> {
 }
 
 pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCommand> {
-    let text = match prompt {
-        [ContentBlock::Text(text)] => text.text.trim(),
-        _ => return None,
-    };
+    let text = extract_command_text(prompt)?;
 
     if text == "/plan" || text.starts_with("/plan ") {
         let rest = text["/plan".len()..].trim();
@@ -85,13 +82,24 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
     }
 
     if let Some(rest) = text.strip_prefix("/resume") {
-        let rest = rest.trim();
-        return Some(SessionCommand::Resume {
-            thread_id: if rest.is_empty() {
-                None
+        let mut include_history = true;
+        let mut query_parts = Vec::new();
+        for token in rest.split_whitespace() {
+            if token == "--history" {
+                include_history = true;
+            } else if token == "--no-history" {
+                include_history = false;
             } else {
-                Some(rest.to_string())
-            },
+                query_parts.push(token);
+            }
+        }
+
+        let query = query_parts.join(" ");
+        let thread_id = if query.is_empty() { None } else { Some(query) };
+
+        return Some(SessionCommand::Resume {
+            thread_id,
+            include_history,
         });
     }
 
@@ -117,6 +125,25 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
     }
 }
 
+fn extract_command_text(prompt: &[ContentBlock]) -> Option<&str> {
+    for block in prompt {
+        let ContentBlock::Text(text_block) = block else {
+            continue;
+        };
+
+        let trimmed = text_block.text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Берём первый непустой текстовый блок: ACP-клиенты могут дописывать
+        // дополнительные текстовые блоки с контекстом, и это не должно ломать slash-команды.
+        return trimmed.starts_with('/').then_some(trimmed);
+    }
+
+    None
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum CommandDispatchOutcome {
     Stop(StopReason),
@@ -132,8 +159,16 @@ pub(super) async fn dispatch_session_command(
         SessionCommand::Threads => Ok(CommandDispatchOutcome::Stop(
             resume::listing::handle_threads_command(inner).await?,
         )),
-        SessionCommand::Resume { thread_id } => Ok(CommandDispatchOutcome::Stop(
-            resume::selector::handle_resume_selector_command(inner, thread_id.as_deref()).await?,
+        SessionCommand::Resume {
+            thread_id,
+            include_history,
+        } => Ok(CommandDispatchOutcome::Stop(
+            resume::selector::handle_resume_selector_command(
+                inner,
+                thread_id.as_deref(),
+                include_history,
+            )
+            .await?,
         )),
         SessionCommand::Compact => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_compact_command(inner).await?,
@@ -171,13 +206,11 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
         AvailableCommand::new("threads", "List saved Codex threads for this account"),
         AvailableCommand::new(
             "resume",
-            "Resume a thread. Without args: pick from current workspace; with args: search by partial id",
+            "Resume a thread and replay history. Add `--no-history` for a clean ACP chat switch",
         )
-        .input(
-            AvailableCommandInput::Unstructured(UnstructuredCommandInput::new(
-                "optional partial thread id",
-            )),
-        ),
+        .input(AvailableCommandInput::Unstructured(
+            UnstructuredCommandInput::new("optional partial thread id and/or --no-history"),
+        )),
         AvailableCommand::new(
             "compact",
             "Summarize the conversation to free context window",
@@ -191,16 +224,16 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
             "reasoning",
             "Show or set reasoning effort (`none|minimal|low|medium|high|xhigh`)",
         )
-        .input(AvailableCommandInput::Unstructured(UnstructuredCommandInput::new(
-            "optional effort value",
-        ))),
+        .input(AvailableCommandInput::Unstructured(
+            UnstructuredCommandInput::new("optional effort value"),
+        )),
         AvailableCommand::new(
             "plan",
             "Show/set plan mode (`on|off`) or run one-shot planning with `/plan <request>`",
         )
-        .input(AvailableCommandInput::Unstructured(UnstructuredCommandInput::new(
-            "optional mode or request",
-        ))),
+        .input(AvailableCommandInput::Unstructured(
+            UnstructuredCommandInput::new("optional mode or request"),
+        )),
         AvailableCommand::new("context", "Show current context window usage"),
     ]
 }

@@ -1,13 +1,14 @@
-//! Применение выбранного thread: `thread_resume`, sync конфигурации, replay и UI-уведомление.
+//! Применение выбранного thread: `thread_resume`, sync конфигурации и UI-уведомление.
 
 use agent_client_protocol::{Error, StopReason};
 use codex_app_server_protocol::ThreadResumeParams;
 
-use crate::thread::{ThreadInner, prompt_commands, replay, session_config, turn_notify};
+use crate::thread::{ThreadInner, replay, session_config, turn_notify};
 
 pub(in crate::thread) async fn handle_resume_command(
     inner: &mut ThreadInner,
     thread_id: &str,
+    include_history: bool,
 ) -> Result<StopReason, Error> {
     let resume = inner
         .app
@@ -37,19 +38,12 @@ pub(in crate::thread) async fn handle_resume_command(
         &inner.current_model,
         resume.reasoning_effort,
     );
+    if include_history {
+        let workspace_cwd = inner.workspace_cwd.clone();
+        replay::replay_turns(&inner.client, &workspace_cwd, resume.thread.turns).await;
+    }
 
-    let workspace_cwd = inner.workspace_cwd.clone();
-    replay::replay_turns(&inner.client, &workspace_cwd, resume.thread.turns).await;
     turn_notify::notify_config_update(inner).await;
-
-    inner
-        .client
-        .send_agent_text(format!(
-            "Resumed thread `{}`.\nPreview: {}\nNow continue chatting; context is loaded.",
-            resume.thread.id,
-            prompt_commands::normalize_preview(&resume.thread.preview),
-        ))
-        .await;
 
     Ok(StopReason::EndTurn)
 }

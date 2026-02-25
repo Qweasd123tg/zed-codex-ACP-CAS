@@ -157,10 +157,14 @@ impl Thread {
     }
 
     pub async fn list_sessions(
-        _config: &Config,
+        config: &Config,
         cwd: Option<PathBuf>,
         cursor: Option<String>,
     ) -> Result<ListSessionsResponse, Error> {
+        // ACP-клиенты (в т.ч. Zed) часто вызывают session/list без cwd.
+        // По умолчанию ведём себя как CLI resume: показываем сессии текущего workspace.
+        let effective_cwd = cwd.or_else(|| Some(config.cwd.clone()));
+
         let mut app = AppServerProcess::spawn("codex").await?;
         app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
 
@@ -179,7 +183,7 @@ impl Thread {
             .data
             .into_iter()
             .filter_map(|thread| {
-                if let Some(expected_cwd) = cwd.as_ref()
+                if let Some(expected_cwd) = effective_cwd.as_ref()
                     && thread.cwd != *expected_cwd
                 {
                     return None;

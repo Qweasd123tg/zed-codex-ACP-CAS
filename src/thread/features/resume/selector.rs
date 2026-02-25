@@ -1,6 +1,7 @@
 //! Выбор thread для `/resume`: фильтрация, picker-карточка и делегирование в apply.
 
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_client_protocol::{
     Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
@@ -16,6 +17,7 @@ use crate::thread::{RESUME_CANCEL_OPTION_ID, RESUME_PICK_LIMIT, ThreadInner};
 pub(in crate::thread) async fn handle_resume_selector_command(
     inner: &mut ThreadInner,
     query: Option<&str>,
+    include_history: bool,
 ) -> Result<StopReason, Error> {
     let all_threads = inner
         .app
@@ -46,7 +48,7 @@ pub(in crate::thread) async fn handle_resume_selector_command(
     if let Some(query) = normalized_query.as_deref()
         && all_threads.iter().any(|thread| thread.id == query)
     {
-        return super::apply::handle_resume_command(inner, query).await;
+        return super::apply::handle_resume_command(inner, query, include_history).await;
     }
 
     let candidates = if let Some(query) = normalized_query.as_deref() {
@@ -89,51 +91,45 @@ pub(in crate::thread) async fn handle_resume_selector_command(
     }
 
     if candidates.len() == 1 {
-        return super::apply::handle_resume_command(inner, &candidates[0].id).await;
+        return super::apply::handle_resume_command(inner, &candidates[0].id, include_history)
+            .await;
     }
 
-    show_resume_picker(inner, candidates, normalized_query.as_deref()).await
+    show_resume_picker(
+        inner,
+        candidates,
+        normalized_query.as_deref(),
+        include_history,
+    )
+    .await
 }
 
 async fn show_resume_picker(
     inner: &mut ThreadInner,
     mut candidates: Vec<Thread>,
     query: Option<&str>,
+    include_history: bool,
 ) -> Result<StopReason, Error> {
     let total = candidates.len();
     candidates.truncate(RESUME_PICK_LIMIT);
 
     let title = match query {
-        Some(query) => format!("Resume thread for `{query}`"),
-        None => "Resume thread from current workspace".to_string(),
+        Some(query) => format!("Resume thread for `{query}` ({total} match(es))"),
+        None => format!("Resume thread from current workspace ({total} match(es))"),
     };
-
-    let mut lines = Vec::new();
-    lines.push(format!("Select a thread to resume ({total} match(es)):"));
-    if total > RESUME_PICK_LIMIT {
-        lines.push(format!(
-            "Showing the newest {RESUME_PICK_LIMIT} matches. Narrow with `/resume <partial_id>` if needed."
-        ));
-    }
-    for thread in &candidates {
-        lines.push(format!(
-            "- `{}` | {} | cwd: `{}` | updated_at: {}",
-            thread.id,
-            normalize_preview(&thread.preview),
-            thread.cwd.display(),
-            thread.updated_at
-        ));
-    }
+    let hint = if total > RESUME_PICK_LIMIT {
+        Some(format!(
+            "Showing newest {RESUME_PICK_LIMIT}. Narrow with `/resume <partial_id>`."
+        ))
+    } else {
+        None
+    };
 
     let mut options = Vec::new();
     let mut id_by_option = HashMap::new();
     for (idx, thread) in candidates.into_iter().enumerate() {
         let option_id = format!("resume-thread-{}", idx + 1);
-        let label = format!(
-            "{} · {}",
-            shorten_thread_id(&thread.id),
-            normalize_preview(&thread.preview)
-        );
+        let label = format_resume_option_label(&thread);
         options.push(PermissionOption::new(
             option_id.clone(),
             label,
@@ -156,7 +152,7 @@ async fn show_resume_picker(
                     .title(title)
                     .kind(ToolKind::Think)
                     .status(ToolCallStatus::Pending)
-                    .content(vec![lines.join("\n").into()]),
+                    .content(hint.map_or_else(Vec::new, |line| vec![line.into()])),
             ),
             options,
         )
@@ -193,7 +189,7 @@ async fn show_resume_picker(
         return Ok(StopReason::EndTurn);
     };
 
-    super::apply::handle_resume_command(inner, &selected_thread_id).await
+    super::apply::handle_resume_command(inner, &selected_thread_id, include_history).await
 }
 
 fn thread_matches_query(thread: &Thread, query: &str) -> bool {
@@ -204,10 +200,84 @@ fn thread_matches_query(thread: &Thread, query: &str) -> bool {
     thread.preview.to_lowercase().contains(&needle)
 }
 
-fn shorten_thread_id(thread_id: &str) -> String {
-    if thread_id.chars().count() <= 12 {
-        thread_id.to_string()
+fn format_resume_option_label(thread: &Thread) -> String {
+    let branch = thread
+        .git_info
+        .as_ref()
+        .and_then(|git| git.branch.as_deref())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("-");
+
+    format!(
+        "created {} · updated {} · {} · {}",
+        format_relative_timestamp(thread.created_at),
+        format_relative_timestamp(thread.updated_at),
+        branch,
+        shorten_preview(&normalize_preview(&thread.preview), 72),
+    )
+}
+
+fn shorten_preview(preview: &str, max_chars: usize) -> String {
+    let chars = preview.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return preview.to_string();
+    }
+
+    let keep = max_chars.saturating_sub(1);
+    format!("{}…", chars[..keep].iter().collect::<String>())
+}
+
+fn format_relative_timestamp(unix_seconds: i64) -> String {
+    if unix_seconds <= 0 {
+        return "-".to_string();
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default();
+
+    if unix_seconds > now {
+        return format_future_duration((unix_seconds - now) as u64);
+    }
+
+    format_past_duration((now - unix_seconds) as u64)
+}
+
+fn format_past_duration(delta: u64) -> String {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+    const MONTH: u64 = 30 * DAY;
+    const YEAR: u64 = 365 * DAY;
+
+    if delta < MINUTE {
+        "just now".to_string()
+    } else if delta < HOUR {
+        format!("{}m ago", delta / MINUTE)
+    } else if delta < DAY {
+        format!("{}h ago", delta / HOUR)
+    } else if delta < MONTH {
+        format!("{}d ago", delta / DAY)
+    } else if delta < YEAR {
+        format!("{}mo ago", delta / MONTH)
     } else {
-        format!("{}…", thread_id.chars().take(12).collect::<String>())
+        format!("{}y ago", delta / YEAR)
+    }
+}
+
+fn format_future_duration(delta: u64) -> String {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+
+    if delta < MINUTE {
+        "soon".to_string()
+    } else if delta < HOUR {
+        format!("in {}m", delta / MINUTE)
+    } else if delta < DAY {
+        format!("in {}h", delta / HOUR)
+    } else {
+        format!("in {}d", delta / DAY)
     }
 }

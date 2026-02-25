@@ -26,7 +26,7 @@ use super::{
 };
 use agent_client_protocol::{
     ContentBlock, PermissionOptionKind, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus,
-    ToolCallStatus, ToolKind,
+    ResourceLink, ToolCallStatus, ToolKind,
 };
 use codex_app_server_protocol::{
     CollabAgentState, CollabAgentStatus, CollabAgentTool, CollabAgentToolCallStatus, CommandAction,
@@ -56,6 +56,7 @@ fn parses_resume_command_with_thread_id() {
         parse_session_command(&prompt),
         Some(SessionCommand::Resume {
             thread_id: Some("thread_123".to_string()),
+            include_history: true,
         })
     );
 }
@@ -65,7 +66,10 @@ fn parses_resume_command_without_thread_id() {
     let prompt: Vec<ContentBlock> = vec!["/resume".into()];
     assert_eq!(
         parse_session_command(&prompt),
-        Some(SessionCommand::Resume { thread_id: None })
+        Some(SessionCommand::Resume {
+            thread_id: None,
+            include_history: true,
+        })
     );
 }
 
@@ -76,6 +80,7 @@ fn parses_resume_command_with_partial_query() {
         parse_session_command(&prompt),
         Some(SessionCommand::Resume {
             thread_id: Some("019c6455".to_string()),
+            include_history: true,
         })
     );
 }
@@ -87,8 +92,78 @@ fn parses_resume_command_without_space_before_query() {
         parse_session_command(&prompt),
         Some(SessionCommand::Resume {
             thread_id: Some("привет".to_string()),
+            include_history: true,
         })
     );
+}
+
+#[test]
+fn parses_resume_command_with_additional_resource_blocks() {
+    let prompt: Vec<ContentBlock> = vec![
+        "/resume".into(),
+        ContentBlock::ResourceLink(ResourceLink::new("ctx", "file:///tmp/ctx.md")),
+    ];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Resume {
+            thread_id: None,
+            include_history: true,
+        })
+    );
+}
+
+#[test]
+fn parses_command_when_first_text_block_is_command() {
+    let prompt: Vec<ContentBlock> = vec!["/resume".into(), "thread-123".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Resume {
+            thread_id: None,
+            include_history: true,
+        })
+    );
+}
+
+#[test]
+fn parses_resume_command_with_history_flag() {
+    let prompt: Vec<ContentBlock> = vec!["/resume --history".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Resume {
+            thread_id: None,
+            include_history: true,
+        })
+    );
+}
+
+#[test]
+fn parses_resume_command_with_query_and_history_flag() {
+    let prompt: Vec<ContentBlock> = vec!["/resume 019c6455 --history".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Resume {
+            thread_id: Some("019c6455".to_string()),
+            include_history: true,
+        })
+    );
+}
+
+#[test]
+fn parses_resume_command_with_no_history_flag() {
+    let prompt: Vec<ContentBlock> = vec!["/resume --no-history".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Resume {
+            thread_id: None,
+            include_history: false,
+        })
+    );
+}
+
+#[test]
+fn ignores_command_when_first_text_block_is_not_command() {
+    let prompt: Vec<ContentBlock> = vec!["continue".into(), "/resume".into()];
+    assert_eq!(parse_session_command(&prompt), None);
 }
 
 #[test]

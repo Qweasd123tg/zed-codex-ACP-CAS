@@ -6,10 +6,10 @@ use agent_client_protocol::{
     CancelNotification, ClientCapabilities, Error, Implementation, InitializeRequest,
     InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
     LoadSessionResponse, McpCapabilities, NewSessionRequest, NewSessionResponse,
-    PromptCapabilities, PromptRequest, PromptResponse, ProtocolVersion, SessionCapabilities,
-    SessionId, SessionListCapabilities, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse,
+    PromptCapabilities, PromptRequest, PromptResponse, ProtocolVersion, ResumeSessionRequest,
+    ResumeSessionResponse, SessionCapabilities, SessionId, SessionListCapabilities,
+    SessionResumeCapabilities, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use codex_core::{
     CodexAuth,
@@ -88,8 +88,9 @@ impl Agent for CodexAgent {
             .mcp_capabilities(McpCapabilities::new().http(true))
             .load_session(true);
 
-        capabilities.session_capabilities =
-            SessionCapabilities::new().list(SessionListCapabilities::new());
+        capabilities.session_capabilities = SessionCapabilities::new()
+            .list(SessionListCapabilities::new())
+            .resume(SessionResumeCapabilities::new());
 
         let mut auth_methods = vec![
             CodexAuthMethod::ChatGpt.into(),
@@ -245,7 +246,7 @@ impl Agent for CodexAgent {
         let notify_thread = thread.clone();
         tokio::task::spawn_local(async move {
             // Используем тот же порядок старта, что и в new_session + replay истории, чтобы
-            // пользователь сразу видел прошлые вызовы инструментов/диффы после `/resume`.
+            // пользователь сразу видел прошлые вызовы инструментов/диффы после загрузки.
             tokio::task::yield_now().await;
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             notify_thread.notify_available_commands().await;
@@ -254,6 +255,52 @@ impl Agent for CodexAgent {
         self.sessions.borrow_mut().insert(session_id, thread);
 
         Ok(load)
+    }
+
+    async fn resume_session(
+        &self,
+        request: ResumeSessionRequest,
+    ) -> Result<ResumeSessionResponse, Error> {
+        self.check_auth().await?;
+
+        let ResumeSessionRequest {
+            session_id,
+            cwd,
+            mcp_servers,
+            ..
+        } = request;
+
+        if !mcp_servers.is_empty() {
+            info!(
+                "MCP server passthrough from ACP is not yet mapped in app-server mode; ignoring {} MCP server(s)",
+                mcp_servers.len()
+            );
+        }
+
+        let thread = Rc::new(
+            Thread::resume_session(
+                session_id.clone(),
+                &self.config,
+                cwd,
+                self.client_capabilities.clone(),
+            )
+            .await?,
+        );
+
+        let load = thread.load().await?;
+        let notify_thread = thread.clone();
+        tokio::task::spawn_local(async move {
+            // Для session/resume не реплеим историю, но обновляем динамические команды после старта.
+            tokio::task::yield_now().await;
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            notify_thread.notify_available_commands().await;
+        });
+        self.sessions.borrow_mut().insert(session_id, thread);
+
+        Ok(ResumeSessionResponse::new()
+            .modes(load.modes)
+            .models(load.models)
+            .config_options(load.config_options))
     }
 
     async fn list_sessions(

@@ -181,6 +181,7 @@ enum SessionCommand {
     Threads,
     Resume {
         thread_id: Option<String>,
+        include_history: bool,
     },
     Compact,
     Undo {

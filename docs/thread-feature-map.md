@@ -91,7 +91,8 @@ flowchart LR
     Replay --> CollabReplay[src/thread/features/collab/render.rs]
 ```
 
-Смысл: после `/resume` UI восстанавливается теми же доменными ветками, что и в live-потоке.
+Смысл: после `/resume` UI по умолчанию восстанавливается теми же доменными ветками, что и в live-потоке.
+Для "тихого" переключения контекста без replay используется `/resume --no-history`.
 
 ## 5) Collab/Subagents ветка
 
@@ -187,7 +188,7 @@ flowchart LR
 | `src/thread/features/file/*` | File-change lifecycle, preview/final diff helper-ы |
 | `src/thread/features/notification/*` | Доменные обработчики notification-событий |
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
-| `src/thread/features/resume/*` | `/threads`, `/resume`, выбор и применение thread |
+| `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread |
 | `src/thread/features/session/*` | `/compact`, `/undo`, `/context`, `/reasoning`, `/plan on/off`, session replay события |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
 | `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw payload |
