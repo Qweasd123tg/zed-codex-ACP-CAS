@@ -1,0 +1,470 @@
+{
+  "title": "Thread Feature Map (Curated)",
+  "source": "docs/thread-feature-map.md",
+  "generated_at": "2026-02-25T18:04:44.966672+00:00",
+  "stats": {
+    "nodes": 45,
+    "edges": 47
+  },
+  "nodes": [
+    {
+      "id": "AppServer",
+      "label": "src/app_server.rs",
+      "kind": "file",
+      "path": "src/app_server.rs"
+    },
+    {
+      "id": "ApprovalsCommand",
+      "label": "src/thread/features/approvals/command.rs",
+      "kind": "file",
+      "path": "src/thread/features/approvals/command.rs"
+    },
+    {
+      "id": "ApprovalsFile",
+      "label": "src/thread/features/approvals/file_change.rs",
+      "kind": "file",
+      "path": "src/thread/features/approvals/file_change.rs"
+    },
+    {
+      "id": "ApprovalsUserInput",
+      "label": "src/thread/features/approvals/user_input.rs",
+      "kind": "file",
+      "path": "src/thread/features/approvals/user_input.rs"
+    },
+    {
+      "id": "CollabContent",
+      "label": "CollabContent",
+      "kind": "concept"
+    },
+    {
+      "id": "CollabRender",
+      "label": "src/thread/features/collab/render.rs",
+      "kind": "file",
+      "path": "src/thread/features/collab/render.rs"
+    },
+    {
+      "id": "CollabReplay",
+      "label": "src/thread/features/collab/render.rs",
+      "kind": "file",
+      "path": "src/thread/features/collab/render.rs"
+    },
+    {
+      "id": "CollabStatus",
+      "label": "CollabStatus",
+      "kind": "concept"
+    },
+    {
+      "id": "CommandReplay",
+      "label": "src/thread/features/tool_events/command.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_events/command.rs"
+    },
+    {
+      "id": "FileChanges",
+      "label": "src/thread/features/file/changes.rs",
+      "kind": "file",
+      "path": "src/thread/features/file/changes.rs"
+    },
+    {
+      "id": "FileEvents",
+      "label": "src/thread/features/file/events.rs",
+      "kind": "file",
+      "path": "src/thread/features/file/events.rs"
+    },
+    {
+      "id": "FileReplay",
+      "label": "src/thread/features/file/events.rs",
+      "kind": "file",
+      "path": "src/thread/features/file/events.rs"
+    },
+    {
+      "id": "ItemHandlers",
+      "label": "src/thread/core/item_handlers.rs",
+      "kind": "file",
+      "path": "src/thread/core/item_handlers.rs"
+    },
+    {
+      "id": "McpReplay",
+      "label": "src/thread/features/tool_events/mcp.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_events/mcp.rs"
+    },
+    {
+      "id": "NotificationDeltas",
+      "label": "src/thread/features/notification/events/deltas.rs",
+      "kind": "file",
+      "path": "src/thread/features/notification/events/deltas.rs"
+    },
+    {
+      "id": "NotificationDispatch",
+      "label": "src/thread/notification/dispatch.rs",
+      "kind": "file",
+      "path": "src/thread/notification/dispatch.rs"
+    },
+    {
+      "id": "NotificationFeature",
+      "label": "src/thread/features/notification/mod.rs",
+      "kind": "file",
+      "path": "src/thread/features/notification/mod.rs"
+    },
+    {
+      "id": "NotificationTurn",
+      "label": "src/thread/features/notification/events/turn.rs",
+      "kind": "file",
+      "path": "src/thread/features/notification/events/turn.rs"
+    },
+    {
+      "id": "NotificationUsage",
+      "label": "src/thread/features/notification/events/usage.rs",
+      "kind": "file",
+      "path": "src/thread/features/notification/events/usage.rs"
+    },
+    {
+      "id": "PlanEvents",
+      "label": "src/thread/features/plan/events.rs",
+      "kind": "file",
+      "path": "src/thread/features/plan/events.rs"
+    },
+    {
+      "id": "PlanFallback",
+      "label": "src/thread/features/plan/fallback.rs",
+      "kind": "file",
+      "path": "src/thread/features/plan/fallback.rs"
+    },
+    {
+      "id": "PlanParse",
+      "label": "src/thread/features/plan/parse.rs",
+      "kind": "file",
+      "path": "src/thread/features/plan/parse.rs"
+    },
+    {
+      "id": "PromptCommands",
+      "label": "src/thread/prompt/commands.rs",
+      "kind": "file",
+      "path": "src/thread/prompt/commands.rs"
+    },
+    {
+      "id": "PromptFlow",
+      "label": "src/thread/prompt/flow.rs",
+      "kind": "file",
+      "path": "src/thread/prompt/flow.rs"
+    },
+    {
+      "id": "Replay",
+      "label": "src/thread/core/replay.rs",
+      "kind": "file",
+      "path": "src/thread/core/replay.rs"
+    },
+    {
+      "id": "ResumeApply",
+      "label": "src/thread/features/resume/apply.rs",
+      "kind": "file",
+      "path": "src/thread/features/resume/apply.rs"
+    },
+    {
+      "id": "ResumeListing",
+      "label": "src/thread/features/resume/listing.rs",
+      "kind": "file",
+      "path": "src/thread/features/resume/listing.rs"
+    },
+    {
+      "id": "ResumeSelector",
+      "label": "src/thread/features/resume/selector.rs",
+      "kind": "file",
+      "path": "src/thread/features/resume/selector.rs"
+    },
+    {
+      "id": "ServerRequests",
+      "label": "src/thread/core/server_requests.rs",
+      "kind": "file",
+      "path": "src/thread/core/server_requests.rs"
+    },
+    {
+      "id": "SessionControls",
+      "label": "src/thread/features/session/controls.rs",
+      "kind": "file",
+      "path": "src/thread/features/session/controls.rs"
+    },
+    {
+      "id": "SessionEvents",
+      "label": "src/thread/features/session/events.rs",
+      "kind": "file",
+      "path": "src/thread/features/session/events.rs"
+    },
+    {
+      "id": "SessionModes",
+      "label": "src/thread/features/session/modes.rs",
+      "kind": "file",
+      "path": "src/thread/features/session/modes.rs"
+    },
+    {
+      "id": "SessionReplay",
+      "label": "src/thread/features/session/events.rs",
+      "kind": "file",
+      "path": "src/thread/features/session/events.rs"
+    },
+    {
+      "id": "StatusMapping",
+      "label": "src/thread/features/status_mapping.rs",
+      "kind": "file",
+      "path": "src/thread/features/status_mapping.rs"
+    },
+    {
+      "id": "TerminalUpdates",
+      "label": "src/thread/core/terminal_updates.rs",
+      "kind": "file",
+      "path": "src/thread/core/terminal_updates.rs"
+    },
+    {
+      "id": "ToolEventsCommand",
+      "label": "src/thread/features/tool_events/command.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_events/command.rs"
+    },
+    {
+      "id": "ToolEventsMcp",
+      "label": "src/thread/features/tool_events/mcp.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_events/mcp.rs"
+    },
+    {
+      "id": "ToolEventsWebImage",
+      "label": "src/thread/features/tool_events/web_image.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_events/web_image.rs"
+    },
+    {
+      "id": "ToolUiKind",
+      "label": "src/thread/features/tool_call_ui/kind.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_call_ui/kind.rs"
+    },
+    {
+      "id": "ToolUiRaw",
+      "label": "src/thread/features/tool_call_ui/raw.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_call_ui/raw.rs"
+    },
+    {
+      "id": "ToolUiTitle",
+      "label": "src/thread/features/tool_call_ui/title.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_call_ui/title.rs"
+    },
+    {
+      "id": "TurnDiff",
+      "label": "src/thread/turn/diff.rs",
+      "kind": "file",
+      "path": "src/thread/turn/diff.rs"
+    },
+    {
+      "id": "TurnExecution",
+      "label": "src/thread/turn/execution.rs",
+      "kind": "file",
+      "path": "src/thread/turn/execution.rs"
+    },
+    {
+      "id": "UserClient",
+      "label": "User/Zed",
+      "kind": "concept"
+    },
+    {
+      "id": "WebImageReplay",
+      "label": "src/thread/features/tool_events/web_image.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_events/web_image.rs"
+    }
+  ],
+  "edges": [
+    {
+      "from": "UserClient",
+      "to": "PromptFlow"
+    },
+    {
+      "from": "PromptFlow",
+      "to": "PromptCommands"
+    },
+    {
+      "from": "PromptFlow",
+      "to": "ResumeListing"
+    },
+    {
+      "from": "PromptFlow",
+      "to": "ResumeSelector"
+    },
+    {
+      "from": "PromptFlow",
+      "to": "SessionControls"
+    },
+    {
+      "from": "PromptFlow",
+      "to": "SessionModes"
+    },
+    {
+      "from": "PromptFlow",
+      "to": "TurnExecution"
+    },
+    {
+      "from": "TurnExecution",
+      "to": "AppServer"
+    },
+    {
+      "from": "AppServer",
+      "to": "NotificationDispatch"
+    },
+    {
+      "from": "NotificationDispatch",
+      "to": "NotificationFeature",
+      "label": "JSONRPCNotification"
+    },
+    {
+      "from": "NotificationDispatch",
+      "to": "ServerRequests",
+      "label": "JSONRPCRequest"
+    },
+    {
+      "from": "ServerRequests",
+      "to": "ApprovalsCommand"
+    },
+    {
+      "from": "ServerRequests",
+      "to": "ApprovalsFile"
+    },
+    {
+      "from": "ServerRequests",
+      "to": "ApprovalsUserInput"
+    },
+    {
+      "from": "NotificationFeature",
+      "to": "NotificationDeltas"
+    },
+    {
+      "from": "NotificationFeature",
+      "to": "NotificationTurn"
+    },
+    {
+      "from": "NotificationFeature",
+      "to": "NotificationUsage"
+    },
+    {
+      "from": "NotificationFeature",
+      "to": "ItemHandlers"
+    },
+    {
+      "from": "NotificationFeature",
+      "to": "TerminalUpdates"
+    },
+    {
+      "from": "NotificationFeature",
+      "to": "TurnDiff"
+    },
+    {
+      "from": "ItemHandlers",
+      "to": "FileEvents"
+    },
+    {
+      "from": "ItemHandlers",
+      "to": "ToolEventsCommand"
+    },
+    {
+      "from": "ItemHandlers",
+      "to": "ToolEventsMcp"
+    },
+    {
+      "from": "ItemHandlers",
+      "to": "ToolEventsWebImage"
+    },
+    {
+      "from": "ItemHandlers",
+      "to": "PlanEvents"
+    },
+    {
+      "from": "ItemHandlers",
+      "to": "CollabRender"
+    },
+    {
+      "from": "ItemHandlers",
+      "to": "SessionEvents"
+    },
+    {
+      "from": "ToolEventsCommand",
+      "to": "ToolUiKind"
+    },
+    {
+      "from": "ToolEventsCommand",
+      "to": "ToolUiTitle"
+    },
+    {
+      "from": "ToolEventsCommand",
+      "to": "ToolUiRaw"
+    },
+    {
+      "from": "ToolEventsCommand",
+      "to": "StatusMapping"
+    },
+    {
+      "from": "ToolEventsMcp",
+      "to": "StatusMapping"
+    },
+    {
+      "from": "FileEvents",
+      "to": "StatusMapping"
+    },
+    {
+      "from": "FileEvents",
+      "to": "FileChanges"
+    },
+    {
+      "from": "TurnExecution",
+      "to": "PlanParse"
+    },
+    {
+      "from": "TurnExecution",
+      "to": "PlanFallback"
+    },
+    {
+      "from": "ResumeSelector",
+      "to": "ResumeApply"
+    },
+    {
+      "from": "ResumeApply",
+      "to": "Replay"
+    },
+    {
+      "from": "Replay",
+      "to": "SessionReplay"
+    },
+    {
+      "from": "Replay",
+      "to": "FileReplay"
+    },
+    {
+      "from": "Replay",
+      "to": "CommandReplay"
+    },
+    {
+      "from": "Replay",
+      "to": "McpReplay"
+    },
+    {
+      "from": "Replay",
+      "to": "WebImageReplay"
+    },
+    {
+      "from": "Replay",
+      "to": "CollabReplay"
+    },
+    {
+      "from": "Replay",
+      "to": "CollabRender"
+    },
+    {
+      "from": "CollabRender",
+      "to": "CollabContent"
+    },
+    {
+      "from": "CollabRender",
+      "to": "CollabStatus"
+    }
+  ]
+}

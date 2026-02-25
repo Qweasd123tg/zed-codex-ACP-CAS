@@ -97,6 +97,11 @@ GitHub Actions release pipeline собирает Linux-артефакт для `
 
 ## Архитектурная документация
 - Карта связности thread-подсистемы: `docs/thread-feature-map.md`.
+- Экспортируемая карта для визуализаторов:
+  - `docs/thread-feature-map.graph.json`
+  - `docs/thread-feature-map.graph.mmd` (Mermaid)
+  - `docs/thread-feature-map.markmap.md` (Mind map)
+- Генерация экспортов: `script/export_thread_feature_map.py`.
 - Правила разработки и проверки: `AGENTS.md`.
 
 ## Лицензия

@@ -200,3 +200,16 @@ flowchart LR
 3. Для turn-зависимых событий сохранять guard по `expected_turn_id`.
 4. После изменений mode/config отправлять обновления через `src/thread/turn/notify.rs` (`notify_config_update`/`notify_mode_and_config_update`).
 5. Не возвращать доменную логику в корневой `thread.rs` без явной архитектурной причины.
+
+## 10) Экспорт для визуализации
+
+Сгенерировать машинные форматы из этой карты:
+
+```bash
+script/export_thread_feature_map.py
+```
+
+Артефакты:
+- `docs/thread-feature-map.graph.json` — граф (`nodes`/`edges`) для сайтов/скриптов.
+- `docs/thread-feature-map.graph.mmd` — Mermaid graph (вставлять в `https://mermaid.live`).
+- `docs/thread-feature-map.markmap.md` — mind map markdown (вставлять в `https://markmap.js.org/repl`).
