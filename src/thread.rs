@@ -65,6 +65,8 @@ mod terminal_updates;
 mod turn_diff;
 #[path = "thread/turn/execution.rs"]
 mod turn_execution;
+#[path = "thread/turn/notify.rs"]
+mod turn_notify;
 #[path = "thread/turn/state.rs"]
 mod turn_state;
 #[path = "thread/core/unified_diff.rs"]

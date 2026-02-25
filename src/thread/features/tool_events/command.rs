@@ -9,14 +9,14 @@ use codex_app_server_protocol::{CommandAction, CommandExecutionStatus};
 use serde_json::Value;
 use tracing::warn;
 
-use crate::thread::features::file::changes as file_changes;
-use crate::thread::features::status_mapping;
-use crate::thread::features::tool_call_ui::kind::command_tool_kind;
-use crate::thread::features::tool_call_ui::raw::command_tool_raw_input;
-use crate::thread::features::tool_call_ui::title::{
-    command_tool_placeholder_content, command_tool_title,
+use crate::thread::{
+    SessionClient, ThreadInner,
+    features::{
+        file::changes as file_changes,
+        status_mapping,
+        tool_call_ui::{kind, raw, title},
+    },
 };
-use crate::thread::{SessionClient, ThreadInner};
 
 #[derive(Debug)]
 // Replay-пакет для shell command item, чтобы не передавать много аргументов.
@@ -55,9 +55,9 @@ pub(in crate::thread) async fn emit_command_execution_started(
         }
     }
     let tool_status = status_mapping::map_command_status(status, true);
-    let title = command_tool_title(&command, &command_actions);
-    let raw_input = command_tool_raw_input(&command, &command_actions);
-    let tool_kind = command_tool_kind(&command, &command_actions);
+    let title = title::command_tool_title(&command, &command_actions);
+    let raw_input = raw::command_tool_raw_input(&command, &command_actions);
+    let tool_kind = kind::command_tool_kind(&command, &command_actions);
     inner
         .client
         .send_tool_call(
@@ -65,7 +65,7 @@ pub(in crate::thread) async fn emit_command_execution_started(
                 .kind(tool_kind)
                 .status(tool_status)
                 .locations(vec![ToolCallLocation::new(cwd)])
-                .content(command_tool_placeholder_content())
+                .content(title::command_tool_placeholder_content())
                 .raw_input(raw_input),
         )
         .await;
@@ -110,16 +110,16 @@ pub(in crate::thread) async fn replay_command_execution(
         exit_code_raw_output,
     } = data;
 
-    let title = command_tool_title(&command, &command_actions);
-    let raw_input = command_tool_raw_input(&command, &command_actions);
-    let tool_kind = command_tool_kind(&command, &command_actions);
+    let title = title::command_tool_title(&command, &command_actions);
+    let raw_input = raw::command_tool_raw_input(&command, &command_actions);
+    let tool_kind = kind::command_tool_kind(&command, &command_actions);
     client
         .send_tool_call(
             ToolCall::new(ToolCallId::new(id.clone()), title)
                 .kind(tool_kind)
                 .status(status_mapping::map_command_status(status.clone(), false))
                 .locations(vec![ToolCallLocation::new(cwd)])
-                .content(command_tool_placeholder_content())
+                .content(title::command_tool_placeholder_content())
                 .raw_input(raw_input),
         )
         .await;

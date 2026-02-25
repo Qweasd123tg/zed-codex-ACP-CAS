@@ -2,9 +2,11 @@
 
 use std::path::Path;
 
-use super::SessionCommand;
-use crate::thread::features::plan::parse_collaboration_mode;
-use crate::thread::session_config::parse_reasoning_effort;
+use super::{Error, SessionCommand, StopReason, ThreadInner};
+use crate::thread::{
+    features::{plan::parse_collaboration_mode, resume, session},
+    session_config::parse_reasoning_effort,
+};
 use agent_client_protocol::{
     AvailableCommand, AvailableCommandInput, ContentBlock, EmbeddedResource,
     EmbeddedResourceResource, ResourceLink, TextResourceContents, UnstructuredCommandInput,
@@ -112,6 +114,43 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         }
         "/context" => Some(SessionCommand::Context),
         _ => None,
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum CommandDispatchOutcome {
+    Stop(StopReason),
+    PlanPrompt(String),
+}
+
+// Применяем slash-команду к текущему session state и возвращаем действие для prompt-flow.
+pub(super) async fn dispatch_session_command(
+    inner: &mut ThreadInner,
+    command: SessionCommand,
+) -> Result<CommandDispatchOutcome, Error> {
+    match command {
+        SessionCommand::Threads => Ok(CommandDispatchOutcome::Stop(
+            resume::listing::handle_threads_command(inner).await?,
+        )),
+        SessionCommand::Resume { thread_id } => Ok(CommandDispatchOutcome::Stop(
+            resume::selector::handle_resume_selector_command(inner, thread_id.as_deref()).await?,
+        )),
+        SessionCommand::Compact => Ok(CommandDispatchOutcome::Stop(
+            session::controls::handle_compact_command(inner).await?,
+        )),
+        SessionCommand::Undo { num_turns } => Ok(CommandDispatchOutcome::Stop(
+            session::controls::handle_undo_command(inner, num_turns).await?,
+        )),
+        SessionCommand::Reasoning { raw_value, effort } => Ok(CommandDispatchOutcome::Stop(
+            session::modes::handle_reasoning_command(inner, raw_value, effort).await?,
+        )),
+        SessionCommand::PlanMode { raw_value, mode } => Ok(CommandDispatchOutcome::Stop(
+            session::modes::handle_plan_mode_command(inner, raw_value, mode).await?,
+        )),
+        SessionCommand::PlanPrompt { prompt } => Ok(CommandDispatchOutcome::PlanPrompt(prompt)),
+        SessionCommand::Context => Ok(CommandDispatchOutcome::Stop(
+            session::controls::handle_context_command(inner).await?,
+        )),
     }
 }
 

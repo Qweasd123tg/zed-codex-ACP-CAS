@@ -1,8 +1,8 @@
 //! Usage notification-ветки (token usage / context window updates).
 
-use crate::thread::ThreadInner;
-use crate::thread::session_config::i64_to_u64_saturating;
-use crate::thread::turn_execution::notify_config_update;
+use crate::thread::{
+    ThreadInner, session_config::i64_to_u64_saturating, turn_notify::notify_config_update,
+};
 
 // Синхронизируем usage-конфиг при очередном token-usage update для активного thread.
 pub(in crate::thread) async fn emit_thread_token_usage_updated(

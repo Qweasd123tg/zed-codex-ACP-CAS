@@ -2,9 +2,9 @@
 
 use tracing::warn;
 
-use crate::thread::features::notification;
-use crate::thread::server_requests::handle_server_request;
-use crate::thread::{Error, StopReason, ThreadInner};
+use crate::thread::{
+    Error, StopReason, ThreadInner, features::notification, server_requests::handle_server_request,
+};
 
 // Рано отбрасываем шум вне текущего turn, чтобы состояние клиента оставалось консистентным.
 pub(super) async fn handle_message(

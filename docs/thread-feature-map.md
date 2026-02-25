@@ -143,13 +143,14 @@ flowchart LR
 - `src/thread/session/config/reasoning.rs`
 - `src/thread/features/session/modes.rs`
 - `src/thread/features/session/events.rs`
-- `src/thread/turn/execution.rs` (`notify_config_update`, `notify_mode_and_config_update`)
+- `src/thread/turn/notify.rs` (`notify_config_update`, `notify_mode_and_config_update`)
 
 ## 7) Зоны повышенной связности и риски
 
 ### План и режимы
 - `src/thread/prompt/flow.rs`
 - `src/thread/turn/execution.rs`
+- `src/thread/turn/notify.rs`
 - `src/thread/features/plan/*`
 - `src/thread/features/notification/events/turn.rs`
 
@@ -197,5 +198,5 @@ flowchart LR
 1. Держать `notification/dispatch` и `core/server_requests` тонкими роутерами.
 2. Любой новый lifecycle добавлять симметрично: `started`, `completed`, `replay`.
 3. Для turn-зависимых событий сохранять guard по `expected_turn_id`.
-4. После изменений mode/config отправлять обновления через `notify_config_update`/`notify_mode_and_config_update`.
+4. После изменений mode/config отправлять обновления через `src/thread/turn/notify.rs` (`notify_config_update`/`notify_mode_and_config_update`).
 5. Не возвращать доменную логику в корневой `thread.rs` без явной архитектурной причины.

@@ -5,8 +5,7 @@ use std::fmt::Write as _;
 
 use codex_app_server_protocol::UserInput;
 
-use crate::thread::turn_execution::notify_config_update;
-use crate::thread::{SessionClient, ThreadInner};
+use crate::thread::{SessionClient, ThreadInner, turn_notify::notify_config_update};
 
 // Replay-ветка пользовательского сообщения: сворачиваем mixed input в единый текстовый блок.
 pub(in crate::thread) async fn replay_user_message(

@@ -4,10 +4,12 @@ use agent_client_protocol::{Error, StopReason};
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ReasoningEffort;
 
-use crate::thread::features::plan::collaboration_mode_label;
-use crate::thread::session_config::{find_model_for_current, reasoning_effort_value};
-use crate::thread::turn_execution::{notify_config_update, notify_mode_and_config_update};
-use crate::thread::{APPROVAL_PRESETS, AUTO_MODE_ID, EditApprovalMode, ThreadInner};
+use crate::thread::{
+    APPROVAL_PRESETS, AUTO_MODE_ID, EditApprovalMode, ThreadInner,
+    features::plan::collaboration_mode_label,
+    session_config::{find_model_for_current, reasoning_effort_value},
+    turn_notify::{notify_config_update, notify_mode_and_config_update},
+};
 
 pub(in crate::thread) async fn handle_reasoning_command(
     inner: &mut ThreadInner,

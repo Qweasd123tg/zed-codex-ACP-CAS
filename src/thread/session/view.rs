@@ -1,14 +1,10 @@
 //! Загрузчики session view и метаданных, которые ACP использует для resume и восстановления контекста.
 
-use super::session_config::{
-    config_options, config_options_input, mode_state, session_model_state,
-};
 use super::{
     AvailableCommandsUpdate, ConfigOptionUpdate, CurrentModeUpdate, Error, LoadSessionResponse,
-    SessionConfigOption, SessionUpdate, Thread,
+    SessionConfigOption, SessionUpdate, Thread, session_config,
 };
-use crate::thread::prompt_commands::builtin_commands;
-use crate::thread::replay::replay_turns;
+use crate::thread::{prompt_commands, replay};
 
 impl Thread {
     // Оппортунистически обновляем кэш моделей перед обработкой load-запроса.
@@ -19,19 +15,26 @@ impl Thread {
         }
 
         Ok(LoadSessionResponse::new()
-            .models(session_model_state(&inner.models, &inner.current_model))
-            .modes(Some(mode_state(
+            .models(session_config::session_model_state(
+                &inner.models,
+                &inner.current_model,
+            ))
+            .modes(Some(session_config::mode_state(
                 inner.approval_policy,
                 inner.sandbox_mode,
                 inner.edit_approval_mode,
                 inner.collaboration_mode_kind,
             )))
-            .config_options(config_options(config_options_input(&inner))))
+            .config_options(session_config::config_options(
+                session_config::config_options_input(&inner),
+            )))
     }
 
     pub async fn config_options(&self) -> Result<Vec<SessionConfigOption>, Error> {
         let inner = self.inner.lock().await;
-        Ok(config_options(config_options_input(&inner)))
+        Ok(session_config::config_options(
+            session_config::config_options_input(&inner),
+        ))
     }
 
     pub async fn notify_config_options_update(&self) {
@@ -39,7 +42,7 @@ impl Thread {
             let inner = self.inner.lock().await;
             (
                 inner.client.clone(),
-                config_options(config_options_input(&inner)),
+                session_config::config_options(session_config::config_options_input(&inner)),
             )
         };
         client
@@ -54,7 +57,7 @@ impl Thread {
             let inner = self.inner.lock().await;
             (
                 inner.client.clone(),
-                mode_state(
+                session_config::mode_state(
                     inner.approval_policy,
                     inner.sandbox_mode,
                     inner.edit_approval_mode,
@@ -77,7 +80,7 @@ impl Thread {
         };
         client
             .send_notification(SessionUpdate::AvailableCommandsUpdate(
-                AvailableCommandsUpdate::new(builtin_commands()),
+                AvailableCommandsUpdate::new(prompt_commands::builtin_commands()),
             ))
             .await;
     }
@@ -88,6 +91,6 @@ impl Thread {
             let turns = std::mem::take(&mut inner.replay_turns);
             (inner.client.clone(), inner.workspace_cwd.clone(), turns)
         };
-        replay_turns(&client, &workspace_cwd, turns).await;
+        replay::replay_turns(&client, &workspace_cwd, turns).await;
     }
 }

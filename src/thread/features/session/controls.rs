@@ -1,9 +1,7 @@
 //! Обработчики slash-команд управления сессией (без `/resume`).
 //! Сюда вынесены compact/undo/reasoning/plan/context ветки.
 
-use crate::thread::ThreadInner;
-use crate::thread::replay::replay_turns;
-use crate::thread::turn_execution::notify_config_update;
+use crate::thread::{ThreadInner, replay::replay_turns, turn_notify::notify_config_update};
 use agent_client_protocol::{Error, StopReason};
 use codex_app_server_protocol::{ThreadCompactStartParams, ThreadRollbackParams};
 
