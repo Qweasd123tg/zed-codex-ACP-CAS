@@ -12,6 +12,7 @@ pub(in crate::thread) async fn initialize_fallback_plan_for_turn(
 ) {
     if collaboration_mode_kind == ModeKind::Plan {
         inner.fallback_plan = None;
+        clear_plan(inner).await;
         return;
     }
 
@@ -21,6 +22,7 @@ pub(in crate::thread) async fn initialize_fallback_plan_for_turn(
         .filter(|steps| !steps.is_empty())
     else {
         inner.fallback_plan = None;
+        clear_plan(inner).await;
         return;
     };
 
@@ -148,4 +150,12 @@ fn limit_plan_entries(mut entries: Vec<PlanEntry>) -> Vec<PlanEntry> {
         entries.truncate(MAX_VISIBLE_PLAN_ENTRIES);
     }
     entries
+}
+
+async fn clear_plan(inner: &mut ThreadInner) {
+    inner.last_plan_steps.clear();
+    inner
+        .client
+        .send_notification(SessionUpdate::Plan(Plan::new(Vec::new())))
+        .await;
 }

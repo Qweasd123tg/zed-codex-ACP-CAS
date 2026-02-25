@@ -10,7 +10,7 @@ use super::features::file::changes::{
 use super::features::plan::{
     collaboration_mode_for_turn, fallback_plan_can_enter_summarizing,
     fallback_plan_entries_for_steps, fallback_plan_should_advance, limit_plan_entries,
-    plan_entries_all_pending, plan_from_text, promote_first_pending_step,
+    plan_entries_all_pending, plan_from_plan_item_text, plan_from_text, promote_first_pending_step,
 };
 use super::features::tool_call_ui::kind::{command_looks_like_verification, command_tool_kind};
 use super::features::tool_call_ui::title::command_tool_title;
@@ -301,6 +301,98 @@ fn parses_plain_proposed_plan_block() {
     assert_eq!(plan.entries[0].status, PlanEntryStatus::Pending);
     assert_eq!(plan.entries[1].content, "second");
     assert_eq!(plan.entries[1].status, PlanEntryStatus::Pending);
+}
+
+#[test]
+fn does_not_parse_list_without_plan_markers() {
+    let plan = plan_from_text("1. first\n2. second\n");
+
+    assert!(plan.is_none());
+}
+
+#[test]
+fn parses_plan_with_intro_line() {
+    let plan = plan_from_text("Implementation plan:\n- first\n- second\n")
+        .expect("expected plan entries after intro line");
+
+    assert_eq!(plan.entries.len(), 2);
+    assert_eq!(plan.entries[0].content, "first");
+    assert_eq!(plan.entries[1].content, "second");
+}
+
+#[test]
+fn does_not_parse_request_user_input_options_as_plan() {
+    let plan = plan_from_text("Question?\nOptions:\n1. small (Recommended)\n2. medium\n3. large\n");
+
+    assert!(plan.is_none());
+}
+
+#[test]
+fn does_not_parse_numbered_poem_as_plan() {
+    let plan = plan_from_text(
+        "1. На крышах звенят осторожные капли.\n2. Двор просыпается раньше фонарей.\n3. Ветер еще помнит февральскую строгость.\n",
+    );
+
+    assert!(plan.is_none());
+}
+
+#[test]
+fn parses_list_only_plan_from_plan_item_text() {
+    let plan =
+        plan_from_plan_item_text("- Step 1\n- Step 2\n").expect("expected plan-item list parse");
+
+    assert_eq!(plan.entries.len(), 2);
+    assert_eq!(plan.entries[0].content, "Step 1");
+    assert_eq!(plan.entries[1].content, "Step 2");
+}
+
+#[test]
+fn does_not_parse_request_user_input_like_plan_item_text() {
+    let plan = plan_from_plan_item_text("Question?\nOptions:\n1. First\n2. Second\n3. Third\n");
+
+    assert!(plan.is_none());
+}
+
+#[test]
+fn does_not_parse_numbered_list_only_plan_item_text() {
+    let plan = plan_from_plan_item_text("1. first\n2. second\n3. third\n");
+
+    assert!(plan.is_none());
+}
+
+#[test]
+fn plan_item_prefers_steps_section_over_other_lists() {
+    let plan = plan_from_plan_item_text(
+        "## Цель и критерии готовности\n1. Готово ровно 3 стихотворения.\n2. В каждом стихотворении ровно 20 строк.\n\n## Пошаговая реализация\n1. Собрать словарь образов.\n2. Написать черновики.\n3. Сжать до финального объема.\n\n## Риски\n1. Ошибка подсчета строк.\n",
+    )
+    .expect("expected plan entries from steps section");
+
+    assert_eq!(plan.entries.len(), 3);
+    assert_eq!(plan.entries[0].content, "Собрать словарь образов.");
+    assert_eq!(plan.entries[1].content, "Написать черновики.");
+    assert_eq!(plan.entries[2].content, "Сжать до финального объема.");
+}
+
+#[test]
+fn does_not_parse_sectioned_plan_item_without_steps_section() {
+    let plan = plan_from_plan_item_text(
+        "# План\n## Зафиксированные параметры\n1. Длина: 4 строки.\n2. Язык: русский.\n3. Рифма: обязательна.\n",
+    );
+
+    assert!(plan.is_none());
+}
+
+#[test]
+fn parses_steps_section_with_etapy_heading() {
+    let plan = plan_from_plan_item_text(
+        "## Цель\n1. Подготовить результат.\n\n## Этапы реализации\n1. Собрать требования.\n2. Внести изменения.\n3. Проверить поведение.\n",
+    )
+    .expect("expected plan entries from stages heading");
+
+    assert_eq!(plan.entries.len(), 3);
+    assert_eq!(plan.entries[0].content, "Собрать требования.");
+    assert_eq!(plan.entries[1].content, "Внести изменения.");
+    assert_eq!(plan.entries[2].content, "Проверить поведение.");
 }
 
 #[test]

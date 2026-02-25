@@ -40,6 +40,15 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --release --target x86_64-unknown-linux-gnu
 ```
 
+## Политика релизов
+- Для обновлений мелких фич сразу собирать релиз в `target-test`:
+
+```bash
+cargo build --release --target-dir target-test
+```
+
+- Полный релиз (`target/release` и релизные процедуры проекта) делать только на финальном штрихе всего проекта.
+
 ## Стиль кода и соглашения
 - Rust edition: `2024`.
 - Форматирование: `rustfmt`.

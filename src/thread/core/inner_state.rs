@@ -23,7 +23,6 @@ impl ThreadInner {
         self.file_change_paths_this_turn.clear();
         self.synced_paths_this_turn.clear();
         self.last_plan_steps.clear();
-        self.carryover_plan_steps = None;
     }
 
     pub(super) fn prepare_for_new_turn(

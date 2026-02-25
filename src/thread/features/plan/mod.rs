@@ -16,6 +16,6 @@ pub(in crate::thread) use fallback::{
 };
 pub(in crate::thread) use parse::{
     collaboration_mode_for_turn, collaboration_mode_label, limit_plan_entries,
-    parse_collaboration_mode, plan_entries_all_pending, plan_from_text, promote_first_pending_step,
-    turn_plan_step_to_entry,
+    parse_collaboration_mode, plan_entries_all_pending, plan_from_plan_item_text, plan_from_text,
+    promote_first_pending_step, turn_plan_step_to_entry,
 };

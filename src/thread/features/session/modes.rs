@@ -1,6 +1,6 @@
 //! Режимные slash-команды сессии: `/reasoning` и `/plan on|off`.
 
-use agent_client_protocol::{Error, StopReason};
+use agent_client_protocol::{Error, Plan, SessionUpdate, StopReason};
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ReasoningEffort;
 
@@ -121,6 +121,14 @@ pub(in crate::thread) async fn handle_plan_mode_command(
             );
         } else {
             inner.collaboration_mode_kind = mode;
+        }
+        if mode == ModeKind::Default {
+            inner.last_plan_steps.clear();
+            inner.carryover_plan_steps = None;
+            inner
+                .client
+                .send_notification(SessionUpdate::Plan(Plan::new(Vec::new())))
+                .await;
         }
         inner.sync_sandbox_mode_from_policy("handle_plan_mode_command");
         notify_mode_and_config_update(inner).await;

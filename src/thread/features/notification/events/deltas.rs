@@ -1,6 +1,7 @@
 //! Delta/progress notification-ветки (text deltas и tool progress updates).
 
 use agent_client_protocol::{ToolCallId, ToolCallUpdate, ToolCallUpdateFields};
+use codex_protocol::config_types::ModeKind;
 
 use crate::thread::{
     FallbackPlanPhase, ThreadInner, fallback_plan_can_enter_summarizing,
@@ -51,6 +52,11 @@ pub(in crate::thread) async fn emit_plan_delta(
     delta: String,
 ) {
     if turn_id == expected_turn_id {
+        // В plan-mode показываем структурированный SessionUpdate::Plan,
+        // поэтому не дублируем сырой markdown-стрим из plan/delta.
+        if inner.active_turn_mode_kind == Some(ModeKind::Plan) {
+            return;
+        }
         inner.active_turn_saw_plan_delta = true;
         inner.client.send_agent_text(delta).await;
     }

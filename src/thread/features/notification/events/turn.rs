@@ -21,14 +21,21 @@ pub(in crate::thread) async fn emit_turn_plan_updated(
         return;
     }
 
+    // В plan-mode канонический поток — это item/plan + item/plan/delta из <proposed_plan>.
+    // turn/plan/updated (update_plan tool) в этом режиме ведёт к UI-артефактам checklist.
+    if inner.active_turn_mode_kind == Some(ModeKind::Plan) {
+        return;
+    }
+
     inner.turn_plan_updates_seen.insert(turn_id.clone());
     let mut entries = plan
         .into_iter()
         .map(turn_plan_step_to_entry)
         .collect::<Vec<_>>();
-    let is_active_plan_turn =
-        inner.active_turn_mode_kind == Some(ModeKind::Plan) && turn_id == expected_turn_id;
-    if is_active_plan_turn && plan_entries_all_pending(&entries) {
+    if !entries.is_empty() {
+        inner.active_turn_saw_plan_item = true;
+    }
+    if plan_entries_all_pending(&entries) {
         let phase = inner
             .fallback_plan
             .as_ref()

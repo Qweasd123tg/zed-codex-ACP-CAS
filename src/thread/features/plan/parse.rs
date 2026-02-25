@@ -62,15 +62,137 @@ pub(in crate::thread) fn turn_plan_step_to_entry(step: TurnPlanStep) -> PlanEntr
 }
 
 pub(in crate::thread) fn plan_from_text(text: &str) -> Option<Plan> {
-    let entries = text
-        .lines()
-        .filter_map(parse_plan_entry_from_line)
-        .collect::<Vec<_>>();
+    plan_from_text_with_mode(text, false)
+}
+
+pub(in crate::thread) fn plan_from_plan_item_text(text: &str) -> Option<Plan> {
+    plan_from_text_with_mode(text, true)
+}
+
+fn plan_from_text_with_mode(text: &str, allow_list_only: bool) -> Option<Plan> {
+    if allow_list_only {
+        let steps_section_entries = parse_plan_entries_from_steps_section(text);
+        if !steps_section_entries.is_empty() {
+            return Some(Plan::new(steps_section_entries));
+        }
+    }
+
+    let mut entries = Vec::new();
+    let mut has_checkbox_entries = false;
+    let mut has_plan_heading = false;
+    let mut has_plan_intro = false;
+    let mut has_options_marker = false;
+    let mut has_non_numbered_list_entries = false;
+    let mut has_any_heading = false;
+    let mut non_entry_lines = 0usize;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if is_markdown_heading(trimmed) {
+            has_any_heading = true;
+            has_plan_heading |= heading_looks_like_plan(trimmed);
+            if !heading_looks_like_plan(trimmed) {
+                non_entry_lines += 1;
+            }
+            continue;
+        }
+
+        if line_looks_like_options_marker(trimmed) {
+            has_options_marker = true;
+            non_entry_lines += 1;
+            continue;
+        }
+
+        if line_looks_like_plan_intro(trimmed) {
+            has_plan_intro = true;
+            non_entry_lines += 1;
+            continue;
+        }
+
+        if let Some((entry, kind)) = parse_plan_entry_from_line(trimmed) {
+            if kind == ParsedPlanLineKind::Checkbox {
+                has_checkbox_entries = true;
+            }
+            if matches!(
+                kind,
+                ParsedPlanLineKind::Checkbox | ParsedPlanLineKind::Bullet
+            ) {
+                has_non_numbered_list_entries = true;
+            }
+            entries.push(entry);
+            continue;
+        }
+
+        non_entry_lines += 1;
+    }
+
     if entries.is_empty() {
         None
-    } else {
+    } else if allow_list_only && has_any_heading && !has_checkbox_entries {
+        // Для plan-item секционный markdown без явного раздела шагов
+        // считается неоднозначным: не превращаем произвольные списки
+        // (например "критерии"/"фиксированные параметры") в checklist.
+        None
+    } else if has_checkbox_entries || has_plan_heading || has_plan_intro {
         Some(Plan::new(entries))
+    } else if has_options_marker {
+        None
+    } else if allow_list_only
+        && non_entry_lines == 0
+        && entries.len() >= 2
+        && has_non_numbered_list_entries
+    {
+        Some(Plan::new(entries))
+    } else {
+        None
     }
+}
+
+fn parse_plan_entries_from_steps_section(text: &str) -> Vec<PlanEntry> {
+    let mut in_steps_section = false;
+    let mut entries = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if is_markdown_heading(trimmed) {
+            if line_looks_like_steps_section_title(trimmed) {
+                in_steps_section = true;
+                continue;
+            }
+            if in_steps_section {
+                break;
+            }
+            continue;
+        }
+
+        if line_looks_like_steps_section_title(trimmed) {
+            in_steps_section = true;
+            continue;
+        }
+
+        if !in_steps_section {
+            continue;
+        }
+
+        if let Some((entry, _kind)) = parse_plan_entry_from_line(trimmed) {
+            entries.push(entry);
+            continue;
+        }
+
+        if !entries.is_empty() {
+            break;
+        }
+    }
+
+    entries
 }
 
 pub(in crate::thread) fn promote_first_pending_step(plan: Plan) -> Plan {
@@ -92,9 +214,16 @@ pub(in crate::thread) fn limit_plan_entries(mut entries: Vec<PlanEntry>) -> Vec<
     entries
 }
 
-fn parse_plan_entry_from_line(line: &str) -> Option<PlanEntry> {
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum ParsedPlanLineKind {
+    Checkbox,
+    Bullet,
+    Numbered,
+}
+
+fn parse_plan_entry_from_line(line: &str) -> Option<(PlanEntry, ParsedPlanLineKind)> {
     let trimmed = line.trim();
-    if trimmed.is_empty() || trimmed.starts_with('#') {
+    if trimmed.is_empty() {
         return None;
     }
 
@@ -106,10 +235,13 @@ fn parse_plan_entry_from_line(line: &str) -> Option<PlanEntry> {
         if content.is_empty() {
             return None;
         }
-        return Some(PlanEntry::new(
-            content,
-            PlanEntryPriority::Medium,
-            PlanEntryStatus::Completed,
+        return Some((
+            PlanEntry::new(
+                content,
+                PlanEntryPriority::Medium,
+                PlanEntryStatus::Completed,
+            ),
+            ParsedPlanLineKind::Checkbox,
         ));
     }
 
@@ -121,10 +253,9 @@ fn parse_plan_entry_from_line(line: &str) -> Option<PlanEntry> {
         if content.is_empty() {
             return None;
         }
-        return Some(PlanEntry::new(
-            content,
-            PlanEntryPriority::Medium,
-            PlanEntryStatus::Pending,
+        return Some((
+            PlanEntry::new(content, PlanEntryPriority::Medium, PlanEntryStatus::Pending),
+            ParsedPlanLineKind::Checkbox,
         ));
     }
 
@@ -138,10 +269,13 @@ fn parse_plan_entry_from_line(line: &str) -> Option<PlanEntry> {
         if content.is_empty() {
             return None;
         }
-        return Some(PlanEntry::new(
-            content,
-            PlanEntryPriority::Medium,
-            PlanEntryStatus::InProgress,
+        return Some((
+            PlanEntry::new(
+                content,
+                PlanEntryPriority::Medium,
+                PlanEntryStatus::InProgress,
+            ),
+            ParsedPlanLineKind::Checkbox,
         ));
     }
 
@@ -150,20 +284,101 @@ fn parse_plan_entry_from_line(line: &str) -> Option<PlanEntry> {
     if let Some(content) = trimmed
         .strip_prefix("- ")
         .or_else(|| trimmed.strip_prefix("* "))
-        .or_else(|| strip_numbered_prefix(trimmed))
     {
         let content = content.trim();
         if content.is_empty() {
             return None;
         }
-        return Some(PlanEntry::new(
-            content,
-            PlanEntryPriority::Medium,
-            PlanEntryStatus::Pending,
+        return Some((
+            PlanEntry::new(content, PlanEntryPriority::Medium, PlanEntryStatus::Pending),
+            ParsedPlanLineKind::Bullet,
+        ));
+    }
+
+    if let Some(content) = strip_numbered_prefix(trimmed) {
+        let content = content.trim();
+        if content.is_empty() {
+            return None;
+        }
+        return Some((
+            PlanEntry::new(content, PlanEntryPriority::Medium, PlanEntryStatus::Pending),
+            ParsedPlanLineKind::Numbered,
         ));
     }
 
     None
+}
+
+fn is_markdown_heading(line: &str) -> bool {
+    line.starts_with('#')
+}
+
+fn heading_looks_like_plan(line: &str) -> bool {
+    let normalized = line
+        .trim_start_matches('#')
+        .trim()
+        .to_lowercase()
+        .replace('ё', "е");
+    line_has_plan_keyword(&normalized)
+}
+
+fn line_looks_like_plan_intro(line: &str) -> bool {
+    let normalized = line.to_lowercase().replace('ё', "е");
+    (normalized.ends_with(':') || normalized.ends_with('.')) && line_has_plan_keyword(&normalized)
+}
+
+fn line_looks_like_steps_section_title(line: &str) -> bool {
+    let normalized = line
+        .trim_start_matches('#')
+        .trim_end_matches(':')
+        .trim()
+        .to_lowercase()
+        .replace('ё', "е");
+
+    normalized.contains("пошаг")
+        || normalized == "шаги"
+        || normalized == "этапы"
+        || (normalized.contains("этап") && normalized.contains("реализац"))
+        || (normalized.contains("план") && normalized.contains("реализац"))
+        || (normalized.contains("шаг") && normalized.contains("выполн"))
+        || (normalized.contains("step") && normalized.contains("implementation"))
+        || (normalized.contains("step") && normalized.contains("execution"))
+        || normalized.contains("implementation steps")
+        || normalized.contains("execution steps")
+        || normalized.contains("step-by-step")
+        || normalized == "steps"
+        || (normalized.contains("steps") && normalized.contains("plan"))
+        || (normalized.contains("шаг") && normalized.contains("реализац"))
+        || (normalized.contains("шаг") && normalized.contains("план"))
+}
+
+fn line_has_plan_keyword(line: &str) -> bool {
+    const PLAN_KEYWORDS: [&str; 11] = [
+        "plan",
+        "steps",
+        "roadmap",
+        "todo",
+        "next steps",
+        "implementation plan",
+        "proposed plan",
+        "план",
+        "шаг",
+        "этап",
+        "дорожн",
+    ];
+    PLAN_KEYWORDS.iter().any(|keyword| line.contains(keyword))
+}
+
+fn line_looks_like_options_marker(line: &str) -> bool {
+    let normalized = line
+        .trim_end_matches(':')
+        .trim()
+        .to_lowercase()
+        .replace('ё', "е");
+    matches!(
+        normalized.as_str(),
+        "options" | "choices" | "variants" | "option" | "choice" | "варианты" | "опции"
+    )
 }
 
 fn strip_numbered_prefix(line: &str) -> Option<&str> {

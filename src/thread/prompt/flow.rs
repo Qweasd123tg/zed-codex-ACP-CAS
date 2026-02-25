@@ -61,7 +61,12 @@ impl Thread {
 
         if stop_reason == StopReason::EndTurn
             && collaboration_mode_kind == ModeKind::Plan
-            && inner.active_turn_saw_plan_item
+            && (inner.active_turn_saw_plan_item
+                || inner.active_turn_saw_plan_delta
+                || inner
+                    .last_plan_steps
+                    .iter()
+                    .any(|step| !step.trim().is_empty()))
         {
             let implement_now = turn_execution::prompt_plan_implementation(&mut inner).await?;
             if implement_now {
