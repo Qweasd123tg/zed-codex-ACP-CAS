@@ -1,4 +1,4 @@
-//! Codex ACP - An Agent Client Protocol implementation for Codex.
+//! Codex ACP — реализация Agent Client Protocol для Codex.
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 use agent_client_protocol::AgentSideConnection;
@@ -11,32 +11,33 @@ use tokio::task::LocalSet;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing_subscriber::EnvFilter;
 
-mod codex_agent;
 mod app_server;
+mod codex_agent;
 mod thread;
 
 pub static ACP_CLIENT: OnceLock<Arc<AgentSideConnection>> = OnceLock::new();
 
-/// Run the Codex ACP agent.
+/// Запускает ACP-агент Codex.
 ///
-/// This sets up an ACP agent that communicates over stdio, bridging
-/// the ACP protocol with the existing codex-rs infrastructure.
+/// Настраивает ACP-агент, который общается через stdio и связывает
+/// протокол ACP с существующей инфраструктурой codex-rs.
 ///
-/// # Errors
+/// # Ошибки
 ///
-/// If unable to parse the config or start the program.
+/// Если не удалось распарсить конфиг или запустить программу.
+// Собираем runtime-конфигурацию один раз и передаём её в инициализацию ACP-агента.
 pub async fn run_main(
     codex_linux_sandbox_exe: Option<PathBuf>,
     cli_config_overrides: CliConfigOverrides,
 ) -> IoResult<()> {
-    // Install a simple subscriber so `tracing` output is visible.
-    // Users can control the log level with `RUST_LOG`.
+    // Подключаем простой subscriber, чтобы вывод `tracing` был виден.
+    // Пользователь может управлять уровнем логов через `RUST_LOG`.
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    // Parse CLI overrides and load configuration
+    // Парсим CLI-override-параметры и загружаем конфигурацию.
     let cli_kv_overrides = cli_config_overrides.parse_overrides().map_err(|e| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -59,16 +60,16 @@ pub async fn run_main(
                 )
             })?;
 
-    // Create our Agent implementation with notification channel
+    // Создаём реализацию Agent с каналом уведомлений.
     let agent = Rc::new(codex_agent::CodexAgent::new(config));
 
     let stdin = tokio::io::stdin().compat();
     let stdout = tokio::io::stdout().compat_write();
 
-    // Run the I/O task to handle the actual communication
+    // Запускаем I/O-задачу для фактического обмена данными.
     LocalSet::new()
         .run_until(async move {
-            // Create the ACP connection
+            // Создаём ACP-соединение.
             let (client, io_task) = AgentSideConnection::new(agent.clone(), stdout, stdin, |fut| {
                 tokio::task::spawn_local(fut);
             });
@@ -86,7 +87,7 @@ pub async fn run_main(
     Ok(())
 }
 
-// Re-export the MCP server types for compatibility
+// Переэкспортируем типы MCP-сервера для совместимости.
 pub use codex_mcp_server::{
     CodexToolCallParam, CodexToolCallReplyParam, ExecApprovalElicitRequestParams,
     ExecApprovalResponse, PatchApprovalElicitRequestParams, PatchApprovalResponse,

@@ -1,64 +1,90 @@
-# ACP-адаптер для Codex (CAS)
+# Codex ACP CAS (Rust)
 
-Используйте [Codex](https://github.com/openai/codex) из [ACP-совместимых](https://agentclientprotocol.com) клиентов (например, [Zed](https://zed.dev)) через CAS-реализацию.
-Проект вдохновлен codex-acp, но реализует собственный CAS-мост и UX-поведение.
+ACP-адаптер, который подключает Codex к ACP-совместимым клиентам (например, Zed) через мост к `codex app-server`.
 
-## Статус проекта
+## Что это
+Проект реализует ACP `Agent` и маппит lifecycle сессий/turn/tool-calls между ACP и Codex app-server.
 
-- Линейка версий CAS начинается с `0.1.0`.
-- На стадии `0.x` проект считается бета-версией: возможны изменения поведения и API между релизами.
-- Цель этой ветки: стабильный UX для Zed + аккуратный мост между ACP и Codex app-server.
-- Текущий практический тестовый контур: в основном сценарий с ChatGPT-подпиской через локальный Codex CLI.
-- Авторизация через `OPENAI_API_KEY` и `CODEX_API_KEY` поддерживается в коде, но в этой ветке не проходила отдельную полную валидацию в Zed/CAS-потоке.
+Бинарь проекта: `codex-acp`.
 
-## Что поддерживается
+## Статус
+- Версия ветки: `0.1.x` (бета-стадия, возможны изменения поведения между релизами).
+- Поддерживаемый релизный target: `x86_64-unknown-linux-gnu`.
+- Основной сценарий эксплуатации: Fedora x86_64.
 
-- Контекст через `@`-упоминания
-- Изображения
-- Tool calls с запросами разрешений
-- Список сессий и восстановление (`/threads`, `/resume <thread_id>`)
-- Replay истории при загрузке/возобновлении
-- Настройка модели и reasoning effort
-- Обновления использования контекста (tokens/window)
-- Команды: `/compact`, `/undo`, `/reasoning`, `/plan`, `/context`
+## Поддерживаемые возможности
+Из фактической реализации:
+- ACP prompt capabilities: `embedded_context`, `image`.
+- Сессии: `new_session`, `load_session`, `list_sessions`.
+- Replay истории после `load_session`/`/resume`.
+- Slash-команды:
+  - `/threads`
+  - `/resume [partial_id]`
+  - `/compact`
+  - `/undo [N]`
+  - `/reasoning [none|minimal|low|medium|high|xhigh]`
+  - `/plan [on|off|<request>]`
+  - `/context`
+- Tool-call карточки и статусы для command/mcp/web/image/file/collab веток.
 
-Ограничение: MCP-серверы клиента пока принимаются на уровне ACP, но не пробрасываются в режим Codex app-server.
+## Ограничения
+- MCP passthrough из ACP-клиента пока не маппится в app-server режим.
+  В `new_session/load_session` MCP-конфигурация принимается, но фактически игнорируется.
 
-Примечание по сессиям: история `/threads` и `/resume` берется из локального `CODEX_HOME` (обычно `~/.codex`), а не из отдельного облачного хранилища.
+## Авторизация
+Поддерживаемые методы (через `authenticate`):
+- ChatGPT login flow.
+- `CODEX_API_KEY`.
+- `OPENAI_API_KEY`.
 
-## Быстрый запуск
+## Быстрый старт
+Локальный запуск:
 
 ```bash
-OPENAI_API_KEY=sk-... codex-acp
+cargo run -- --help
 ```
 
-## Локальный CAS workflow
+После сборки:
 
-- Быстрые проверки: `bash script/run_live_checks.sh quick`
-- Полные проверки: `bash script/run_live_checks.sh full`
-- Сборка+установка+smoke-test: `bash script/build_install_cas.sh`
-- Отдельный smoke-test: `bash script/smoke_test_cas.sh "$HOME/.local/bin/codex-acp-cas"`
+```bash
+./target/release/codex-acp --help
+```
 
-## Обновление references
+## Локальный workflow
+Полезные скрипты:
 
-- Ручное обновление всех reference-репозиториев:
-  `bash script/update_references.sh`
-- Обновление один раз в день (если уже обновлялось сегодня по UTC, скрипт завершится без действий):
-  `bash script/update_references.sh --daily`
-- Обновление одного reference-репо:
-  `bash script/update_references.sh --repo zed`
+```bash
+bash script/run_live_checks.sh quick
+bash script/run_live_checks.sh full
+bash script/build_install_cas.sh
+bash script/smoke_test_cas.sh "$HOME/.local/bin/codex-acp-cas"
+```
 
-Скрипт подтягивает изменения из `origin`, определяет версию (`tag`/`describe`/commit) и переименовывает папку в формат `<имя>@<версия>`, например `codex-acp-upstream@v0.9.4`. Для удобства он оставляет стабильный симлинк без версии: `references/codex-acp-upstream -> references/codex-acp-upstream@v0.9.4`.
+Обновление references:
 
-Пример cron (ежедневно в 04:20 UTC):
-`20 4 * * * cd /home/qweasd123tg/Code/zed\ codex\ app\ server && bash script/update_references.sh --daily >> /tmp/cas-update-references.log 2>&1`
+```bash
+bash script/update_references.sh
+bash script/update_references.sh --daily
+bash script/update_references.sh --repo zed
+```
 
-## Релизы и версии
+## Сборка и проверки
+Базовый набор:
 
-Проект использует **независимую SemVer-схему CAS** (не привязанную к тегам upstream), например `0.1.0`, `0.1.1`.
-Официальная поддерживаемая платформа релизов: **Fedora x86_64**.
-Остальные платформы считаются best-effort: можно собрать самостоятельно, но сопровождение и фиксы не гарантируются.
+```bash
+cargo build
+cargo test
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+```
 
+Проверка под релизный target:
+
+```bash
+cargo test --release --target x86_64-unknown-linux-gnu
+```
+
+## Релизы
 Подготовка релиза:
 
 ```bash
@@ -67,10 +93,11 @@ git push origin main
 git push origin v0.1.0
 ```
 
-Рекомендуется пушить именно нужный релизный тег (`vX.Y.Z`) и не использовать `git push --tags`, чтобы не отправлять лишние теги из локального репозитория.
+GitHub Actions release pipeline собирает Linux-артефакт для `x86_64-unknown-linux-gnu` и публикует `tar.gz` + `.sha256`.
 
-GitHub Actions релизного контура собирает **только Linux GNU x86_64** (`x86_64-unknown-linux-gnu`) для Fedora-сценария.
+## Архитектурная документация
+- Карта связности thread-подсистемы: `docs/thread-feature-map.md`.
+- Правила разработки и проверки: `AGENTS.md`.
 
 ## Лицензия
-
 Apache-2.0 (`LICENSE`).

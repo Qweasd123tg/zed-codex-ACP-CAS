@@ -1,5 +1,5 @@
-//! ACP `Agent` implementation that maps ACP session lifecycle to `Thread`
-//! instances backed by Codex app-server.
+//! Реализация ACP `Agent`, которая сопоставляет жизненный цикл ACP-сессии с `Thread`
+//! Каждый `Thread` работает поверх Codex app-server.
 
 use agent_client_protocol::{
     Agent, AgentCapabilities, AuthMethod, AuthMethodId, AuthenticateRequest, AuthenticateResponse,
@@ -31,11 +31,12 @@ pub struct CodexAgent {
     auth_manager: Arc<AuthManager>,
     client_capabilities: Arc<Mutex<ClientCapabilities>>,
     config: Config,
-    // In-memory registry of active ACP sessions for this process lifetime.
+    // Реестр активных ACP-сессий в памяти на время жизни процесса.
     sessions: Rc<RefCell<HashMap<SessionId, Rc<Thread>>>>,
 }
 
 impl CodexAgent {
+    // Сохраняем общий стартовый конфиг, который используется всеми ACP-сессиями.
     pub fn new(config: Config) -> Self {
         let auth_manager = AuthManager::shared(
             config.codex_home.clone(),
@@ -60,8 +61,8 @@ impl CodexAgent {
     }
 
     async fn check_auth(&self) -> Result<(), Error> {
-        // OpenAI provider requires one of the supported auth flows to be ready
-        // before any session/prompt call is accepted.
+        // Для провайдера OpenAI один из поддерживаемых способов авторизации должен быть готов
+        // до принятия любого вызова session/prompt.
         if self.config.model_provider_id == "openai" && self.auth_manager.auth().await.is_none() {
             return Err(Error::auth_required());
         }
@@ -87,7 +88,8 @@ impl Agent for CodexAgent {
             .mcp_capabilities(McpCapabilities::new().http(true))
             .load_session(true);
 
-        capabilities.session_capabilities = SessionCapabilities::new().list(SessionListCapabilities::new());
+        capabilities.session_capabilities =
+            SessionCapabilities::new().list(SessionListCapabilities::new());
 
         let mut auth_methods = vec![
             CodexAuthMethod::ChatGpt.into(),
@@ -95,7 +97,7 @@ impl Agent for CodexAgent {
             CodexAuthMethod::OpenAiApiKey.into(),
         ];
 
-        // Device-code/browser flow is unavailable in some remote setups.
+        // Поток device-code/browser недоступен в некоторых удалённых окружениях.
         if std::env::var("NO_BROWSER").is_ok() {
             auth_methods.remove(0);
         }
@@ -192,8 +194,8 @@ impl Agent for CodexAgent {
         let load = thread.load().await?;
         let notify_thread = thread.clone();
         tokio::task::spawn_local(async move {
-            // Let the load/new response reach the client first, then publish
-            // dynamic command metadata to avoid UI races on startup.
+            // Сначала отдаём клиенту ответ load/new, затем публикуем
+            // динамические метаданные команд, чтобы избежать гонок UI при старте.
             tokio::task::yield_now().await;
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             notify_thread.notify_available_commands().await;
@@ -242,8 +244,8 @@ impl Agent for CodexAgent {
         let load = thread.load().await?;
         let notify_thread = thread.clone();
         tokio::task::spawn_local(async move {
-            // Same startup ordering as new_session + replay restored history so
-            // the user immediately sees prior tool calls/diffs after `/resume`.
+            // Используем тот же порядок старта, что и в new_session + replay истории, чтобы
+            // пользователь сразу видел прошлые вызовы инструментов/диффы после `/resume`.
             tokio::task::yield_now().await;
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             notify_thread.notify_available_commands().await;

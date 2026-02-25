@@ -1,6 +1,6 @@
-//! Thin async JSON-RPC client around `codex app-server --listen stdio://`.
-//! It is responsible only for transport/multiplexing between ACP thread logic
-//! and the Codex app-server protocol.
+//! Тонкий асинхронный JSON-RPC-клиент вокруг `codex app-server --listen stdio://`.
+//! Отвечает только за транспорт/мультиплексирование между логикой ACP-thread
+//! и протоколом Codex app-server.
 
 use std::collections::VecDeque;
 use std::process::Stdio;
@@ -19,10 +19,11 @@ use codex_app_server_protocol::{
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::process::Command as TokioCommand;
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tracing::warn;
 
+// Нормализуем I/O-сбои дочернего процесса в ошибки уровня протокола.
 fn io_error(message: impl Into<String>) -> Error {
     Error::internal_error().data(message.into())
 }
@@ -31,8 +32,8 @@ pub struct AppServerProcess {
     _child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
-    // While waiting for a specific response id, app-server can emit unrelated
-    // notifications and server requests. We enqueue them and replay later.
+    // Пока ждём конкретный response id, app-server может прислать несвязанные
+    // уведомления и server request. Мы ставим их в очередь и воспроизводим позже.
     pending_messages: VecDeque<JSONRPCMessage>,
     next_request_id: i64,
 }
@@ -151,7 +152,8 @@ impl AppServerProcess {
             request_id: request_id.clone(),
             params,
         };
-        self.request(request, request_id, "thread/compact/start").await
+        self.request(request, request_id, "thread/compact/start")
+            .await
     }
 
     pub async fn thread_rollback(
@@ -166,7 +168,10 @@ impl AppServerProcess {
         self.request(request, request_id, "thread/rollback").await
     }
 
-    pub async fn turn_start(&mut self, params: TurnStartParams) -> Result<TurnStartResponse, Error> {
+    pub async fn turn_start(
+        &mut self,
+        params: TurnStartParams,
+    ) -> Result<TurnStartResponse, Error> {
         let request_id = self.next_request_id();
         let request = ClientRequest::TurnStart {
             request_id: request_id.clone(),
@@ -188,7 +193,7 @@ impl AppServerProcess {
     }
 
     pub async fn next_message(&mut self) -> Result<JSONRPCMessage, Error> {
-        // Drain queued out-of-band messages before reading from stdout.
+        // Сначала выгружаем queued out-of-band сообщения, потом читаем stdout.
         if let Some(message) = self.pending_messages.pop_front() {
             return Ok(message);
         }
@@ -200,7 +205,8 @@ impl AppServerProcess {
         request_id: RequestId,
         response: codex_app_server_protocol::CommandExecutionRequestApprovalResponse,
     ) -> Result<(), Error> {
-        self.send_server_request_response(request_id, response).await
+        self.send_server_request_response(request_id, response)
+            .await
     }
 
     pub async fn send_file_change_approval_response(
@@ -208,7 +214,8 @@ impl AppServerProcess {
         request_id: RequestId,
         response: FileChangeRequestApprovalResponse,
     ) -> Result<(), Error> {
-        self.send_server_request_response(request_id, response).await
+        self.send_server_request_response(request_id, response)
+            .await
     }
 
     pub async fn send_tool_request_user_input_response(
@@ -216,7 +223,8 @@ impl AppServerProcess {
         request_id: RequestId,
         response: ToolRequestUserInputResponse,
     ) -> Result<(), Error> {
-        self.send_server_request_response(request_id, response).await
+        self.send_server_request_response(request_id, response)
+            .await
     }
 
     pub async fn send_server_request_error(
@@ -269,15 +277,18 @@ impl AppServerProcess {
                     )));
                 }
                 other => {
-                    // Keep protocol ordering stable: the thread event loop will
-                    // process these messages as regular stream events.
+                    // Сохраняем стабильный порядок протокола: цикл событий thread затем
+                    // обработает эти сообщения как обычные события потока.
                     self.pending_messages.push_back(other);
                 }
             }
         }
     }
 
-    async fn send_client_notification(&mut self, notification: ClientNotification) -> Result<(), Error> {
+    async fn send_client_notification(
+        &mut self,
+        notification: ClientNotification,
+    ) -> Result<(), Error> {
         self.write_json(&notification).await
     }
 
@@ -289,8 +300,11 @@ impl AppServerProcess {
     where
         T: Serialize,
     {
-        let result = serde_json::to_value(response)
-            .map_err(|err| io_error(format!("failed to serialize server request response: {err}")))?;
+        let result = serde_json::to_value(response).map_err(|err| {
+            io_error(format!(
+                "failed to serialize server request response: {err}"
+            ))
+        })?;
         self.write_json(&JSONRPCMessage::Response(JSONRPCResponse {
             id: request_id,
             result,

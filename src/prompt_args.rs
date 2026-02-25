@@ -1,4 +1,6 @@
-/// Mostly copied from `codex_tui::bottom_pane::prompt_args`: <https://github.com/zed-industries/codex/blob/9baf30493dd9f531af1e4dc49a781654b1b2c966/codex-rs/tui/src/bottom_pane/prompt_args.rs#L1>
+//! Парсер аргументов промпта для slash-команд и разворачивания упоминаний.
+
+/// В основном скопировано из `codex_tui::bottom_pane::prompt_args`: <https://github.com/zed-industries/codex/blob/9baf30493dd9f531af1e4dc49a781654b1b2c966/codex-rs/tui/src/bottom_pane/prompt_args.rs#L1>
 use codex_protocol::custom_prompts::CustomPrompt;
 use regex_lite::Regex;
 use shlex::Shlex;
@@ -16,6 +18,7 @@ pub enum PromptArgsError {
 }
 
 impl PromptArgsError {
+    // Описываем форму распарсенной команды, чтобы вызывающий код мог показать понятную ошибку.
     fn describe(&self, command: &str) -> String {
         match self {
             PromptArgsError::MissingAssignment { token } => format!(
@@ -54,9 +57,9 @@ impl PromptExpansionError {
     }
 }
 
-/// Parse a first-line slash command of the form `/name <rest>`.
-/// Returns `(name, rest_after_name)` if the line begins with `/` and contains
-/// a non-empty name; otherwise returns `None`.
+/// Парсит slash-команду в первой строке вида `/name <rest>`.
+/// Возвращает `(name, rest_after_name)`, если строка начинается с `/` и содержит
+/// непустое имя; иначе возвращает `None`.
 pub fn parse_slash_name(line: &str) -> Option<(&str, &str)> {
     let stripped = line.strip_prefix('/')?;
     let mut name_end = stripped.len();
@@ -74,11 +77,11 @@ pub fn parse_slash_name(line: &str) -> Option<(&str, &str)> {
     Some((name, rest))
 }
 
-/// Extracts the unique placeholder variable names from a prompt template.
+/// Извлекает уникальные имена переменных-плейсхолдеров из шаблона промпта.
 ///
-/// A placeholder is any token that matches the pattern `$[A-Z][A-Z0-9_]*`
-/// (for example `$USER`). The function returns the variable names without
-/// the leading `$`, de-duplicated and in the order of first appearance.
+/// Плейсхолдером считается любой токен, который соответствует шаблону `$[A-Z][A-Z0-9_]*`.
+/// Например, `$USER`. Функция возвращает имена переменных без ведущего `$`,
+/// без дублей и в порядке первого появления.
 pub fn prompt_argument_names(content: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut names = Vec::new();
@@ -87,7 +90,7 @@ pub fn prompt_argument_names(content: &str) -> Vec<String> {
             continue;
         }
         let name = &content[m.start() + 1..m.end()];
-        // Exclude special positional aggregate token from named args.
+        // Исключаем специальный агрегирующий позиционный токен из именованных аргументов.
         if name == "ARGUMENTS" {
             continue;
         }
@@ -99,11 +102,11 @@ pub fn prompt_argument_names(content: &str) -> Vec<String> {
     names
 }
 
-/// Parses the `key=value` pairs that follow a custom prompt name.
+/// Парсит пары `key=value`, идущие после имени кастомного промпта.
 ///
-/// The input is split using shlex rules, so quoted values are supported
-/// (for example `USER="Alice Smith"`). The function returns a map of parsed
-/// arguments, or an error if a token is missing `=` or if the key is empty.
+/// Вход разбивается по правилам shlex, поэтому значения в кавычках поддерживаются
+/// (например, `USER="Alice Smith"`). Функция возвращает map распарсенных
+/// аргументов или ошибку, если у токена нет `=` либо ключ пустой.
 pub fn parse_prompt_inputs(rest: &str) -> Result<HashMap<String, String>, PromptArgsError> {
     let mut map = HashMap::new();
     if rest.trim().is_empty() {
@@ -122,11 +125,11 @@ pub fn parse_prompt_inputs(rest: &str) -> Result<HashMap<String, String>, Prompt
     Ok(map)
 }
 
-/// Expands a message of the form `/prompts:name [value] [value] …` using a matching saved prompt.
+/// Разворачивает сообщение вида `/prompts:name [value] [value] …` с помощью соответствующего сохранённого промпта.
 ///
-/// If the text does not start with `/prompts:`, or if no prompt named `name` exists,
-/// the function returns `Ok(None)`. On success it returns
-/// `Ok(Some(expanded))`; otherwise it returns a descriptive error.
+/// Если текст не начинается с `/prompts:` или промпт с именем `name` не найден,
+/// функция возвращает `Ok(None)`. При успехе возвращает
+/// `Ok(Some(expanded))`; иначе возвращает понятную ошибку.
 pub fn expand_custom_prompt(
     name: &str,
     rest: &str,
@@ -135,7 +138,7 @@ pub fn expand_custom_prompt(
     let Some(prompt) = custom_prompts.iter().find(|p| p.name == name) else {
         return Ok(None);
     };
-    // If there are named placeholders, expect key=value inputs.
+    // Если есть именованные плейсхолдеры, ожидаем вход в формате key=value.
     let required = prompt_argument_names(&prompt.content);
     if !required.is_empty() {
         let inputs = parse_prompt_inputs(rest).map_err(|error| PromptExpansionError::Args {
@@ -170,13 +173,13 @@ pub fn expand_custom_prompt(
         return Ok(Some(replaced.into_owned()));
     }
 
-    // Otherwise, treat it as numeric/positional placeholder prompt (or none).
+    // Иначе считаем это промптом с числовыми/позиционными плейсхолдерами (или без них).
     let pos_args: Vec<String> = Shlex::new(rest).collect();
     let expanded = expand_numeric_placeholders(&prompt.content, &pos_args);
     Ok(Some(expanded))
 }
 
-/// Expand `$1..$9` and `$ARGUMENTS` in `content` with values from `args`.
+/// Разворачивает `$1..$9` и `$ARGUMENTS` в `content` значениями из `args`.
 pub fn expand_numeric_placeholders(content: &str, args: &[String]) -> String {
     let mut out = String::with_capacity(content.len());
     let mut i = 0;
@@ -221,7 +224,7 @@ pub fn expand_numeric_placeholders(content: &str, args: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{CustomPrompt, expand_custom_prompt, prompt_argument_names};
 
     #[test]
     fn expand_arguments_basic() {

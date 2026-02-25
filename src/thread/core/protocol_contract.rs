@@ -1,3 +1,5 @@
+//! Протокольные guardrail-ограничения для неподдерживаемых методов и строгих проверок контракта request/response.
+
 use agent_client_protocol::Error;
 use codex_app_server_protocol::RequestId;
 use tracing::warn;
@@ -6,6 +8,7 @@ use crate::app_server::AppServerProcess;
 
 pub(super) const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
 
+// Централизуем сообщения о неподдерживаемых методах для единообразной диагностики.
 pub(super) fn unsupported_method_message(method: &str) -> String {
     format!("Unsupported app-server request `{method}`")
 }
@@ -47,7 +50,7 @@ pub(super) async fn reject_unsupported_server_request(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::unsupported_method_message;
 
     #[test]
     fn unsupported_method_message_is_stable() {

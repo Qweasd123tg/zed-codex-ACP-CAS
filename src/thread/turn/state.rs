@@ -1,3 +1,5 @@
+//! Хелперы учёта завершения turn для дедупликации финальных событий по turn id.
+
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -7,6 +9,7 @@ pub(super) enum TurnCompletionDisposition {
     UnexpectedTurnId,
 }
 
+// Отслеживаем завершённые turn id, чтобы игнорировать дубликаты terminal-уведомлений.
 pub(super) fn register_turn_completion(
     completed_turn_ids: &mut HashSet<String>,
     expected_turn_id: &str,
@@ -25,7 +28,9 @@ pub(super) fn register_turn_completion(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::HashSet;
+
+    use super::{TurnCompletionDisposition, register_turn_completion};
 
     #[test]
     fn register_turn_completion_accepts_first_completion() {
@@ -50,4 +55,3 @@ mod tests {
         assert!(completed_turn_ids.is_empty());
     }
 }
-

@@ -1,18 +1,30 @@
-# Repository Guidelines
+# Руководство по репозиторию
 
-## Project Structure & Module Organization
-`src/` contains the Rust ACP adapter:
-- `src/main.rs`: binary entrypoint.
-- `src/lib.rs`: startup wiring and ACP connection setup.
-- `src/codex_agent.rs`: ACP `Agent` implementation (sessions/auth/capabilities).
-- `src/app_server.rs`: JSON-RPC bridge to `codex app-server`.
-- `src/thread.rs`, `src/prompt_args.rs`: thread/prompt logic and most unit tests.
+## Структура проекта
+`src/` содержит Rust ACP-адаптер:
+- `src/main.rs`: entrypoint бинаря.
+- `src/lib.rs`: инициализация runtime, запуск ACP-соединения.
+- `src/codex_agent.rs`: реализация ACP `Agent` (initialize/auth/session lifecycle).
+- `src/app_server.rs`: мост JSON-RPC к `codex app-server`.
+- `src/prompt_args.rs`: разбор prompt-входа и вспомогательные parser-тесты.
 
-`.github/workflows/` defines CI (`ci.yml`) and release automation. `script/` contains local maintenance and release scripts.
-Release support policy in this fork is Fedora-focused (`x86_64-unknown-linux-gnu`); other platforms are not required for release validation.
+`src/thread.rs` хранит только оркестрацию и общее состояние `ThreadInner`; вся рабочая логика разнесена в подпакеты:
+- `src/thread/core/*`: роутинг и glue (`item_handlers`, `replay`, `server_requests`, `inner_state`, `terminal_updates`).
+- `src/thread/features/*`: доменные срезы (`approvals`, `collab`, `file`, `notification`, `plan`, `resume`, `session`, `tool_events`, `tool_call_ui`).
+- `src/thread/prompt/*`: парсинг slash-команд и основной prompt-flow.
+- `src/thread/notification/*`: транспортный dispatch входящих JSON-RPC сообщений.
+- `src/thread/session/*`: загрузка/конфигурация/настройки view сессии.
+- `src/thread/turn/*`: выполнение turn и обработка turn diff/state.
 
-## Build, Test, and Development Commands
-Use these from the repository root:
+Дополнительно:
+- `.github/workflows/`: CI (`ci.yml`) и релизный пайплайн (`release.yml`).
+- `script/`: локальные утилиты сборки, smoke-тестов и release-подготовки.
+- `docs/thread-feature-map.md`: карта связности thread-подсистемы.
+
+Политика релизной поддержки в форке: Fedora-oriented, целевой target `x86_64-unknown-linux-gnu`.
+
+## Команды сборки и проверки
+Запускать из корня репозитория:
 
 ```bash
 cargo build
@@ -22,29 +34,54 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`cargo test --release --target x86_64-unknown-linux-gnu` mirrors the supported CI/release target.
+Проверка, совпадающая с поддерживаемым релизным target:
 
-## Coding Style & Naming Conventions
-Rust uses edition 2024 with `rustfmt` and strict `clippy` (`-D warnings` in CI). Follow standard Rust naming:
-- `snake_case` for modules/functions/tests.
-- `PascalCase` for types/traits.
-- `UPPER_SNAKE_CASE` for constants.
+```bash
+cargo test --release --target x86_64-unknown-linux-gnu
+```
 
-Use 4-space indentation and keep functions focused.
+## Стиль кода и соглашения
+- Rust edition: `2024`.
+- Форматирование: `rustfmt`.
+- Линтинг: `clippy -D warnings` в CI.
+- Имена:
+  - `snake_case` для модулей/функций/тестов.
+  - `PascalCase` для типов/трейтов.
+  - `UPPER_SNAKE_CASE` для констант.
+- Отступ: 4 пробела.
+- Функции делать узкими по ответственности.
 
-## Testing Guidelines
-Prefer unit tests colocated with implementation via `#[cfg(test)]` (see `src/thread.rs` and `src/prompt_args.rs`). Name tests by behavior, e.g. `parses_resume_command_with_thread_id`.
+## Правила изменений в `thread`-слое
+1. `notification/dispatch` и `core/server_requests` оставлять тонкими роутерами.
+2. Доменную логику держать в `features/*`, не возвращать ее в корневой `thread.rs`.
+3. Для новых lifecycle-веток соблюдать симметрию: `started -> completed -> replay`.
+4. Для turn-зависимых веток сохранять guard по `expected_turn_id`.
+5. После изменений mode/config отправлять `notify_config_update` или `notify_mode_and_config_update`.
 
-When changing parsing/protocol logic, add both happy-path and invalid/edge-case tests. Run Rust checks before opening a PR.
+## Тестирование
+Предпочтительный формат: unit-тесты рядом с реализацией (`#[cfg(test)]`).
+Ключевые тестовые точки:
+- `src/thread/core/tests.rs` (основной набор для thread-функциональности).
+- `src/prompt_args.rs` (тесты парсинга аргументов).
+- локальные `#[cfg(test)]` в отдельных модулях (`turn/state`, `core/protocol_contract` и т.д.).
 
-## Commit & Pull Request Guidelines
-Commit subjects should be imperative and concise; current history follows sentence case with optional PR ref, e.g. `Consolidate event mapping into one place (#151)`.
+При изменениях парсинга/протокола добавлять:
+- happy-path сценарии,
+- edge/invalid сценарии.
 
-PRs should include:
-- What changed and why.
-- Linked issue (if applicable).
-- Exact verification commands run and results.
-- Platform/release notes when touching targets, release scripts, or signing scripts.
+Перед PR обязательно прогонять `fmt`, `clippy`, `test`.
 
-## Security & Configuration Tips
-Never commit credentials. Use environment variables like `OPENAI_API_KEY` or `CODEX_API_KEY` for local runs.
+## Коммиты и PR
+- Тема коммита: императивно и коротко.
+- Текущий паттерн истории: sentence case, опционально с `(#PR)`.
+
+В PR указывать:
+- что изменено и зачем;
+- ссылку на issue (если есть);
+- точные команды проверки и результат;
+- релизные/platform notes, если затронуты target/release скрипты.
+
+## Безопасность и конфигурация
+- Не коммитить ключи/токены.
+- Для локальных запусков использовать env-переменные (`OPENAI_API_KEY`, `CODEX_API_KEY`).
+- Любые учетные данные хранить вне репозитория.
