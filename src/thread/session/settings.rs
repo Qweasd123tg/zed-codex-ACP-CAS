@@ -6,8 +6,9 @@ use super::session_config::{
 };
 use super::{
     APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, EditApprovalMode, Error, ModeKind,
-    ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort, SessionConfigId, SessionModeId, Thread,
+    ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort, SessionConfigId, SessionModeId, Thread, replay,
 };
+use codex_app_server_protocol::ThreadRollbackParams;
 
 impl Thread {
     // Переключаем collaboration mode атомарно, чтобы избежать смешанного рендера событий.
@@ -105,5 +106,33 @@ impl Thread {
         self.cancel_tx
             .send(current.saturating_add(1))
             .map_err(|err| Error::internal_error().data(err.to_string()))
+    }
+
+    pub async fn rollback_turns_ext(
+        &self,
+        num_turns: u32,
+        replay_history: bool,
+    ) -> Result<usize, Error> {
+        if num_turns == 0 {
+            return Err(Error::invalid_params().data("num_turns must be >= 1"));
+        }
+
+        let mut inner = self.inner.lock().await;
+        let thread_id = inner.thread_id.clone();
+        let response = inner
+            .app
+            .thread_rollback(ThreadRollbackParams {
+                thread_id,
+                num_turns,
+            })
+            .await?;
+        let remaining_turns = response.thread.turns.len();
+
+        if replay_history {
+            let workspace_cwd = inner.workspace_cwd.clone();
+            replay::replay_turns(&inner.client, &workspace_cwd, response.thread.turns).await;
+        }
+
+        Ok(remaining_turns)
     }
 }

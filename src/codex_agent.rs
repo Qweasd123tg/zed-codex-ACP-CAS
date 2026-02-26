@@ -3,13 +3,14 @@
 
 use agent_client_protocol::{
     Agent, AgentCapabilities, AuthMethod, AuthMethodId, AuthenticateRequest, AuthenticateResponse,
-    CancelNotification, ClientCapabilities, Error, Implementation, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, McpCapabilities, NewSessionRequest, NewSessionResponse,
-    PromptCapabilities, PromptRequest, PromptResponse, ProtocolVersion, ResumeSessionRequest,
-    ResumeSessionResponse, SessionCapabilities, SessionId, SessionListCapabilities,
-    SessionResumeCapabilities, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
+    CancelNotification, ClientCapabilities, Error, ExtRequest, ExtResponse, Implementation,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, LoadSessionResponse, McpCapabilities, NewSessionRequest,
+    NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse, ProtocolVersion,
+    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionId,
+    SessionListCapabilities, SessionResumeCapabilities, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionModelRequest, SetSessionModelResponse,
 };
 use codex_core::{
     CodexAuth,
@@ -17,6 +18,8 @@ use codex_core::{
     config::Config,
 };
 use codex_login::{CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR};
+use serde::Deserialize;
+use serde_json::value::to_raw_value;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -26,6 +29,13 @@ use std::{
 use tracing::{debug, info};
 
 use crate::thread::Thread;
+
+const EXT_THREAD_ROLLBACK_METHODS: [&str; 4] = [
+    "zed.dev/codex/thread/rollback",
+    "codex/thread/rollback",
+    "zed.dev/session/rollback",
+    "session/rollback",
+];
 
 pub struct CodexAgent {
     auth_manager: Arc<AuthManager>,
@@ -68,6 +78,34 @@ impl CodexAgent {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadRollbackExtParams {
+    #[serde(alias = "session_id")]
+    session_id: SessionId,
+    #[serde(alias = "num_turns")]
+    num_turns: u32,
+    #[serde(default, alias = "replay_history")]
+    replay_history: bool,
+}
+
+fn parse_thread_rollback_ext_params(
+    args: &ExtRequest,
+) -> Result<Option<ThreadRollbackExtParams>, Error> {
+    if !EXT_THREAD_ROLLBACK_METHODS.contains(&args.method.as_ref()) {
+        return Ok(None);
+    }
+
+    serde_json::from_str::<ThreadRollbackExtParams>(args.params.get())
+        .map(Some)
+        .map_err(|err| Error::invalid_params().data(format!("invalid ext params: {err}")))
+}
+
+fn ext_json_response(value: serde_json::Value) -> Result<ExtResponse, Error> {
+    let raw = to_raw_value(&value).map_err(|err| Error::internal_error().data(err.to_string()))?;
+    Ok(ExtResponse::new(Arc::from(raw)))
 }
 
 #[async_trait::async_trait(?Send)]
@@ -358,6 +396,22 @@ impl Agent for CodexAgent {
         let config_options = thread.config_options().await?;
         Ok(SetSessionConfigOptionResponse::new(config_options))
     }
+
+    async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse, Error> {
+        let Some(params) = parse_thread_rollback_ext_params(&args)? else {
+            return Err(Error::method_not_found());
+        };
+
+        let thread = self.get_thread(&params.session_id)?;
+        let remaining_turns = thread
+            .rollback_turns_ext(params.num_turns, params.replay_history)
+            .await?;
+
+        ext_json_response(serde_json::json!({
+            "ok": true,
+            "remainingTurns": remaining_turns
+        }))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -407,5 +461,79 @@ impl TryFrom<AuthMethodId> for CodexAuthMethod {
             "openai-api-key" => Ok(CodexAuthMethod::OpenAiApiKey),
             _ => Err(Error::invalid_params().data("unsupported authentication method")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_ext_request(method: &str, value: serde_json::Value) -> ExtRequest {
+        let raw = to_raw_value(&value).expect("raw value");
+        ExtRequest::new(method, Arc::from(raw))
+    }
+
+    #[test]
+    fn parses_thread_rollback_ext_params_camel_case() {
+        let request = build_ext_request(
+            "zed.dev/codex/thread/rollback",
+            serde_json::json!({
+                "sessionId": "thread_123",
+                "numTurns": 2,
+                "replayHistory": true
+            }),
+        );
+
+        let params = parse_thread_rollback_ext_params(&request)
+            .expect("should parse")
+            .expect("known method");
+        assert_eq!(params.session_id, SessionId::new("thread_123"));
+        assert_eq!(params.num_turns, 2);
+        assert!(params.replay_history);
+    }
+
+    #[test]
+    fn parses_thread_rollback_ext_params_snake_case_aliases() {
+        let request = build_ext_request(
+            "session/rollback",
+            serde_json::json!({
+                "session_id": "thread_321",
+                "num_turns": 1
+            }),
+        );
+
+        let params = parse_thread_rollback_ext_params(&request)
+            .expect("should parse")
+            .expect("known method");
+        assert_eq!(params.session_id, SessionId::new("thread_321"));
+        assert_eq!(params.num_turns, 1);
+        assert!(!params.replay_history);
+    }
+
+    #[test]
+    fn ignores_unknown_ext_method() {
+        let request = build_ext_request(
+            "example.com/ping",
+            serde_json::json!({
+                "sessionId": "thread_x",
+                "numTurns": 1
+            }),
+        );
+
+        let parsed = parse_thread_rollback_ext_params(&request).expect("parse result");
+        assert!(parsed.is_none());
+    }
+
+    #[test]
+    fn errors_on_invalid_ext_params() {
+        let request = build_ext_request(
+            "codex/thread/rollback",
+            serde_json::json!({
+                "sessionId": "thread_x"
+            }),
+        );
+
+        let error = parse_thread_rollback_ext_params(&request).expect_err("should fail");
+        assert_eq!(error.code, agent_client_protocol::ErrorCode::InvalidParams);
     }
 }
