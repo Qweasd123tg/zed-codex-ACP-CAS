@@ -17,6 +17,19 @@ This repository was published slightly earlier than originally planned to partic
 
 The code is functional and actively maintained, but some polishing and broader platform validation are still in progress.
 
+## Compared with the official Zed adapter
+
+The official Zed-maintained adapter is [`zed-industries/codex-acp`](https://github.com/zed-industries/codex-acp). Its README describes it as an ACP adapter around the Codex CLI, and positions it as the out-of-the-box Codex integration for recent Zed builds.
+
+This repository takes a different path:
+
+- It bridges ACP to `codex app-server` instead of wrapping the Codex CLI directly.
+- It focuses on app-server session lifecycle fidelity, including `load_session`, `resume_session`, `list_sessions`, workspace-scoped `/resume`, and history replay.
+- It exposes app-server-oriented tool and replay flows for command, file-change, MCP, web, image, and collab events.
+- It does not currently aim for full feature parity with the official adapter's command set and workflow surface such as `/review`, `/review-branch`, `/review-commit`, `/init`, `/logout`, custom prompts, following, and full client MCP passthrough.
+
+If you want the default Zed-supported Codex ACP experience, use the official adapter. If you want an app-server-focused ACP bridge with explicit session and replay behavior, this project is the alternative.
+
 ## Implemented capabilities
 
 - ACP prompt capabilities: `embedded_context`, `image`.
