@@ -11,6 +11,12 @@ It exposes Codex session lifecycle, turn streaming, approvals, replay, and tool-
 - Supported release target: `x86_64-unknown-linux-gnu`.
 - The binary name is `codex-acp`.
 
+## Why this repository is public now
+
+This repository was published slightly earlier than originally planned to participate in the OpenAI Codex for OSS program.
+
+The code is functional and actively maintained, but some polishing and broader platform validation are still in progress.
+
 ## Implemented capabilities
 
 - ACP prompt capabilities: `embedded_context`, `image`.
@@ -114,6 +120,46 @@ Release-target validation:
 ```bash
 cargo test --release --target x86_64-unknown-linux-gnu
 ```
+
+Platform-specific release builds:
+
+Linux (`x86_64-unknown-linux-gnu`, primary supported target):
+
+```bash
+rustup target add x86_64-unknown-linux-gnu
+cargo build --release --target x86_64-unknown-linux-gnu
+./target/x86_64-unknown-linux-gnu/release/codex-acp --help
+```
+
+macOS (Apple Silicon):
+
+```bash
+rustup target add aarch64-apple-darwin
+cargo build --release --target aarch64-apple-darwin
+./target/aarch64-apple-darwin/release/codex-acp --help
+```
+
+macOS (Intel):
+
+```bash
+rustup target add x86_64-apple-darwin
+cargo build --release --target x86_64-apple-darwin
+./target/x86_64-apple-darwin/release/codex-acp --help
+```
+
+Windows (MSVC toolchain):
+
+```powershell
+rustup target add x86_64-pc-windows-msvc
+cargo build --release --target x86_64-pc-windows-msvc
+.\target\x86_64-pc-windows-msvc\release\codex-acp.exe --help
+```
+
+Notes:
+
+- Linux is the platform used for regular maintenance and release validation.
+- macOS and Windows build instructions are provided, but release artifacts are currently published only for Linux in CI.
+- Runtime also requires a `codex` binary available in `PATH`.
 
 Useful local scripts:
 
