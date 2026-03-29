@@ -1,6 +1,7 @@
-//! Обновления runtime-настроек сессии (mode/model/reasoning), доступные ACP-клиентам.
+//! Обновления runtime-настроек сессии (mode/model/reasoning/context), доступные ACP-клиентам.
 
 use super::session_config::{
+    CONTEXT_COMPACT_VALUE, CONTEXT_STATUS_VALUE, CONTEXT_USAGE_VALUE, context_usage_message,
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
     reasoning_effort_value,
 };
@@ -9,6 +10,7 @@ use super::{
     ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort, SessionConfigId, SessionModeId, Thread, replay,
 };
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
+use crate::thread::features::session::controls::start_context_compaction;
 use codex_app_server_protocol::ThreadRollbackParams;
 
 impl Thread {
@@ -85,6 +87,32 @@ impl Thread {
         Ok(())
     }
 
+    pub async fn set_context_control(
+        &self,
+        value: agent_client_protocol::SessionConfigValueId,
+    ) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+        match value.0.as_ref() {
+            CONTEXT_STATUS_VALUE => Ok(()),
+            CONTEXT_USAGE_VALUE => {
+                inner
+                    .client
+                    .send_agent_text(context_usage_message(
+                        inner.last_used_tokens,
+                        inner.context_window_size,
+                    ))
+                    .await;
+                Ok(())
+            }
+            CONTEXT_COMPACT_VALUE => {
+                let message = start_context_compaction(&mut inner).await?;
+                inner.client.send_agent_text(message).await;
+                Ok(())
+            }
+            _ => Err(Error::invalid_params().data("Unsupported context control action")),
+        }
+    }
+
     pub async fn set_config_option(
         &self,
         config_id: SessionConfigId,
@@ -98,6 +126,7 @@ impl Thread {
                     .ok_or_else(|| Error::invalid_params().data("Unsupported reasoning effort"))?;
                 self.set_reasoning_effort(effort).await
             }
+            "context_control" => self.set_context_control(value).await,
             _ => Err(Error::invalid_params().data("Unsupported config option")),
         }
     }

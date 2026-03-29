@@ -72,15 +72,6 @@ fn reasoning_effort_label(effort: ReasoningEffort) -> &'static str {
     }
 }
 
-pub(in crate::thread) fn reasoning_effort_option_label(
-    effort: ReasoningEffort,
-    current_effort: ReasoningEffort,
-    current_usage_percent: Option<u64>,
-) -> String {
-    if effort == current_effort
-        && let Some(percent) = current_usage_percent
-    {
-        return format!("{} · {}% ctx", reasoning_effort_label(effort), percent);
-    }
+pub(in crate::thread) fn reasoning_effort_option_label(effort: ReasoningEffort) -> String {
     reasoning_effort_label(effort).to_string()
 }

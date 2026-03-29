@@ -1,13 +1,15 @@
 //! Usage notification-ветки (token usage / context window updates).
 
 use crate::thread::{
-    ThreadInner, session_config::i64_to_u64_saturating, turn_notify::notify_config_update,
+    ThreadInner, session_config::i64_to_u64_saturating, session_usage_cache::persist_context_usage,
+    turn_notify::notify_config_update,
 };
 
 // Синхронизируем usage-конфиг при очередном token-usage update для активного thread.
 pub(in crate::thread) async fn emit_thread_token_usage_updated(
     inner: &mut ThreadInner,
     thread_id: String,
+    turn_id: String,
     last_total_tokens: i64,
     model_context_window: Option<i64>,
 ) {
@@ -31,6 +33,20 @@ pub(in crate::thread) async fn emit_thread_token_usage_updated(
     }
     if let Some(size) = inner.context_window_size {
         inner.client.send_usage_update(used, size).await;
+        if let Err(error) = persist_context_usage(
+            &inner.context_usage_cache_path,
+            &thread_id,
+            &turn_id,
+            used,
+            size,
+        ) {
+            tracing::warn!(
+                thread_id,
+                turn_id,
+                %error,
+                "failed to persist context usage cache"
+            );
+        }
     }
     notify_config_update(inner).await;
 }

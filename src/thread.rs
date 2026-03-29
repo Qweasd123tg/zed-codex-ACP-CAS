@@ -57,6 +57,8 @@ mod session_config;
 mod session_lifecycle;
 #[path = "thread/session/settings.rs"]
 mod session_settings;
+#[path = "thread/session/usage_cache.rs"]
+mod session_usage_cache;
 #[path = "thread/session/view.rs"]
 mod session_view;
 #[path = "thread/core/terminal_updates.rs"]
@@ -118,6 +120,7 @@ struct ThreadInner {
     session_id: SessionId,
     app: AppServerProcess,
     thread_id: String,
+    context_usage_cache_path: PathBuf,
     session_mcp_config_overrides: Option<HashMap<String, serde_json::Value>>,
     workspace_cwd: PathBuf,
     client: SessionClient,
@@ -206,7 +209,6 @@ enum SessionCommand {
     PlanPrompt {
         prompt: String,
     },
-    Context,
     Rename {
         name: Option<String>,
     },

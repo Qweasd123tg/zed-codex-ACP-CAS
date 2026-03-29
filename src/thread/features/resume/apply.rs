@@ -7,6 +7,7 @@ use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_fo
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::features::session::thread_switch::flush_thread_switch_transport_state;
 use crate::thread::session_lifecycle::thread_resume_with_startup_retry;
+use crate::thread::session_usage_cache::restore_cached_context_usage;
 use crate::thread::{ThreadInner, replay, session_config, turn_notify};
 
 pub(in crate::thread) async fn handle_resume_command(
@@ -42,8 +43,13 @@ pub(in crate::thread) async fn handle_resume_command(
     inner.current_model = resume.model;
     inner.current_model_provider = resume.model_provider;
     inner.compaction_in_progress = false;
-    inner.last_used_tokens = None;
-    inner.context_window_size = None;
+    let cached_context_usage = restore_cached_context_usage(
+        &inner.context_usage_cache_path,
+        &resume.thread.id,
+        &resume.thread.turns,
+    );
+    inner.last_used_tokens = cached_context_usage.map(|(used, _)| used);
+    inner.context_window_size = cached_context_usage.map(|(_, size)| size);
     inner.agent_labels.clear();
     remember_agent_label(
         &mut inner.agent_labels,

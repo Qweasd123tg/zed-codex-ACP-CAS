@@ -5,6 +5,8 @@ use crate::thread::{
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption, ThreadInner,
 };
 
+#[path = "context.rs"]
+mod context;
 #[path = "modes.rs"]
 mod modes;
 #[path = "reasoning.rs"]
@@ -21,7 +23,10 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) models: &'a [AppModel],
     pub(in crate::thread) current_model: &'a str,
     pub(in crate::thread) current_reasoning_effort: ReasoningEffort,
+    pub(in crate::thread) current_used_tokens: Option<u64>,
+    pub(in crate::thread) current_context_window_size: Option<u64>,
     pub(in crate::thread) current_usage_percent: Option<u64>,
+    pub(in crate::thread) compaction_in_progress: bool,
     pub(in crate::thread) approval: AppAskForApproval,
     pub(in crate::thread) sandbox: AppSandboxMode,
     pub(in crate::thread) edit_approval_mode: EditApprovalMode,
@@ -33,7 +38,10 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         models: &inner.models,
         current_model: &inner.current_model,
         current_reasoning_effort: inner.reasoning_effort,
+        current_used_tokens: inner.last_used_tokens,
+        current_context_window_size: inner.context_window_size,
         current_usage_percent: usage_percent(inner.last_used_tokens, inner.context_window_size),
+        compaction_in_progress: inner.compaction_in_progress,
         approval: inner.approval_policy,
         sandbox: inner.sandbox_mode,
         edit_approval_mode: inner.edit_approval_mode,
@@ -46,7 +54,10 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         models,
         current_model,
         current_reasoning_effort,
+        current_used_tokens,
+        current_context_window_size,
         current_usage_percent,
+        compaction_in_progress,
         approval,
         sandbox,
         edit_approval_mode,
@@ -64,11 +75,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         .map(|model| model.id.clone())
         .unwrap_or_else(|| current_model.to_string());
     let current_effort_value = reasoning_effort_value(current_reasoning_effort);
-    let current_effort_label = reasoning::reasoning_effort_option_label(
-        current_reasoning_effort,
-        current_reasoning_effort,
-        current_usage_percent,
-    );
+    let current_effort_label = reasoning::reasoning_effort_option_label(current_reasoning_effort);
 
     let mut options = Vec::with_capacity(3);
     let mut mode_options = Vec::with_capacity(mode_state.available_modes.len());
@@ -123,11 +130,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             reasoning_options.push(
                 SessionConfigSelectOption::new(
                     effort_value,
-                    reasoning::reasoning_effort_option_label(
-                        option.reasoning_effort,
-                        current_reasoning_effort,
-                        current_usage_percent,
-                    ),
+                    reasoning::reasoning_effort_option_label(option.reasoning_effort),
                 )
                 .description(option.description.clone()),
             );
@@ -154,9 +157,27 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         .description("Choose how much reasoning effort Codex should use"),
     );
 
+    options.push(
+        SessionConfigOption::select(
+            "context_control",
+            "Context",
+            context::CONTEXT_STATUS_VALUE,
+            context::context_control_options(
+                current_used_tokens,
+                current_context_window_size,
+                current_usage_percent,
+                compaction_in_progress,
+            ),
+        )
+        .description("Inspect context usage or start compaction"),
+    );
+
     options
 }
 
+pub(super) use context::{
+    CONTEXT_COMPACT_VALUE, CONTEXT_STATUS_VALUE, CONTEXT_USAGE_VALUE, context_usage_message,
+};
 pub(super) use reasoning::{
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
     reasoning_effort_value, resolve_reasoning_effort,

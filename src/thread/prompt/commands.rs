@@ -133,7 +133,6 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
                 .unwrap_or(1);
             Some(SessionCommand::Undo { num_turns })
         }
-        "/context" => Some(SessionCommand::Context),
         _ => None,
     }
 }
@@ -199,9 +198,6 @@ pub(super) async fn dispatch_session_command(
             session::modes::handle_plan_mode_command(inner, raw_value, mode).await?,
         )),
         SessionCommand::PlanPrompt { prompt } => Ok(CommandDispatchOutcome::PlanPrompt(prompt)),
-        SessionCommand::Context => Ok(CommandDispatchOutcome::Stop(
-            session::controls::handle_context_command(inner).await?,
-        )),
         SessionCommand::Rename { name } => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_rename_command(inner, name).await?,
         )),
@@ -260,7 +256,6 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
         .input(AvailableCommandInput::Unstructured(
             UnstructuredCommandInput::new("optional mode or request"),
         )),
-        AvailableCommand::new("context", "Show current context window usage"),
         AvailableCommand::new("rename", "Rename the current thread").input(
             AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("new thread name")),
         ),

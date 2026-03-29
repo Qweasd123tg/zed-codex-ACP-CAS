@@ -1,5 +1,5 @@
 //! Обработчики slash-команд управления сессией (без `/resume`).
-//! Сюда вынесены compact/undo/context/archive/rename ветки.
+//! Сюда вынесены compact/undo/archive/rename ветки.
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,31 +25,8 @@ use tracing::warn;
 pub(in crate::thread) async fn handle_compact_command(
     inner: &mut ThreadInner,
 ) -> Result<StopReason, Error> {
-    if inner.compaction_in_progress {
-        inner
-            .client
-            .send_agent_text("Context compaction is already running.")
-            .await;
-        return Ok(StopReason::EndTurn);
-    }
-
-    inner
-        .app
-        .thread_compact_start(ThreadCompactStartParams {
-            thread_id: inner.thread_id.clone(),
-        })
-        .await?;
-    inner.compaction_in_progress = true;
-    // Статистика токенов может оставаться устаревшей (часто 100%) до следующего завершённого turn модели.
-    // Сразу после /compact очищаем кэш usage, чтобы процент контекста не вводил в заблуждение.
-    inner.last_used_tokens = None;
-    notify_config_update(inner).await;
-    inner
-        .client
-        .send_agent_text(
-            "Context compaction started. Wait for \"Context compacted.\" before sending the next prompt.",
-        )
-        .await;
+    let message = start_context_compaction(inner).await?;
+    inner.client.send_agent_text(message).await;
     Ok(StopReason::EndTurn)
 }
 
@@ -88,37 +65,25 @@ pub(in crate::thread) async fn handle_undo_command(
     Ok(StopReason::EndTurn)
 }
 
-pub(in crate::thread) async fn handle_context_command(
+pub(in crate::thread) async fn start_context_compaction(
     inner: &mut ThreadInner,
-) -> Result<StopReason, Error> {
-    match (inner.last_used_tokens, inner.context_window_size) {
-        (Some(used), Some(size)) if size > 0 => {
-            let percent = (used as f64 / size as f64) * 100.0;
-            inner
-                .client
-                .send_agent_text(format!(
-                    "Context usage: {used}/{size} tokens ({percent:.1}%)."
-                ))
-                .await;
-        }
-        (Some(used), None) => {
-            inner
-                .client
-                .send_agent_text(format!(
-                    "Context usage: {used} tokens (window size is not available yet)."
-                ))
-                .await;
-        }
-        _ => {
-            inner
-                .client
-                .send_agent_text(
-                    "Context usage is not available yet. App-server sends it only after the first completed model turn in this session.",
-                )
-                .await;
-        }
+) -> Result<String, Error> {
+    if inner.compaction_in_progress {
+        return Ok("Context compaction is already running.".to_string());
     }
-    Ok(StopReason::EndTurn)
+
+    inner
+        .app
+        .thread_compact_start(ThreadCompactStartParams {
+            thread_id: inner.thread_id.clone(),
+        })
+        .await?;
+    inner.compaction_in_progress = true;
+    // Статистика токенов может оставаться устаревшей (часто 100%) до следующего завершённого turn модели.
+    // Сразу после /compact очищаем кэш usage, чтобы процент контекста не вводил в заблуждение.
+    inner.last_used_tokens = None;
+    notify_config_update(inner).await;
+    Ok("Context compaction started. Wait for \"Context compacted.\" before sending the next prompt.".to_string())
 }
 
 pub(in crate::thread) async fn handle_archive_command(

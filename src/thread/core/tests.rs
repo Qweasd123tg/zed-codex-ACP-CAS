@@ -196,15 +196,6 @@ fn parses_undo_command_with_optional_count() {
 }
 
 #[test]
-fn parses_context_command() {
-    let prompt: Vec<ContentBlock> = vec!["/context".into()];
-    assert_eq!(
-        parse_session_command(&prompt),
-        Some(SessionCommand::Context)
-    );
-}
-
-#[test]
 fn parses_rename_command_with_name() {
     let prompt: Vec<ContentBlock> = vec!["/rename My current thread".into()];
     assert_eq!(

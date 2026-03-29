@@ -21,6 +21,7 @@ use super::{
 };
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
+use crate::thread::session_usage_cache::{context_usage_cache_path, restore_cached_context_usage};
 use codex_app_server_protocol::ThreadStartResponse;
 use tracing::warn;
 
@@ -206,6 +207,7 @@ pub(in crate::thread) async fn thread_resume_with_startup_retry(
 impl Thread {
     async fn build_started_thread(
         session_id: SessionId,
+        codex_home: PathBuf,
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
@@ -234,6 +236,7 @@ impl Thread {
                 session_id: session_id.clone(),
                 app,
                 thread_id: start.thread.id,
+                context_usage_cache_path: context_usage_cache_path(&codex_home),
                 session_mcp_config_overrides,
                 workspace_cwd: cwd,
                 client: SessionClient::new(session_id, client_capabilities),
@@ -299,6 +302,7 @@ impl Thread {
 
         Ok(Self::build_started_thread(
             session_id,
+            config.codex_home.clone(),
             cwd,
             client_capabilities,
             session_mcp_config_overrides,
@@ -333,6 +337,7 @@ impl Thread {
         let session_id = SessionId::new(start.thread.id.clone());
         let thread = Self::build_started_thread(
             session_id.clone(),
+            config.codex_home.clone(),
             cwd,
             client_capabilities,
             session_mcp_config_overrides,
@@ -391,6 +396,12 @@ impl Thread {
             .unwrap_or_default();
         let reasoning_effort =
             resolve_reasoning_effort(&models, &resume.model, resume.reasoning_effort);
+        let context_usage_cache_path = context_usage_cache_path(&config.codex_home);
+        let cached_context_usage = restore_cached_context_usage(
+            &context_usage_cache_path,
+            &resume.thread.id,
+            &resume.thread.turns,
+        );
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
         let mut agent_labels = HashMap::new();
         remember_agent_label(
@@ -405,6 +416,7 @@ impl Thread {
                 session_id: session_id.clone(),
                 app,
                 thread_id: resume.thread.id,
+                context_usage_cache_path,
                 session_mcp_config_overrides,
                 workspace_cwd: cwd,
                 client: SessionClient::new(session_id, client_capabilities),
@@ -418,8 +430,8 @@ impl Thread {
                 reasoning_effort,
                 agent_labels,
                 compaction_in_progress: false,
-                last_used_tokens: None,
-                context_window_size: None,
+                last_used_tokens: cached_context_usage.map(|(used, _)| used),
+                context_window_size: cached_context_usage.map(|(_, size)| size),
                 models,
                 active_turn_id: None,
                 active_turn_mode_kind: None,
