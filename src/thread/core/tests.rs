@@ -196,30 +196,6 @@ fn parses_undo_command_with_optional_count() {
 }
 
 #[test]
-fn parses_reasoning_command_without_value() {
-    let prompt: Vec<ContentBlock> = vec!["/reasoning".into()];
-    assert_eq!(
-        parse_session_command(&prompt),
-        Some(SessionCommand::Reasoning {
-            raw_value: None,
-            effort: None,
-        })
-    );
-}
-
-#[test]
-fn parses_reasoning_command_with_value() {
-    let prompt: Vec<ContentBlock> = vec!["/reasoning xhigh".into()];
-    assert_eq!(
-        parse_session_command(&prompt),
-        Some(SessionCommand::Reasoning {
-            raw_value: Some("xhigh".to_string()),
-            effort: Some(ReasoningEffort::XHigh),
-        })
-    );
-}
-
-#[test]
 fn parses_context_command() {
     let prompt: Vec<ContentBlock> = vec!["/context".into()];
     assert_eq!(

@@ -150,7 +150,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             current_effort_value,
             reasoning_options,
         )
-        .category(SessionConfigOptionCategory::Model)
+        .category(SessionConfigOptionCategory::ThoughtLevel)
         .description("Choose how much reasoning effort Codex should use"),
     );
 

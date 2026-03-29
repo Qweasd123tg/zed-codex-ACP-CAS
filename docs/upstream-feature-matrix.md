@@ -24,7 +24,7 @@
 
 - По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `7/15` полных совпадений, `1/15` частичное совпадение и `7/15` явных пробелов.
 - Основные пробелы относительно официального адаптера: `close_session`, review/init/logout-команды, полноценное client-side выполнение `DynamicToolCall` и forwarding warning-сообщений.
-- Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/reasoning`, `/plan`, `/context`, app-server-ориентированный flow восстановления тредов и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
+- Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/plan`, `/context`, app-server-ориентированный flow восстановления тредов и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
 
 ## 1. Parity С Официальным `zed codex acp`
 
@@ -57,7 +57,6 @@
 | `/archive [partial_id]`, `/unarchive [partial_id]` | `codex` (`thread/archive`, `thread/unarchive`) + форк | нативные RPC есть в `codex`; ACP-ветка форка добавлена локально `2026-03-29` | `[ ]` | `[x]` | `/archive` скрывает тред из обычных списков без hard delete, `/unarchive` возвращает archived тред обратно. Если архивируется текущий активный тред, форк сразу поднимает fresh backend-thread под той же ACP-сессией. Для неоднозначных query archive/unarchive используют picker с полным `raw_input`, как `/resume`. |
 | `/rename <name>` | `codex` (`set_thread_name`) + форк | нативный op есть в `codex`; ACP-ветка форка добавлена локально `2026-03-29` | `[ ]` | `[x]` | Использует `thread/name/set`, сразу обновляет `SessionInfoUpdate` в ACP и поднимает `thread.name` в `/threads` и `/resume`. |
 | `ACP_DISABLE_AUTO_RESTORE=1` для ручного restore-flow | форк | `2026-03-29`, локально | `[ ]` | `[x]` | Capability `load_session/resume_session` остаются видимыми для Zed, но внутри `src/codex_agent.rs` automatic backend-restore заменяется на fresh backend-thread; старый диалог подтягивается вручную через `/resume`. |
-| `/reasoning` | форк | `2026-02-25`, `e1ace61b` | `[ ]` | `[x]` | Вынесено в `src/thread/features/session/modes.rs`. |
 | `/plan` mode и one-shot planning | форк | базовая ветка `2026-02-25`, `30e0d57a`; поведение стабилизировано `2026-02-26`, `f537f1d5` | `[ ]` | `[x]` | Логика в `src/thread/features/plan/*`, prompt-flow в `src/thread/prompt/flow.rs`. |
 | `/context` | форк | `2026-02-25`, `e1ace61b` | `[ ]` | `[x]` | Session-level команда для текущего usage/context состояния. |
 | Collab tool-call UI | форк | `2026-02-24`, `45c084ee` | `[ ]` | `[x]` | Отдельный доменный срез в `src/thread/features/collab/*`. |

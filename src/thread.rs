@@ -199,10 +199,6 @@ enum SessionCommand {
     Undo {
         num_turns: u32,
     },
-    Reasoning {
-        raw_value: Option<String>,
-        effort: Option<ReasoningEffort>,
-    },
     PlanMode {
         raw_value: Option<String>,
         mode: Option<ModeKind>,

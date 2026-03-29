@@ -1,5 +1,5 @@
 //! Обработчики slash-команд управления сессией (без `/resume`).
-//! Сюда вынесены compact/undo/reasoning/plan/context ветки.
+//! Сюда вынесены compact/undo/context/archive/rename ветки.
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
