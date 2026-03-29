@@ -117,13 +117,6 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
-    if let Some(rest) = text.strip_prefix("/delete") {
-        let query = rest.trim();
-        return Some(SessionCommand::Archive {
-            thread_id: (!query.is_empty()).then(|| query.to_string()),
-        });
-    }
-
     if let Some(rest) = text.strip_prefix("/unarchive") {
         let query = rest.trim();
         return Some(SessionCommand::Unarchive {
@@ -251,13 +244,6 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
         AvailableCommand::new(
             "archive",
             "Archive the current thread or a matched thread so it disappears from normal lists",
-        )
-        .input(AvailableCommandInput::Unstructured(
-            UnstructuredCommandInput::new("optional partial thread id"),
-        )),
-        AvailableCommand::new(
-            "delete",
-            "Alias for /archive. Hides a thread from normal lists without hard deleting data",
         )
         .input(AvailableCommandInput::Unstructured(
             UnstructuredCommandInput::new("optional partial thread id"),

@@ -260,15 +260,6 @@ fn parses_archive_command_with_query() {
 }
 
 #[test]
-fn parses_delete_command_without_query() {
-    let prompt: Vec<ContentBlock> = vec!["/delete".into()];
-    assert_eq!(
-        parse_session_command(&prompt),
-        Some(SessionCommand::Archive { thread_id: None })
-    );
-}
-
-#[test]
 fn parses_unarchive_command_with_query() {
     let prompt: Vec<ContentBlock> = vec!["/unarchive old-thread".into()];
     assert_eq!(
