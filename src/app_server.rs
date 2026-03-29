@@ -8,14 +8,15 @@ use std::process::Stdio;
 use agent_client_protocol::Error;
 use anyhow::Context;
 use codex_app_server_protocol::{
-    ClientInfo, ClientNotification, ClientRequest, FileChangeRequestApprovalResponse,
-    InitializeCapabilities, InitializeParams, InitializeResponse, JSONRPCError, JSONRPCErrorError,
-    JSONRPCMessage, JSONRPCResponse, ModelListParams, ModelListResponse,
-    PermissionsRequestApprovalResponse, RequestId, ThreadArchiveParams, ThreadArchiveResponse,
-    ThreadCompactStartParams, ThreadCompactStartResponse, ThreadListParams, ThreadListResponse,
-    ThreadReadParams, ThreadReadResponse, ThreadResumeParams, ThreadResumeResponse,
-    ThreadRollbackParams, ThreadRollbackResponse, ThreadSetNameParams, ThreadSetNameResponse,
-    ThreadStartParams, ThreadStartResponse, ThreadUnarchiveParams, ThreadUnarchiveResponse,
+    ClientInfo, ClientNotification, ClientRequest, DynamicToolCallResponse,
+    FileChangeRequestApprovalResponse, InitializeCapabilities, InitializeParams,
+    InitializeResponse, JSONRPCError, JSONRPCErrorError, JSONRPCMessage, JSONRPCResponse,
+    ModelListParams, ModelListResponse, PermissionsRequestApprovalResponse, RequestId,
+    ThreadArchiveParams, ThreadArchiveResponse, ThreadCompactStartParams,
+    ThreadCompactStartResponse, ThreadListParams, ThreadListResponse, ThreadReadParams,
+    ThreadReadResponse, ThreadResumeParams, ThreadResumeResponse, ThreadRollbackParams,
+    ThreadRollbackResponse, ThreadSetNameParams, ThreadSetNameResponse, ThreadStartParams,
+    ThreadStartResponse, ThreadUnarchiveParams, ThreadUnarchiveResponse,
     ToolRequestUserInputResponse, TurnInterruptParams, TurnInterruptResponse, TurnStartParams,
     TurnStartResponse,
 };
@@ -283,6 +284,15 @@ impl AppServerProcess {
         &mut self,
         request_id: RequestId,
         response: PermissionsRequestApprovalResponse,
+    ) -> Result<(), Error> {
+        self.send_server_request_response(request_id, response)
+            .await
+    }
+
+    pub async fn send_dynamic_tool_call_response(
+        &mut self,
+        request_id: RequestId,
+        response: DynamicToolCallResponse,
     ) -> Result<(), Error> {
         self.send_server_request_response(request_id, response)
             .await

@@ -5,6 +5,8 @@ use crate::thread::{SessionClient, ThreadInner, ThreadItem};
 
 #[path = "command.rs"]
 pub(in crate::thread) mod command;
+#[path = "dynamic.rs"]
+pub(in crate::thread) mod dynamic;
 #[path = "mcp.rs"]
 pub(in crate::thread) mod mcp;
 #[path = "web_image.rs"]
@@ -44,6 +46,16 @@ pub(in crate::thread) async fn handle_item_started(
             ..
         } => {
             mcp::emit_mcp_tool_call_started(inner, id, server, tool, status, arguments).await;
+            None
+        }
+        ThreadItem::DynamicToolCall {
+            id,
+            tool,
+            arguments,
+            status,
+            ..
+        } => {
+            dynamic::emit_dynamic_tool_call_started(inner, id, tool, status, arguments).await;
             None
         }
         ThreadItem::WebSearch { id, query, .. } => {
@@ -94,6 +106,25 @@ pub(in crate::thread) async fn handle_item_completed(
                 status,
                 result.map(|result| serde_json::json!({ "result": result })),
                 error.map(|error| serde_json::json!({ "error": error })),
+            )
+            .await;
+            None
+        }
+        ThreadItem::DynamicToolCall {
+            id,
+            status,
+            content_items,
+            success,
+            duration_ms,
+            ..
+        } => {
+            dynamic::emit_dynamic_tool_call_completed(
+                inner,
+                id,
+                status,
+                content_items,
+                success,
+                duration_ms,
             )
             .await;
             None
@@ -158,6 +189,30 @@ pub(in crate::thread) async fn replay_item(
                     arguments,
                     result_raw_output: result.map(|result| serde_json::json!({ "result": result })),
                     error_raw_output: error.map(|error| serde_json::json!({ "error": error })),
+                },
+            )
+            .await;
+            None
+        }
+        ThreadItem::DynamicToolCall {
+            id,
+            tool,
+            arguments,
+            status,
+            content_items,
+            success,
+            duration_ms,
+        } => {
+            dynamic::replay_dynamic_tool_call(
+                client,
+                dynamic::ReplayDynamicToolCall {
+                    id,
+                    tool,
+                    arguments,
+                    status,
+                    content_items,
+                    success,
+                    duration_ms,
                 },
             )
             .await;

@@ -1,7 +1,9 @@
 //! Доменные трансляторы статусов app-server -> ACP для tool-call карточек.
 
 use agent_client_protocol::ToolCallStatus;
-use codex_app_server_protocol::{CommandExecutionStatus, McpToolCallStatus, PatchApplyStatus};
+use codex_app_server_protocol::{
+    CommandExecutionStatus, DynamicToolCallStatus, McpToolCallStatus, PatchApplyStatus,
+};
 
 // Держим маппинг статусов команд явным, чтобы UI-бейджи были предсказуемыми.
 pub(in crate::thread) fn map_command_status(
@@ -44,5 +46,18 @@ pub(in crate::thread) fn map_mcp_status(
     match status {
         McpToolCallStatus::Completed => ToolCallStatus::Completed,
         McpToolCallStatus::InProgress | McpToolCallStatus::Failed => ToolCallStatus::Failed,
+    }
+}
+
+pub(in crate::thread) fn map_dynamic_tool_status(
+    status: DynamicToolCallStatus,
+    assume_in_progress: bool,
+) -> ToolCallStatus {
+    if assume_in_progress {
+        return ToolCallStatus::InProgress;
+    }
+    match status {
+        DynamicToolCallStatus::Completed => ToolCallStatus::Completed,
+        DynamicToolCallStatus::InProgress | DynamicToolCallStatus::Failed => ToolCallStatus::Failed,
     }
 }

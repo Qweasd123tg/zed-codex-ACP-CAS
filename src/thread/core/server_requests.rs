@@ -47,11 +47,9 @@ pub(super) async fn handle_server_request(
             approvals::permissions::handle_permissions_request_approval(inner, request_id, params)
                 .await
         }
-        ServerRequest::DynamicToolCall { request_id, .. } => {
-            protocol_contract::reject_unsupported_server_request(
-                &mut inner.app,
-                request_id,
-                "item/tool/call",
+        ServerRequest::DynamicToolCall { request_id, params } => {
+            crate::thread::features::dynamic_tool_call::handle_dynamic_tool_call(
+                inner, request_id, params,
             )
             .await
         }
