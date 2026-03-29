@@ -1,8 +1,10 @@
 //! Применение выбранного thread: `thread_resume`, sync конфигурации и UI-уведомление.
 
 use agent_client_protocol::{Error, SessionInfoUpdate, SessionUpdate, StopReason};
+use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::ThreadResumeParams;
 use std::time::Duration;
+use tracing::warn;
 
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use crate::thread::features::resume::common::thread_display_title;
@@ -84,12 +86,64 @@ pub(in crate::thread) async fn handle_resume_command(
 }
 
 async fn flush_resume_transport_state(inner: &mut ThreadInner) -> Result<(), Error> {
-    let _ = inner
-        .app
-        .discard_background_messages(
+    for _ in 0..RESUME_TRANSPORT_FLUSH_MAX_MESSAGES {
+        let message = match tokio::time::timeout(
             Duration::from_millis(RESUME_TRANSPORT_FLUSH_TIMEOUT_MS),
-            RESUME_TRANSPORT_FLUSH_MAX_MESSAGES,
+            inner.app.next_message(),
         )
-        .await?;
+        .await
+        {
+            Ok(message) => message?,
+            Err(_) => break,
+        };
+        handle_stale_resume_message(inner, message).await?;
+    }
+    Ok(())
+}
+
+async fn handle_stale_resume_message(
+    inner: &mut ThreadInner,
+    message: JSONRPCMessage,
+) -> Result<(), Error> {
+    match message {
+        JSONRPCMessage::Notification(notification) => {
+            warn!(
+                method = %notification.method,
+                "dropping stale app-server notification during thread switch"
+            );
+        }
+        JSONRPCMessage::Request(request) => {
+            warn!(
+                method = %request.method,
+                "rejecting stale app-server request during thread switch"
+            );
+            inner
+                .app
+                .send_server_request_error(
+                    request.id,
+                    -32600,
+                    format!(
+                        "Dropping stale app-server request `{}` during thread switch",
+                        request.method
+                    ),
+                    None,
+                )
+                .await?;
+        }
+        JSONRPCMessage::Response(response) => {
+            warn!(
+                id = ?response.id,
+                "dropping unexpected app-server response during thread switch"
+            );
+        }
+        JSONRPCMessage::Error(error) => {
+            warn!(
+                id = ?error.id,
+                message = error.error.message,
+                "dropping unexpected app-server error during thread switch"
+            );
+        }
+    }
+
     Ok(())
 }

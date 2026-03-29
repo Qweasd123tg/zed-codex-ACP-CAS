@@ -23,7 +23,7 @@
 ## Короткий Вывод
 
 - По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `7/15` полных совпадений, `1/15` частичное совпадение и `7/15` явных пробелов.
-- Основные пробелы относительно официального адаптера: `close_session`, review/init/logout-команды, `DynamicToolCall`, forwarding warning-сообщений и ACP MCP passthrough.
+- Основные пробелы относительно официального адаптера: `close_session`, review/init/logout-команды, `DynamicToolCall` и forwarding warning-сообщений.
 - Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/reasoning`, `/plan`, `/context`, app-server-ориентированный flow восстановления тредов и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
 
 ## 1. Parity С Официальным `zed codex acp`
@@ -44,7 +44,7 @@
 | `RequestPermissions` tool | `codex`, sync в `codex-acp-upstream` | `2026-03-08`, `e6b93841c`; в official adapter попало через `2026-03-13`, `be20828` | `[x]` | `[x]` | У нас есть отдельная typed-ветка `ServerRequest::PermissionsRequestApproval` и ACP popup в `src/thread/features/approvals/permissions.rs`. |
 | `DynamicToolCall` (`item/tool/call`) | `codex`, sync в `codex-acp-upstream` | `2026-02-25`, `a0fd94bde`; в official adapter попало через `2026-03-13`, `be20828` | `[x]` | `[~]` | В `src/thread/core/server_requests.rs` метод уже распознается, но сейчас сразу уходит в `reject_unsupported_server_request`. |
 | Forwarding warning-сообщений в клиент | `codex-acp-upstream` | `2026-03-05`, `a278432` | `[x]` | `[ ]` | В `src/thread/features/notification/mod.rs` warning-ветка отдельно не поднимается, неизвестные server notifications просто игнорируются. |
-| ACP MCP passthrough + sanitize имен серверов | `codex-acp-upstream` | `2026-03-05`, `678a99e` | `[x]` | `[ ]` | В `src/codex_agent.rs` форк прямо пишет, что `mcp_servers` из ACP пока игнорируются в app-server режиме. |
+| ACP MCP passthrough + sanitize имен серверов | `codex-acp-upstream` | `2026-03-05`, `678a99e` | `[x]` | `[~]` | В форке `mcp_servers` из ACP теперь маппятся в session-scoped `thread/start` / `thread/resume` `config` overrides и переживают replacement-thread внутри одной ACP-сессии. Поддержаны `stdio` и `http`; ACP `sse` пока явно игнорируется. |
 
 ## 2. Расширения Форка Поверх Официального Адаптера
 
@@ -81,5 +81,5 @@
 1. `close_session`, потому что это чистый parity-gap с официальным адаптером и понятный ACP-level контракт.
 2. `DynamicToolCall`, потому что сейчас у нас есть только распознавание метода без end-to-end поведения.
 3. Warning forwarding, потому что это маленький diff по коду, но заметно улучшает UX после compaction и других advisory-событий.
-4. ACP MCP passthrough, если нужен parity с официальным адаптером, а не только app-server-centric сценарий.
+4. Довести MCP passthrough до полной parity-ветки, если потребуется поддержка ACP `sse` или отдельный UX для MCP auth/status.
 5. Документирование reconnect stall-guard и связанной turn-логики в архитектурной карте, чтобы docs не отставали от кода.

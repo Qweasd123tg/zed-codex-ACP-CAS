@@ -5,6 +5,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use agent_client_protocol::{
+    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
+};
+use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
+use serde_json::Value as JsonValue;
+
 use super::session_config::{
     policy_to_mode, resolve_reasoning_effort, to_app_approval, to_app_sandbox_mode,
 };
@@ -20,6 +26,148 @@ use tracing::warn;
 
 const RESUME_STARTUP_RETRY_ATTEMPTS: usize = 6;
 const RESUME_STARTUP_RETRY_DELAY_MS: u64 = 300;
+
+pub(crate) fn build_session_mcp_config_overrides(
+    base_mcp_servers: &HashMap<String, McpServerConfig>,
+    cwd: &PathBuf,
+    mcp_servers: Vec<McpServer>,
+) -> Result<Option<HashMap<String, JsonValue>>, Error> {
+    if mcp_servers.is_empty() {
+        return Ok(None);
+    }
+
+    let mut merged_mcp_servers = base_mcp_servers.clone();
+    let mut saw_supported_server = false;
+
+    for mcp_server in mcp_servers {
+        match mcp_server {
+            McpServer::Http(server) => {
+                saw_supported_server = true;
+                insert_http_mcp_server(&mut merged_mcp_servers, server);
+            }
+            McpServer::Stdio(server) => {
+                saw_supported_server = true;
+                insert_stdio_mcp_server(&mut merged_mcp_servers, cwd, server);
+            }
+            McpServer::Sse(McpServerSse { name, .. }) => {
+                warn!(
+                    server_name = %name,
+                    "ACP requested an SSE MCP server, but codex app-server currently supports only stdio/streamable HTTP passthrough; ignoring server"
+                );
+            }
+            _ => {
+                warn!("ACP requested an unknown MCP server transport; ignoring server");
+            }
+        }
+    }
+
+    if !saw_supported_server {
+        return Ok(None);
+    }
+
+    let mut overrides = HashMap::new();
+    overrides.insert(
+        "mcp_servers".to_string(),
+        serde_json::to_value(merged_mcp_servers)
+            .map_err(|err| Error::internal_error().data(err.to_string()))?,
+    );
+    Ok(Some(overrides))
+}
+
+fn insert_http_mcp_server(target: &mut HashMap<String, McpServerConfig>, server: McpServerHttp) {
+    let McpServerHttp {
+        name, url, headers, ..
+    } = server;
+    target.insert(
+        normalize_mcp_server_name(&name),
+        McpServerConfig {
+            transport: McpServerTransportConfig::StreamableHttp {
+                url,
+                bearer_token_env_var: None,
+                http_headers: headers_to_map(headers),
+                env_http_headers: None,
+            },
+            required: false,
+            enabled: true,
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            disabled_tools: None,
+            enabled_tools: None,
+            disabled_reason: None,
+            scopes: None,
+            oauth_resource: None,
+        },
+    );
+}
+
+fn insert_stdio_mcp_server(
+    target: &mut HashMap<String, McpServerConfig>,
+    cwd: &PathBuf,
+    server: McpServerStdio,
+) {
+    let McpServerStdio {
+        name,
+        command,
+        args,
+        env,
+        ..
+    } = server;
+    target.insert(
+        normalize_mcp_server_name(&name),
+        McpServerConfig {
+            transport: McpServerTransportConfig::Stdio {
+                command: command.display().to_string(),
+                args,
+                env: env_to_map(env),
+                env_vars: vec![],
+                cwd: Some(cwd.clone()),
+            },
+            required: false,
+            enabled: true,
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            disabled_tools: None,
+            enabled_tools: None,
+            disabled_reason: None,
+            scopes: None,
+            oauth_resource: None,
+        },
+    );
+}
+
+fn normalize_mcp_server_name(name: &str) -> String {
+    let normalized = name.replace(|c: char| c.is_whitespace(), "_");
+    if normalized.is_empty() {
+        "mcp_server".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn headers_to_map(headers: Vec<HttpHeader>) -> Option<HashMap<String, String>> {
+    if headers.is_empty() {
+        None
+    } else {
+        Some(
+            headers
+                .into_iter()
+                .map(|header| (header.name, header.value))
+                .collect(),
+        )
+    }
+}
+
+fn env_to_map(env: Vec<EnvVariable>) -> Option<HashMap<String, String>> {
+    if env.is_empty() {
+        None
+    } else {
+        Some(
+            env.into_iter()
+                .map(|entry| (entry.name, entry.value))
+                .collect(),
+        )
+    }
+}
 
 fn is_retryable_missing_rollout_resume_error(error: &Error) -> bool {
     let message = error.to_string();
@@ -60,6 +208,7 @@ impl Thread {
         session_id: SessionId,
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         mut app: AppServerProcess,
         start: ThreadStartResponse,
     ) -> Self {
@@ -85,6 +234,7 @@ impl Thread {
                 session_id: session_id.clone(),
                 app,
                 thread_id: start.thread.id,
+                session_mcp_config_overrides,
                 workspace_cwd: cwd,
                 client: SessionClient::new(session_id, client_capabilities),
                 approval_policy: start.approval_policy,
@@ -129,6 +279,7 @@ impl Thread {
         config: &Config,
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
     ) -> Result<Self, Error> {
         let mut app = AppServerProcess::spawn("codex").await?;
         app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
@@ -140,11 +291,20 @@ impl Thread {
                 cwd: Some(cwd.to_string_lossy().to_string()),
                 approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
                 sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
+                config: session_mcp_config_overrides.clone(),
                 ..Default::default()
             })
             .await?;
 
-        Ok(Self::build_started_thread(session_id, cwd, client_capabilities, app, start).await)
+        Ok(Self::build_started_thread(
+            session_id,
+            cwd,
+            client_capabilities,
+            session_mcp_config_overrides,
+            app,
+            start,
+        )
+        .await)
     }
 
     // Сначала запускаем сессию app-server, чтобы последующие capability-вызовы имели валидный session id.
@@ -152,6 +312,7 @@ impl Thread {
         config: &Config,
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
     ) -> Result<(SessionId, Self), Error> {
         let mut app = AppServerProcess::spawn("codex").await?;
         app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
@@ -163,14 +324,21 @@ impl Thread {
                 cwd: Some(cwd.to_string_lossy().to_string()),
                 approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
                 sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
+                config: session_mcp_config_overrides.clone(),
                 ..Default::default()
             })
             .await?;
 
         let session_id = SessionId::new(start.thread.id.clone());
-        let thread =
-            Self::build_started_thread(session_id.clone(), cwd, client_capabilities, app, start)
-                .await;
+        let thread = Self::build_started_thread(
+            session_id.clone(),
+            cwd,
+            client_capabilities,
+            session_mcp_config_overrides,
+            app,
+            start,
+        )
+        .await;
 
         Ok((session_id, thread))
     }
@@ -180,6 +348,7 @@ impl Thread {
         config: &Config,
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
     ) -> Result<Self, Error> {
         let mut app = AppServerProcess::spawn("codex").await?;
         app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
@@ -191,6 +360,7 @@ impl Thread {
             cwd: Some(cwd.to_string_lossy().to_string()),
             approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
             sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
+            config: session_mcp_config_overrides.clone(),
             ..Default::default()
         };
 
@@ -206,6 +376,7 @@ impl Thread {
                     config,
                     cwd,
                     client_capabilities,
+                    session_mcp_config_overrides,
                 )
                 .await;
             }
@@ -233,6 +404,7 @@ impl Thread {
                 session_id: session_id.clone(),
                 app,
                 thread_id: resume.thread.id,
+                session_mcp_config_overrides,
                 workspace_cwd: cwd,
                 client: SessionClient::new(session_id, client_capabilities),
                 approval_policy: resume.approval_policy,
@@ -318,8 +490,11 @@ impl Thread {
 
 #[cfg(test)]
 mod tests {
-    use super::is_retryable_missing_rollout_resume_error;
-    use agent_client_protocol::Error;
+    use super::{build_session_mcp_config_overrides, is_retryable_missing_rollout_resume_error};
+    use agent_client_protocol::{Error, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
+    use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
 
     #[test]
     fn detects_retryable_missing_rollout_resume_error() {
@@ -339,5 +514,93 @@ mod tests {
         let error = Error::internal_error()
             .data("Internal error: \"no rollout found for thread id 019-test\"");
         assert!(is_retryable_missing_rollout_resume_error(&error));
+    }
+
+    #[test]
+    fn builds_session_mcp_overrides_for_stdio_and_http_servers() {
+        let cwd = PathBuf::from("/tmp/workspace");
+        let overrides = build_session_mcp_config_overrides(
+            &HashMap::new(),
+            &cwd,
+            vec![
+                McpServer::Stdio(
+                    McpServerStdio::new("local files", "/bin/mcp-server")
+                        .args(vec!["--root".to_string(), "/tmp".to_string()]),
+                ),
+                McpServer::Http(McpServerHttp::new(
+                    "remote tools",
+                    "https://example.com/mcp",
+                )),
+            ],
+        )
+        .expect("mcp overrides")
+        .expect("non-empty overrides");
+
+        let mcp_servers = overrides
+            .get("mcp_servers")
+            .and_then(|value| value.as_object())
+            .expect("mcp_servers object");
+
+        let stdio = mcp_servers
+            .get("local_files")
+            .expect("normalized stdio server");
+        assert_eq!(
+            stdio.get("command").and_then(|value| value.as_str()),
+            Some("/bin/mcp-server")
+        );
+        assert_eq!(
+            stdio.get("cwd").and_then(|value| value.as_str()),
+            Some("/tmp/workspace")
+        );
+
+        let http = mcp_servers
+            .get("remote_tools")
+            .expect("normalized http server");
+        assert_eq!(
+            http.get("url").and_then(|value| value.as_str()),
+            Some("https://example.com/mcp")
+        );
+    }
+
+    #[test]
+    fn keeps_base_mcp_servers_and_ignores_sse_servers() {
+        let cwd = PathBuf::from("/tmp/workspace");
+        let mut base = HashMap::new();
+        base.insert(
+            "base".to_string(),
+            McpServerConfig {
+                transport: McpServerTransportConfig::Stdio {
+                    command: "/bin/base-mcp".to_string(),
+                    args: vec![],
+                    env: None,
+                    env_vars: vec![],
+                    cwd: None,
+                },
+                required: false,
+                enabled: true,
+                disabled_reason: None,
+                startup_timeout_sec: None,
+                tool_timeout_sec: None,
+                enabled_tools: None,
+                disabled_tools: None,
+                scopes: None,
+                oauth_resource: None,
+            },
+        );
+
+        let overrides = build_session_mcp_config_overrides(
+            &base,
+            &cwd,
+            vec![McpServer::Sse(McpServerSse::new(
+                "remote sse",
+                "https://example.com/sse",
+            ))],
+        )
+        .expect("sse passthrough should not error");
+
+        assert!(
+            overrides.is_none(),
+            "unsupported-only inputs should not override base config"
+        );
     }
 }

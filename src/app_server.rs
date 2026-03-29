@@ -252,29 +252,6 @@ impl AppServerProcess {
         self.read_message().await
     }
 
-    pub fn clear_pending_messages(&mut self) -> usize {
-        let cleared = self.pending_messages.len();
-        self.pending_messages.clear();
-        cleared
-    }
-
-    pub async fn discard_background_messages(
-        &mut self,
-        timeout: std::time::Duration,
-        max_messages: usize,
-    ) -> Result<usize, Error> {
-        let mut discarded = self.clear_pending_messages();
-        for _ in 0..max_messages {
-            let message = match tokio::time::timeout(timeout, self.next_message()).await {
-                Ok(message) => message?,
-                Err(_) => break,
-            };
-            drop(message);
-            discarded += 1;
-        }
-        Ok(discarded)
-    }
-
     pub async fn send_command_approval_response(
         &mut self,
         request_id: RequestId,

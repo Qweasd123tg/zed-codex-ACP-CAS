@@ -28,7 +28,7 @@ use std::{
 };
 use tracing::{debug, info};
 
-use crate::thread::Thread;
+use crate::thread::{Thread, build_session_mcp_config_overrides};
 
 const EXT_THREAD_ROLLBACK_METHODS: [&str; 4] = [
     "zed.dev/codex/thread/rollback",
@@ -230,15 +230,26 @@ impl Agent for CodexAgent {
             cwd, mcp_servers, ..
         } = request;
 
-        if !mcp_servers.is_empty() {
+        let session_mcp_config_overrides =
+            build_session_mcp_config_overrides(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
+        if let Some(config) = &session_mcp_config_overrides {
             info!(
-                "MCP server passthrough from ACP is not yet mapped in app-server mode; ignoring {} MCP server(s)",
-                mcp_servers.len()
+                mcp_server_count = config
+                    .get("mcp_servers")
+                    .and_then(|value| value.as_object())
+                    .map(|servers| servers.len())
+                    .unwrap_or(0),
+                "Applied ACP MCP servers as session-scoped app-server config overrides"
             );
         }
 
-        let (session_id, thread) =
-            Thread::start_session(&self.config, cwd, self.client_capabilities.clone()).await?;
+        let (session_id, thread) = Thread::start_session(
+            &self.config,
+            cwd,
+            self.client_capabilities.clone(),
+            session_mcp_config_overrides,
+        )
+        .await?;
         let thread = Rc::new(thread);
         let load = thread.load().await?;
         let notify_thread = thread.clone();
@@ -273,12 +284,8 @@ impl Agent for CodexAgent {
             ..
         } = request;
 
-        if !mcp_servers.is_empty() {
-            info!(
-                "MCP server passthrough from ACP is not yet mapped in app-server mode; ignoring {} MCP server(s)",
-                mcp_servers.len()
-            );
-        }
+        let session_mcp_config_overrides =
+            build_session_mcp_config_overrides(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
 
         let thread = if self.auto_restore_enabled {
             Rc::new(
@@ -287,6 +294,7 @@ impl Agent for CodexAgent {
                     &self.config,
                     cwd,
                     self.client_capabilities.clone(),
+                    session_mcp_config_overrides.clone(),
                 )
                 .await?,
             )
@@ -297,6 +305,7 @@ impl Agent for CodexAgent {
                     &self.config,
                     cwd,
                     self.client_capabilities.clone(),
+                    session_mcp_config_overrides.clone(),
                 )
                 .await?,
             )
@@ -337,12 +346,8 @@ impl Agent for CodexAgent {
             ..
         } = request;
 
-        if !mcp_servers.is_empty() {
-            info!(
-                "MCP server passthrough from ACP is not yet mapped in app-server mode; ignoring {} MCP server(s)",
-                mcp_servers.len()
-            );
-        }
+        let session_mcp_config_overrides =
+            build_session_mcp_config_overrides(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
 
         let thread = if self.auto_restore_enabled {
             Rc::new(
@@ -351,6 +356,7 @@ impl Agent for CodexAgent {
                     &self.config,
                     cwd,
                     self.client_capabilities.clone(),
+                    session_mcp_config_overrides.clone(),
                 )
                 .await?,
             )
@@ -361,6 +367,7 @@ impl Agent for CodexAgent {
                     &self.config,
                     cwd,
                     self.client_capabilities.clone(),
+                    session_mcp_config_overrides.clone(),
                 )
                 .await?,
             )

@@ -225,6 +225,7 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
             cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
             approval_policy: Some(inner.approval_policy),
             sandbox: Some(inner.sandbox_mode.clone()),
+            config: inner.session_mcp_config_overrides.clone(),
             ..Default::default()
         })
         .await?;

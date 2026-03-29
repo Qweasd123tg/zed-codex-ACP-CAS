@@ -95,7 +95,8 @@ flowchart LR
 
 Смысл: после `/resume` UI по умолчанию восстанавливается теми же доменными ветками, что и в live-потоке.
 Для "тихого" переключения контекста без replay используется `/resume --no-history`.
-Для устойчивого повторного `/resume` в одной ACP-сессии transport-хвост app-server теперь сбрасывается в `src/thread/features/resume/apply.rs`, а сам picker создается с уникальным `ToolCallId` в `src/thread/features/resume/selector.rs`.
+Для устойчивого повторного `/resume` в одной ACP-сессии transport-хвост app-server теперь санируется в `src/thread/features/resume/apply.rs`, а сам picker создается с уникальным `ToolCallId` в `src/thread/features/resume/selector.rs`.
+Смысл этой санитизации: stale notifications старого треда глушатся, stale server requests явно отклоняются ответом, а не теряются молча.
 Picker и `/threads` при этом предпочитают `thread.name`, если тред был явно переименован через `/rename`, и только потом показывают `preview`.
 После успешного `/resume` текущая ACP-сессия теперь сразу получает `SessionInfoUpdate.title`, чтобы клиентский заголовок не застревал на последнем slash-prompt.
 Важно: старые сообщения, уже показанные ACP-клиентом, при этом не очищаются — это ограничение UI/API клиента, а не replay-пайплайна адаптера.
@@ -170,6 +171,9 @@ flowchart LR
 - `src/thread/features/notification/mod.rs`
 - `src/thread/session/lifecycle.rs`
 - `src/thread/turn/notify.rs` (`notify_config_update`, `notify_mode_and_config_update`)
+- Если ACP-сессия стартует с `mcp_servers`, эти session-scoped overrides теперь тоже входят в этот связный набор:
+  они собираются в `src/thread/session/lifecycle.rs`, хранятся в `ThreadInner`, подаются в `thread/start` / `thread/resume`
+  и должны переживать replacement-thread внутри той же ACP-сессии.
 
 6. Изменение collab/subagents контракта:
 - `src/thread/features/collab/render.rs`
@@ -218,7 +222,7 @@ flowchart LR
 - `src/codex_agent.rs`
 
 Риск: после `/resume` не сброшено turn-transient состояние.
-Отдельный риск: transport-хвост старого треда может мешать следующему `/resume`, если не синхронизировать `apply.rs`, `app_server.rs` и pre-command routing в `prompt/flow.rs`.
+Отдельный риск: transport-хвост старого треда может мешать следующему `/resume`, если не синхронизировать `apply.rs`, `app_server.rs` и pre-command routing в `prompt/flow.rs`. Опасный вариант здесь — blind drop request-ов; текущая версия этого уже не делает.
 
 ### Collab/Subagents
 - `src/thread/features/collab/*`
