@@ -7,10 +7,12 @@ use super::{
 use crate::thread::{features::collab, prompt_commands, replay};
 
 impl Thread {
-    // Оппортунистически обновляем кэш моделей перед обработкой load-запроса.
+    // Не делаем лишний blocking model/list на bootstrap, если модели уже пришли из start/resume.
     pub async fn load(&self) -> Result<LoadSessionResponse, Error> {
         let mut inner = self.inner.lock().await;
-        if let Ok(models) = inner.app.model_list().await {
+        if inner.models.is_empty()
+            && let Ok(models) = inner.app.model_list().await
+        {
             inner.models = models.data;
         }
 

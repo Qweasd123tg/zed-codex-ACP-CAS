@@ -4,6 +4,7 @@ use agent_client_protocol::{Error, StopReason};
 use codex_app_server_protocol::ThreadResumeParams;
 
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
+use crate::thread::session_lifecycle::thread_resume_with_startup_retry;
 use crate::thread::{ThreadInner, replay, session_config, turn_notify};
 
 pub(in crate::thread) async fn handle_resume_command(
@@ -11,13 +12,14 @@ pub(in crate::thread) async fn handle_resume_command(
     thread_id: &str,
     include_history: bool,
 ) -> Result<StopReason, Error> {
-    let resume = inner
-        .app
-        .thread_resume(ThreadResumeParams {
+    let resume = thread_resume_with_startup_retry(
+        &mut inner.app,
+        ThreadResumeParams {
             thread_id: thread_id.to_string(),
             ..Default::default()
-        })
-        .await?;
+        },
+    )
+    .await?;
 
     inner.thread_id = resume.thread.id.clone();
     inner.workspace_cwd = resume.thread.cwd.clone();

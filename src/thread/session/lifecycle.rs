@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use super::session_config::{
     policy_to_mode, resolve_reasoning_effort, to_app_approval, to_app_sandbox_mode,
@@ -13,29 +14,54 @@ use super::{
     ThreadSortKey, ThreadStartParams,
 };
 use crate::thread::features::collab::remember_agent_label;
+use codex_app_server_protocol::ThreadStartResponse;
+use tracing::warn;
+
+const RESUME_STARTUP_RETRY_ATTEMPTS: usize = 6;
+const RESUME_STARTUP_RETRY_DELAY_MS: u64 = 300;
+
+fn is_retryable_missing_rollout_resume_error(error: &Error) -> bool {
+    let message = error.to_string();
+    message.contains("no rollout found for thread id")
+}
+
+pub(in crate::thread) async fn thread_resume_with_startup_retry(
+    app: &mut AppServerProcess,
+    params: ThreadResumeParams,
+) -> Result<codex_app_server_protocol::ThreadResumeResponse, Error> {
+    for attempt in 0..=RESUME_STARTUP_RETRY_ATTEMPTS {
+        match app.thread_resume(params.clone()).await {
+            Ok(response) => return Ok(response),
+            Err(error)
+                if is_retryable_missing_rollout_resume_error(&error)
+                    && attempt < RESUME_STARTUP_RETRY_ATTEMPTS =>
+            {
+                let retry_number = attempt + 1;
+                warn!(
+                    retry_number,
+                    thread_id = params.thread_id,
+                    "thread/resume reported missing rollout during startup; retrying"
+                );
+                tokio::time::sleep(Duration::from_millis(
+                    RESUME_STARTUP_RETRY_DELAY_MS * retry_number as u64,
+                ))
+                .await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    unreachable!("retry loop must return on success or final error")
+}
 
 impl Thread {
-    // Сначала запускаем сессию app-server, чтобы последующие capability-вызовы имели валидный session id.
-    pub async fn start_session(
-        config: &Config,
+    async fn build_started_thread(
+        session_id: SessionId,
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
-    ) -> Result<(SessionId, Self), Error> {
-        let mut app = AppServerProcess::spawn("codex").await?;
-        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
-
-        let start = app
-            .thread_start(ThreadStartParams {
-                model: config.model.clone(),
-                model_provider: Some(config.model_provider_id.clone()),
-                cwd: Some(cwd.to_string_lossy().to_string()),
-                approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
-                sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
-                ..Default::default()
-            })
-            .await?;
-
-        let session_id = SessionId::new(start.thread.id.clone());
+        mut app: AppServerProcess,
+        start: ThreadStartResponse,
+    ) -> Self {
         let models = app
             .model_list()
             .await
@@ -52,13 +78,14 @@ impl Thread {
             start.thread.agent_nickname.clone(),
             start.thread.agent_role.clone(),
         );
-        let thread = Thread {
+
+        Thread {
             inner: tokio::sync::Mutex::new(ThreadInner {
                 session_id: session_id.clone(),
                 app,
                 thread_id: start.thread.id,
                 workspace_cwd: cwd,
-                client: SessionClient::new(session_id.clone(), client_capabilities),
+                client: SessionClient::new(session_id, client_capabilities),
                 approval_policy: start.approval_policy,
                 sandbox_policy: start.sandbox.clone(),
                 sandbox_mode: policy_to_mode(&start.sandbox),
@@ -93,7 +120,56 @@ impl Thread {
                 turn_reconnect_retry_limit_hit: false,
             }),
             cancel_tx,
-        };
+        }
+    }
+
+    pub(crate) async fn start_session_for_existing_session_id(
+        session_id: SessionId,
+        config: &Config,
+        cwd: PathBuf,
+        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+    ) -> Result<Self, Error> {
+        let mut app = AppServerProcess::spawn("codex").await?;
+        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
+
+        let start = app
+            .thread_start(ThreadStartParams {
+                model: config.model.clone(),
+                model_provider: Some(config.model_provider_id.clone()),
+                cwd: Some(cwd.to_string_lossy().to_string()),
+                approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
+                sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
+                ..Default::default()
+            })
+            .await?;
+
+        Ok(Self::build_started_thread(session_id, cwd, client_capabilities, app, start).await)
+    }
+
+    // Сначала запускаем сессию app-server, чтобы последующие capability-вызовы имели валидный session id.
+    pub async fn start_session(
+        config: &Config,
+        cwd: PathBuf,
+        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+    ) -> Result<(SessionId, Self), Error> {
+        let mut app = AppServerProcess::spawn("codex").await?;
+        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
+
+        let start = app
+            .thread_start(ThreadStartParams {
+                model: config.model.clone(),
+                model_provider: Some(config.model_provider_id.clone()),
+                cwd: Some(cwd.to_string_lossy().to_string()),
+                approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
+                sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
+                ..Default::default()
+            })
+            .await?;
+
+        let session_id = SessionId::new(start.thread.id.clone());
+        let thread =
+            Self::build_started_thread(session_id.clone(), cwd, client_capabilities, app, start)
+                .await;
 
         Ok((session_id, thread))
     }
@@ -107,17 +183,33 @@ impl Thread {
         let mut app = AppServerProcess::spawn("codex").await?;
         app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
 
-        let resume = app
-            .thread_resume(ThreadResumeParams {
-                thread_id: session_id.0.to_string(),
-                model: config.model.clone(),
-                model_provider: Some(config.model_provider_id.clone()),
-                cwd: Some(cwd.to_string_lossy().to_string()),
-                approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
-                sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
-                ..Default::default()
-            })
-            .await?;
+        let resume_params = ThreadResumeParams {
+            thread_id: session_id.0.to_string(),
+            model: config.model.clone(),
+            model_provider: Some(config.model_provider_id.clone()),
+            cwd: Some(cwd.to_string_lossy().to_string()),
+            approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
+            sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
+            ..Default::default()
+        };
+
+        let resume = match thread_resume_with_startup_retry(&mut app, resume_params.clone()).await {
+            Ok(resume) => resume,
+            Err(error) if is_retryable_missing_rollout_resume_error(&error) => {
+                warn!(
+                    requested_thread_id = resume_params.thread_id,
+                    "resume source is unavailable or not materialized; starting a fresh backend thread for this ACP session"
+                );
+                return Self::start_session_for_existing_session_id(
+                    session_id,
+                    config,
+                    cwd,
+                    client_capabilities,
+                )
+                .await;
+            }
+            Err(error) => return Err(error),
+        };
 
         let models = app
             .model_list()
@@ -219,5 +311,31 @@ impl Thread {
             .collect();
 
         Ok(ListSessionsResponse::new(sessions).next_cursor(response.next_cursor))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_retryable_missing_rollout_resume_error;
+    use agent_client_protocol::Error;
+
+    #[test]
+    fn detects_retryable_missing_rollout_resume_error() {
+        let error = Error::internal_error()
+            .data("thread/resume failed: no rollout found for thread id 019-test (code -32600)");
+        assert!(is_retryable_missing_rollout_resume_error(&error));
+    }
+
+    #[test]
+    fn ignores_other_resume_errors() {
+        let error = Error::internal_error().data("thread/resume failed: auth required");
+        assert!(!is_retryable_missing_rollout_resume_error(&error));
+    }
+
+    #[test]
+    fn detects_retryable_missing_rollout_even_in_wrapped_error_text() {
+        let error = Error::internal_error()
+            .data("Internal error: \"no rollout found for thread id 019-test\"");
+        assert!(is_retryable_missing_rollout_resume_error(&error));
     }
 }

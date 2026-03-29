@@ -3,6 +3,8 @@
 
 #[path = "apply.rs"]
 pub(in crate::thread) mod apply;
+#[path = "common.rs"]
+pub(in crate::thread) mod common;
 #[path = "listing.rs"]
 pub(in crate::thread) mod listing;
 #[path = "selector.rs"]

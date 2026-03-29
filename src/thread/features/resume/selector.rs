@@ -1,38 +1,26 @@
 //! Выбор thread для `/resume`: фильтрация, picker-карточка и делегирование в apply.
 
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_client_protocol::{
     Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
     SelectedPermissionOutcome, StopReason, ToolCallId, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,
 };
-use codex_app_server_protocol::{Thread, ThreadListParams, ThreadSortKey};
+use codex_app_server_protocol::{Thread, ThreadSortKey};
+use serde_json::json;
 use tracing::warn;
 
+use super::common::{format_relative_timestamp, list_all_threads};
 use crate::thread::prompt_commands::normalize_preview;
-use crate::thread::{RESUME_CANCEL_OPTION_ID, RESUME_PICK_LIMIT, ThreadInner};
+use crate::thread::{RESUME_CANCEL_OPTION_ID, ThreadInner};
 
 pub(in crate::thread) async fn handle_resume_selector_command(
     inner: &mut ThreadInner,
     query: Option<&str>,
     include_history: bool,
 ) -> Result<StopReason, Error> {
-    let all_threads = inner
-        .app
-        .thread_list(ThreadListParams {
-            cursor: None,
-            limit: Some(100),
-            sort_key: Some(ThreadSortKey::UpdatedAt),
-            model_providers: None,
-            source_kinds: None,
-            archived: Some(false),
-            cwd: None,
-            search_term: None,
-        })
-        .await?
-        .data;
+    let all_threads = list_all_threads(inner, ThreadSortKey::UpdatedAt, None, None).await?;
 
     if all_threads.is_empty() {
         inner
@@ -108,24 +96,17 @@ pub(in crate::thread) async fn handle_resume_selector_command(
 
 async fn show_resume_picker(
     inner: &mut ThreadInner,
-    mut candidates: Vec<Thread>,
+    candidates: Vec<Thread>,
     query: Option<&str>,
     include_history: bool,
 ) -> Result<StopReason, Error> {
     let total = candidates.len();
-    candidates.truncate(RESUME_PICK_LIMIT);
 
     let title = match query {
         Some(query) => format!("Resume thread for `{query}` ({total} match(es))"),
         None => format!("Resume thread from current workspace ({total} match(es))"),
     };
-    let hint = if total > RESUME_PICK_LIMIT {
-        Some(format!(
-            "Showing newest {RESUME_PICK_LIMIT}. Narrow with `/resume <partial_id>`."
-        ))
-    } else {
-        None
-    };
+    let raw_input = resume_picker_raw_input(&candidates, query);
 
     let mut options = Vec::new();
     let mut id_by_option = HashMap::new();
@@ -154,7 +135,11 @@ async fn show_resume_picker(
                     .title(title)
                     .kind(ToolKind::Think)
                     .status(ToolCallStatus::Pending)
-                    .content(hint.map_or_else(Vec::new, |line| vec![line.into()])),
+                    .content(vec![
+                        "Search in the picker list. Open View Raw Input for full previews and paths."
+                            .into(),
+                    ])
+                    .raw_input(raw_input),
             ),
             options,
         )
@@ -215,71 +200,71 @@ fn format_resume_option_label(thread: &Thread) -> String {
         format_relative_timestamp(thread.created_at),
         format_relative_timestamp(thread.updated_at),
         branch,
-        shorten_preview(&normalize_preview(&thread.preview), 72),
+        normalize_preview(&thread.preview),
     )
 }
 
-fn shorten_preview(preview: &str, max_chars: usize) -> String {
-    let chars = preview.chars().collect::<Vec<_>>();
-    if chars.len() <= max_chars {
-        return preview.to_string();
-    }
-
-    let keep = max_chars.saturating_sub(1);
-    format!("{}…", chars[..keep].iter().collect::<String>())
+fn resume_picker_raw_input(candidates: &[Thread], query: Option<&str>) -> serde_json::Value {
+    json!({
+        "query": query,
+        "count": candidates.len(),
+        "threads": candidates.iter().map(|thread| {
+            json!({
+                "id": thread.id,
+                "cwd": thread.cwd,
+                "branch": thread
+                    .git_info
+                    .as_ref()
+                    .and_then(|git| git.branch.as_deref())
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("-"),
+                "created_at": thread.created_at,
+                "created_at_relative": format_relative_timestamp(thread.created_at),
+                "updated_at": thread.updated_at,
+                "updated_at_relative": format_relative_timestamp(thread.updated_at),
+                "preview": normalize_preview(&thread.preview),
+            })
+        }).collect::<Vec<_>>()
+    })
 }
 
-fn format_relative_timestamp(unix_seconds: i64) -> String {
-    if unix_seconds <= 0 {
-        return "-".to_string();
-    }
+#[cfg(test)]
+mod tests {
+    use super::resume_picker_raw_input;
+    use codex_app_server_protocol::{GitInfo, SessionSource, Thread, ThreadStatus};
+    use std::path::PathBuf;
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or_default();
+    #[test]
+    fn raw_input_keeps_full_preview_text() {
+        let thread = Thread {
+            id: "019-test".to_string(),
+            preview: "very long preview text that should stay intact in raw input".to_string(),
+            ephemeral: false,
+            model_provider: "openai".to_string(),
+            created_at: 10,
+            updated_at: 20,
+            status: ThreadStatus::Idle,
+            path: None,
+            cwd: PathBuf::from("/tmp/workspace"),
+            cli_version: "0.1.0".to_string(),
+            source: SessionSource::AppServer,
+            agent_nickname: None,
+            agent_role: None,
+            git_info: Some(GitInfo {
+                sha: None,
+                branch: Some("main".to_string()),
+                origin_url: None,
+            }),
+            name: None,
+            turns: vec![],
+        };
 
-    if unix_seconds > now {
-        return format_future_duration((unix_seconds - now) as u64);
-    }
-
-    format_past_duration((now - unix_seconds) as u64)
-}
-
-fn format_past_duration(delta: u64) -> String {
-    const MINUTE: u64 = 60;
-    const HOUR: u64 = 60 * MINUTE;
-    const DAY: u64 = 24 * HOUR;
-    const MONTH: u64 = 30 * DAY;
-    const YEAR: u64 = 365 * DAY;
-
-    if delta < MINUTE {
-        "just now".to_string()
-    } else if delta < HOUR {
-        format!("{}m ago", delta / MINUTE)
-    } else if delta < DAY {
-        format!("{}h ago", delta / HOUR)
-    } else if delta < MONTH {
-        format!("{}d ago", delta / DAY)
-    } else if delta < YEAR {
-        format!("{}mo ago", delta / MONTH)
-    } else {
-        format!("{}y ago", delta / YEAR)
-    }
-}
-
-fn format_future_duration(delta: u64) -> String {
-    const MINUTE: u64 = 60;
-    const HOUR: u64 = 60 * MINUTE;
-    const DAY: u64 = 24 * HOUR;
-
-    if delta < MINUTE {
-        "soon".to_string()
-    } else if delta < HOUR {
-        format!("in {}m", delta / MINUTE)
-    } else if delta < DAY {
-        format!("in {}h", delta / HOUR)
-    } else {
-        format!("in {}d", delta / DAY)
+        let raw = resume_picker_raw_input(&[thread], Some("019"));
+        assert_eq!(raw["count"], 1);
+        assert_eq!(
+            raw["threads"][0]["preview"],
+            "very long preview text that should stay intact in raw input"
+        );
+        assert_eq!(raw["threads"][0]["branch"], "main");
     }
 }

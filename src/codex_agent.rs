@@ -41,11 +41,21 @@ pub struct CodexAgent {
     auth_manager: Arc<AuthManager>,
     client_capabilities: Arc<Mutex<ClientCapabilities>>,
     config: Config,
+    auto_restore_enabled: bool,
     // Реестр активных ACP-сессий в памяти на время жизни процесса.
     sessions: Rc<RefCell<HashMap<SessionId, Rc<Thread>>>>,
 }
 
 impl CodexAgent {
+    fn auto_restore_enabled_from_env() -> bool {
+        std::env::var("ACP_DISABLE_AUTO_RESTORE")
+            .map(|value| {
+                let normalized = value.trim().to_ascii_lowercase();
+                normalized.is_empty() || !matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+            })
+            .unwrap_or(true)
+    }
+
     // Сохраняем общий стартовый конфиг, который используется всеми ACP-сессиями.
     pub fn new(config: Config) -> Self {
         let auth_manager = AuthManager::shared(
@@ -58,6 +68,7 @@ impl CodexAgent {
             auth_manager,
             client_capabilities: Arc::default(),
             config,
+            auto_restore_enabled: Self::auto_restore_enabled_from_env(),
             sessions: Rc::default(),
         }
     }
@@ -123,12 +134,17 @@ impl Agent for CodexAgent {
 
         let mut capabilities = AgentCapabilities::new()
             .prompt_capabilities(PromptCapabilities::new().embedded_context(true).image(true))
-            .mcp_capabilities(McpCapabilities::new().http(true))
-            .load_session(true);
+            .mcp_capabilities(McpCapabilities::new().http(true));
 
-        capabilities.session_capabilities = SessionCapabilities::new()
-            .list(SessionListCapabilities::new())
-            .resume(SessionResumeCapabilities::new());
+        if self.auto_restore_enabled {
+            capabilities = capabilities.load_session(true);
+            capabilities.session_capabilities = SessionCapabilities::new()
+                .list(SessionListCapabilities::new())
+                .resume(SessionResumeCapabilities::new());
+        } else {
+            capabilities.session_capabilities =
+                SessionCapabilities::new().list(SessionListCapabilities::new());
+        }
 
         let mut auth_methods = vec![
             CodexAuthMethod::ChatGpt.into(),
@@ -270,26 +286,45 @@ impl Agent for CodexAgent {
             );
         }
 
-        let thread = Rc::new(
-            Thread::resume_session(
-                session_id.clone(),
-                &self.config,
-                cwd,
-                self.client_capabilities.clone(),
+        let thread = if self.auto_restore_enabled {
+            Rc::new(
+                Thread::resume_session(
+                    session_id.clone(),
+                    &self.config,
+                    cwd,
+                    self.client_capabilities.clone(),
+                )
+                .await?,
             )
-            .await?,
-        );
+        } else {
+            Rc::new(
+                Thread::start_session_for_existing_session_id(
+                    session_id.clone(),
+                    &self.config,
+                    cwd,
+                    self.client_capabilities.clone(),
+                )
+                .await?,
+            )
+        };
 
         let load = thread.load().await?;
         let notify_thread = thread.clone();
         tokio::task::spawn_local(async move {
-            // Используем тот же порядок старта, что и в new_session + replay истории, чтобы
-            // пользователь сразу видел прошлые вызовы инструментов/диффы после загрузки.
+            // При обычном load-сценарии реплеим историю; при отключённом auto-restore
+            // просто открываем свежий backend-thread под тем же ACP session handle.
             tokio::task::yield_now().await;
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             notify_thread.notify_available_commands().await;
-            notify_thread.replay_loaded_history().await;
         });
+        if self.auto_restore_enabled {
+            let replay_thread = thread.clone();
+            tokio::task::spawn_local(async move {
+                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                replay_thread.replay_loaded_history().await;
+            });
+        }
         self.sessions.borrow_mut().insert(session_id, thread);
 
         Ok(load)
@@ -315,15 +350,27 @@ impl Agent for CodexAgent {
             );
         }
 
-        let thread = Rc::new(
-            Thread::resume_session(
-                session_id.clone(),
-                &self.config,
-                cwd,
-                self.client_capabilities.clone(),
+        let thread = if self.auto_restore_enabled {
+            Rc::new(
+                Thread::resume_session(
+                    session_id.clone(),
+                    &self.config,
+                    cwd,
+                    self.client_capabilities.clone(),
+                )
+                .await?,
             )
-            .await?,
-        );
+        } else {
+            Rc::new(
+                Thread::start_session_for_existing_session_id(
+                    session_id.clone(),
+                    &self.config,
+                    cwd,
+                    self.client_capabilities.clone(),
+                )
+                .await?,
+            )
+        };
 
         let load = thread.load().await?;
         let notify_thread = thread.clone();

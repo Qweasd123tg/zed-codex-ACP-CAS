@@ -94,7 +94,6 @@ const REJECT_ONCE: &str = "reject-once";
 const CANCEL_TURN: &str = "cancel-turn";
 const NONE_OF_THE_ABOVE: &str = "None of the above";
 const RESUME_CANCEL_OPTION_ID: &str = "resume-cancel";
-const RESUME_PICK_LIMIT: usize = 8;
 const MAX_VISIBLE_PLAN_ENTRIES: usize = 6;
 const PLAN_SESSION_MODE_ID: &str = "plan";
 const AUTO_MODE_ID: &str = "auto";
