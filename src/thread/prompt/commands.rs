@@ -103,6 +103,13 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
+    if let Some(rest) = text.strip_prefix("/rename") {
+        let name = rest.trim();
+        return Some(SessionCommand::Rename {
+            name: (!name.is_empty()).then(|| name.to_string()),
+        });
+    }
+
     let mut parts = text.split_whitespace();
     match parts.next()? {
         "/threads" => Some(SessionCommand::Threads),
@@ -186,6 +193,9 @@ pub(super) async fn dispatch_session_command(
         SessionCommand::Context => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_context_command(inner).await?,
         )),
+        SessionCommand::Rename { name } => Ok(CommandDispatchOutcome::Stop(
+            session::controls::handle_rename_command(inner, name).await?,
+        )),
     }
 }
 
@@ -235,6 +245,9 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
             UnstructuredCommandInput::new("optional mode or request"),
         )),
         AvailableCommand::new("context", "Show current context window usage"),
+        AvailableCommand::new("rename", "Rename the current thread").input(
+            AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("new thread name")),
+        ),
     ]
 }
 

@@ -3,8 +3,10 @@
 
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use crate::thread::{ThreadInner, replay::replay_turns, turn_notify::notify_config_update};
-use agent_client_protocol::{Error, StopReason};
-use codex_app_server_protocol::{ThreadCompactStartParams, ThreadRollbackParams};
+use agent_client_protocol::{Error, SessionInfoUpdate, SessionUpdate, StopReason};
+use codex_app_server_protocol::{
+    ThreadCompactStartParams, ThreadRollbackParams, ThreadSetNameParams,
+};
 
 pub(in crate::thread) async fn handle_compact_command(
     inner: &mut ThreadInner,
@@ -102,5 +104,41 @@ pub(in crate::thread) async fn handle_context_command(
                 .await;
         }
     }
+    Ok(StopReason::EndTurn)
+}
+
+pub(in crate::thread) async fn handle_rename_command(
+    inner: &mut ThreadInner,
+    name: Option<String>,
+) -> Result<StopReason, Error> {
+    let Some(name) = name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        inner
+            .client
+            .send_agent_text("Usage: `/rename <new thread name>`")
+            .await;
+        return Ok(StopReason::EndTurn);
+    };
+
+    inner
+        .app
+        .thread_set_name(ThreadSetNameParams {
+            thread_id: inner.thread_id.clone(),
+            name: name.clone(),
+        })
+        .await?;
+
+    inner
+        .client
+        .send_notification(SessionUpdate::SessionInfoUpdate(
+            SessionInfoUpdate::new().title(name.clone()),
+        ))
+        .await;
+    inner
+        .client
+        .send_agent_text(format!("Thread renamed to `{name}`."))
+        .await;
     Ok(StopReason::EndTurn)
 }

@@ -304,7 +304,7 @@ impl Thread {
             .filter_map(|thread| {
                 Some(
                     agent_client_protocol::SessionInfo::new(SessionId::new(thread.id), thread.cwd)
-                        .title(Some(thread.preview))
+                        .title(Some(thread.name.unwrap_or(thread.preview)))
                         .updated_at(Some(thread.updated_at.to_string())),
                 )
             })

@@ -229,6 +229,26 @@ fn parses_context_command() {
 }
 
 #[test]
+fn parses_rename_command_with_name() {
+    let prompt: Vec<ContentBlock> = vec!["/rename My current thread".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Rename {
+            name: Some("My current thread".to_string()),
+        })
+    );
+}
+
+#[test]
+fn parses_rename_command_without_name() {
+    let prompt: Vec<ContentBlock> = vec!["/rename".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Rename { name: None })
+    );
+}
+
+#[test]
 fn parses_plan_command_without_value() {
     let prompt: Vec<ContentBlock> = vec!["/plan".into()];
     assert_eq!(

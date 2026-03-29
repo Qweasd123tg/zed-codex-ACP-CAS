@@ -59,6 +59,15 @@ pub(in crate::thread) fn format_relative_timestamp(unix_seconds: i64) -> String 
     format_past_duration((now - unix_seconds) as u64)
 }
 
+pub(in crate::thread) fn thread_display_title(thread: &Thread) -> String {
+    let base = thread
+        .name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(&thread.preview);
+    crate::thread::prompt_commands::normalize_preview(base)
+}
+
 fn format_past_duration(delta: u64) -> String {
     const MINUTE: u64 = 60;
     const HOUR: u64 = 60 * MINUTE;

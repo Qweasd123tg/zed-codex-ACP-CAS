@@ -202,6 +202,9 @@ enum SessionCommand {
         prompt: String,
     },
     Context,
+    Rename {
+        name: Option<String>,
+    },
 }
 
 #[derive(Clone)]

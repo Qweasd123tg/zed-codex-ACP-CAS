@@ -12,8 +12,7 @@ use codex_app_server_protocol::{Thread, ThreadSortKey};
 use serde_json::json;
 use tracing::warn;
 
-use super::common::{format_relative_timestamp, list_all_threads};
-use crate::thread::prompt_commands::normalize_preview;
+use super::common::{format_relative_timestamp, list_all_threads, thread_display_title};
 use crate::thread::{RESUME_CANCEL_OPTION_ID, ThreadInner};
 
 pub(in crate::thread) async fn handle_resume_selector_command(
@@ -194,6 +193,10 @@ fn thread_matches_query(thread: &Thread, query: &str) -> bool {
     }
     let needle = query.to_lowercase();
     thread.preview.to_lowercase().contains(&needle)
+        || thread
+            .name
+            .as_ref()
+            .is_some_and(|name| name.to_lowercase().contains(&needle))
 }
 
 fn format_resume_option_label(thread: &Thread) -> String {
@@ -209,7 +212,7 @@ fn format_resume_option_label(thread: &Thread) -> String {
         format_relative_timestamp(thread.created_at),
         format_relative_timestamp(thread.updated_at),
         branch,
-        normalize_preview(&thread.preview),
+        thread_display_title(thread),
     )
 }
 
@@ -231,7 +234,9 @@ fn resume_picker_raw_input(candidates: &[Thread], query: Option<&str>) -> serde_
                 "created_at_relative": format_relative_timestamp(thread.created_at),
                 "updated_at": thread.updated_at,
                 "updated_at_relative": format_relative_timestamp(thread.updated_at),
-                "preview": normalize_preview(&thread.preview),
+                "name": thread.name,
+                "preview": crate::thread::prompt_commands::normalize_preview(&thread.preview),
+                "display_title": thread_display_title(thread),
             })
         }).collect::<Vec<_>>()
     })
@@ -272,6 +277,10 @@ mod tests {
         assert_eq!(raw["count"], 1);
         assert_eq!(
             raw["threads"][0]["preview"],
+            "very long preview text that should stay intact in raw input"
+        );
+        assert_eq!(
+            raw["threads"][0]["display_title"],
             "very long preview text that should stay intact in raw input"
         );
         assert_eq!(raw["threads"][0]["branch"], "main");

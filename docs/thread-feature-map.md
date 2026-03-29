@@ -96,6 +96,7 @@ flowchart LR
 Смысл: после `/resume` UI по умолчанию восстанавливается теми же доменными ветками, что и в live-потоке.
 Для "тихого" переключения контекста без replay используется `/resume --no-history`.
 Для устойчивого повторного `/resume` в одной ACP-сессии transport-хвост app-server теперь сбрасывается в `src/thread/features/resume/apply.rs`, а сам picker создается с уникальным `ToolCallId` в `src/thread/features/resume/selector.rs`.
+Picker и `/threads` при этом предпочитают `thread.name`, если тред был явно переименован через `/rename`, и только потом показывают `preview`.
 Важно: старые сообщения, уже показанные ACP-клиентом, при этом не очищаются — это ограничение UI/API клиента, а не replay-пайплайна адаптера.
 
 ## 5) Collab/Subagents ветка
@@ -158,12 +159,15 @@ flowchart LR
 - `src/thread/features/approvals/user_input.rs`
 - `src/thread/features/approvals/permissions.rs`
 
-5. Изменение session/config:
+5. Изменение session/config и thread title:
 - `src/thread/session/config/mod.rs`
 - `src/thread/session/config/modes.rs`
 - `src/thread/session/config/reasoning.rs`
 - `src/thread/features/session/modes.rs`
+- `src/thread/features/session/controls.rs`
 - `src/thread/features/session/events.rs`
+- `src/thread/features/notification/mod.rs`
+- `src/thread/session/lifecycle.rs`
 - `src/thread/turn/notify.rs` (`notify_config_update`, `notify_mode_and_config_update`)
 
 6. Изменение collab/subagents контракта:
@@ -232,7 +236,7 @@ flowchart LR
 | `src/thread/features/notification/*` | Доменные обработчики notification-событий |
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
 | `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread, transport scrub при переключении |
-| `src/thread/features/session/*` | `/compact`, `/undo`, `/context`, `/reasoning`, `/plan on/off`, session replay события |
+| `src/thread/features/session/*` | `/compact`, `/undo`, `/context`, `/reasoning`, `/plan on/off`, `/rename`, session replay события и title update |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
 | `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw payload |
 | `src/thread/features/status_mapping.rs` | app-server status -> ACP status |

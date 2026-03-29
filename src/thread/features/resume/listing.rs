@@ -3,9 +3,8 @@
 use agent_client_protocol::{Error, StopReason};
 use codex_app_server_protocol::ThreadSortKey;
 
-use super::common::{format_relative_timestamp, list_all_threads};
+use super::common::{format_relative_timestamp, list_all_threads, thread_display_title};
 use crate::thread::ThreadInner;
-use crate::thread::prompt_commands::normalize_preview;
 
 // Получаем историю thread и рендерим полный список для `/threads`.
 pub(in crate::thread) async fn handle_threads_command(
@@ -37,7 +36,7 @@ pub(in crate::thread) async fn handle_threads_command(
                 .and_then(|git| git.branch.as_deref())
                 .filter(|value| !value.is_empty())
                 .unwrap_or("-"),
-            normalize_preview(&thread.preview)
+            thread_display_title(&thread)
         ));
     }
     lines.push(

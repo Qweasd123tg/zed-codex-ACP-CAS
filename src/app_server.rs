@@ -14,8 +14,9 @@ use codex_app_server_protocol::{
     PermissionsRequestApprovalResponse, RequestId, ThreadCompactStartParams,
     ThreadCompactStartResponse, ThreadListParams, ThreadListResponse, ThreadReadParams,
     ThreadReadResponse, ThreadResumeParams, ThreadResumeResponse, ThreadRollbackParams,
-    ThreadRollbackResponse, ThreadStartParams, ThreadStartResponse, ToolRequestUserInputResponse,
-    TurnInterruptParams, TurnInterruptResponse, TurnStartParams, TurnStartResponse,
+    ThreadRollbackResponse, ThreadSetNameParams, ThreadSetNameResponse, ThreadStartParams,
+    ThreadStartResponse, ToolRequestUserInputResponse, TurnInterruptParams, TurnInterruptResponse,
+    TurnStartParams, TurnStartResponse,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -180,6 +181,18 @@ impl AppServerProcess {
             params,
         };
         self.request(request, request_id, "thread/rollback").await
+    }
+
+    pub async fn thread_set_name(
+        &mut self,
+        params: ThreadSetNameParams,
+    ) -> Result<ThreadSetNameResponse, Error> {
+        let request_id = self.next_request_id();
+        let request = ClientRequest::ThreadSetName {
+            request_id: request_id.clone(),
+            params,
+        };
+        self.request(request, request_id, "thread/name/set").await
     }
 
     pub async fn turn_start(

@@ -4,7 +4,7 @@ use agent_client_protocol::Error;
 use codex_app_server_protocol::{
     FileChangeOutputDeltaNotification, JSONRPCNotification, McpToolCallProgressNotification,
     ReasoningSummaryTextDeltaNotification, ReasoningTextDeltaNotification, ServerNotification,
-    ThreadTokenUsageUpdatedNotification,
+    ThreadNameUpdatedNotification, ThreadTokenUsageUpdatedNotification,
 };
 
 use crate::thread::{
@@ -62,6 +62,19 @@ pub(in crate::thread) async fn handle_notification(
                 token_usage.model_context_window,
             )
             .await;
+            Ok(None)
+        }
+        ServerNotification::ThreadNameUpdated(ThreadNameUpdatedNotification {
+            thread_id,
+            thread_name,
+            ..
+        }) => {
+            if thread_id == inner.thread_id
+                && let Some(title) = thread_name
+            {
+                crate::thread::features::session::events::emit_thread_name_updated(inner, title)
+                    .await;
+            }
             Ok(None)
         }
         ServerNotification::TurnPlanUpdated(payload) => {

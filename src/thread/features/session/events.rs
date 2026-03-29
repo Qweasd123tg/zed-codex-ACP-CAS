@@ -3,6 +3,7 @@
 
 use std::fmt::Write as _;
 
+use agent_client_protocol::{SessionInfoUpdate, SessionUpdate};
 use codex_app_server_protocol::UserInput;
 
 use crate::thread::{SessionClient, ThreadInner, turn_notify::notify_config_update};
@@ -78,6 +79,15 @@ pub(in crate::thread) async fn replay_exited_review_mode(client: &SessionClient,
 // Replay-ветка для compaction item.
 pub(in crate::thread) async fn replay_context_compaction(client: &SessionClient) {
     client.send_agent_thought("Context compacted.").await;
+}
+
+pub(in crate::thread) async fn emit_thread_name_updated(inner: &mut ThreadInner, title: String) {
+    inner
+        .client
+        .send_notification(SessionUpdate::SessionInfoUpdate(
+            SessionInfoUpdate::new().title(title),
+        ))
+        .await;
 }
 
 // Превращаем mixed user input в плоский текст для replay.
