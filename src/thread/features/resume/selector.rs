@@ -1,6 +1,7 @@
 //! Выбор thread для `/resume`: фильтрация, picker-карточка и делегирование в apply.
 
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_client_protocol::{
     Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
@@ -130,7 +131,7 @@ async fn show_resume_picker(
         .client
         .request_permission(
             ToolCallUpdate::new(
-                ToolCallId::new("resume-selector"),
+                ToolCallId::new(next_resume_selector_tool_call_id()),
                 ToolCallUpdateFields::new()
                     .title(title)
                     .kind(ToolKind::Think)
@@ -177,6 +178,14 @@ async fn show_resume_picker(
     };
 
     super::apply::handle_resume_command(inner, &selected_thread_id, include_history).await
+}
+
+fn next_resume_selector_tool_call_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("resume-selector-{nanos}")
 }
 
 fn thread_matches_query(thread: &Thread, query: &str) -> bool {

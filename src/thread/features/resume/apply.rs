@@ -2,16 +2,22 @@
 
 use agent_client_protocol::{Error, StopReason};
 use codex_app_server_protocol::ThreadResumeParams;
+use std::time::Duration;
 
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use crate::thread::session_lifecycle::thread_resume_with_startup_retry;
 use crate::thread::{ThreadInner, replay, session_config, turn_notify};
+
+const RESUME_TRANSPORT_FLUSH_TIMEOUT_MS: u64 = 20;
+const RESUME_TRANSPORT_FLUSH_MAX_MESSAGES: usize = 64;
 
 pub(in crate::thread) async fn handle_resume_command(
     inner: &mut ThreadInner,
     thread_id: &str,
     include_history: bool,
 ) -> Result<StopReason, Error> {
+    flush_resume_transport_state(inner).await?;
+
     let resume = thread_resume_with_startup_retry(
         &mut inner.app,
         ThreadResumeParams {
@@ -20,6 +26,8 @@ pub(in crate::thread) async fn handle_resume_command(
         },
     )
     .await?;
+
+    flush_resume_transport_state(inner).await?;
 
     inner.thread_id = resume.thread.id.clone();
     inner.workspace_cwd = resume.thread.cwd.clone();
@@ -38,11 +46,13 @@ pub(in crate::thread) async fn handle_resume_command(
         resume.thread.agent_nickname.clone(),
         resume.thread.agent_role.clone(),
     );
+    inner.carryover_plan_steps = None;
     inner.reset_turn_transient_state();
 
     if let Ok(models) = inner.app.model_list().await {
         inner.models = models.data;
     }
+    flush_resume_transport_state(inner).await?;
     inner.reasoning_effort = session_config::resolve_reasoning_effort(
         &inner.models,
         &inner.current_model,
@@ -64,4 +74,15 @@ pub(in crate::thread) async fn handle_resume_command(
     turn_notify::notify_config_update(inner).await;
 
     Ok(StopReason::EndTurn)
+}
+
+async fn flush_resume_transport_state(inner: &mut ThreadInner) -> Result<(), Error> {
+    let _ = inner
+        .app
+        .discard_background_messages(
+            Duration::from_millis(RESUME_TRANSPORT_FLUSH_TIMEOUT_MS),
+            RESUME_TRANSPORT_FLUSH_MAX_MESSAGES,
+        )
+        .await?;
+    Ok(())
 }

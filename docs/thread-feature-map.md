@@ -95,6 +95,8 @@ flowchart LR
 
 Смысл: после `/resume` UI по умолчанию восстанавливается теми же доменными ветками, что и в live-потоке.
 Для "тихого" переключения контекста без replay используется `/resume --no-history`.
+Для устойчивого повторного `/resume` в одной ACP-сессии transport-хвост app-server теперь сбрасывается в `src/thread/features/resume/apply.rs`, а сам picker создается с уникальным `ToolCallId` в `src/thread/features/resume/selector.rs`.
+Важно: старые сообщения, уже показанные ACP-клиентом, при этом не очищаются — это ограничение UI/API клиента, а не replay-пайплайна адаптера.
 
 ## 5) Collab/Subagents ветка
 
@@ -206,8 +208,12 @@ flowchart LR
 - `src/thread/features/resume/*`
 - `src/thread/core/replay.rs`
 - `src/thread/core/inner_state.rs`
+- `src/app_server.rs`
+- `src/thread/prompt/flow.rs`
+- `src/codex_agent.rs`
 
 Риск: после `/resume` не сброшено turn-transient состояние.
+Отдельный риск: transport-хвост старого треда может мешать следующему `/resume`, если не синхронизировать `apply.rs`, `app_server.rs` и pre-command routing в `prompt/flow.rs`.
 
 ### Collab/Subagents
 - `src/thread/features/collab/*`
@@ -225,7 +231,7 @@ flowchart LR
 | `src/thread/features/file/*` | File-change lifecycle, preview/final diff helper-ы |
 | `src/thread/features/notification/*` | Доменные обработчики notification-событий |
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
-| `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread |
+| `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread, transport scrub при переключении |
 | `src/thread/features/session/*` | `/compact`, `/undo`, `/context`, `/reasoning`, `/plan on/off`, session replay события |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
 | `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw payload |

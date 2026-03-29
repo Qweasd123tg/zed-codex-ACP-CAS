@@ -134,17 +134,11 @@ impl Agent for CodexAgent {
 
         let mut capabilities = AgentCapabilities::new()
             .prompt_capabilities(PromptCapabilities::new().embedded_context(true).image(true))
-            .mcp_capabilities(McpCapabilities::new().http(true));
-
-        if self.auto_restore_enabled {
-            capabilities = capabilities.load_session(true);
-            capabilities.session_capabilities = SessionCapabilities::new()
-                .list(SessionListCapabilities::new())
-                .resume(SessionResumeCapabilities::new());
-        } else {
-            capabilities.session_capabilities =
-                SessionCapabilities::new().list(SessionListCapabilities::new());
-        }
+            .mcp_capabilities(McpCapabilities::new().http(true))
+            .load_session(true);
+        capabilities.session_capabilities = SessionCapabilities::new()
+            .list(SessionListCapabilities::new())
+            .resume(SessionResumeCapabilities::new());
 
         let mut auth_methods = vec![
             CodexAuthMethod::ChatGpt.into(),

@@ -1,8 +1,8 @@
 //! Основной конвейер выполнения промпта: парсинг команд, старт turn и маппинг завершения.
 
 use super::{
-    Error, ModeKind, PLAN_IMPLEMENTATION_PROMPT, StopReason, Thread, notification_dispatch,
-    prompt_commands, turn_execution, turn_notify,
+    Error, ModeKind, PLAN_IMPLEMENTATION_PROMPT, SessionCommand, StopReason, Thread,
+    notification_dispatch, prompt_commands, turn_execution, turn_notify,
 };
 use agent_client_protocol::ContentBlock;
 
@@ -15,7 +15,9 @@ impl Thread {
         let command = prompt_commands::parse_session_command(&request.prompt);
         let mut plan_prompt: Option<String> = None;
         let mut inner = self.inner.lock().await;
-        notification_dispatch::drain_background_notifications(&mut inner).await?;
+        if should_drain_background_notifications(command.as_ref()) {
+            notification_dispatch::drain_background_notifications(&mut inner).await?;
+        }
         if let Some(command) = command {
             match prompt_commands::dispatch_session_command(&mut inner, command).await? {
                 prompt_commands::CommandDispatchOutcome::Stop(stop_reason) => {
@@ -97,4 +99,8 @@ impl Thread {
 
         Ok(stop_reason)
     }
+}
+
+fn should_drain_background_notifications(command: Option<&SessionCommand>) -> bool {
+    !matches!(command, Some(SessionCommand::Resume { .. }))
 }
