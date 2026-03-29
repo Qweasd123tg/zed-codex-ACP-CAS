@@ -10,6 +10,7 @@ pub(super) async fn handle_server_request(
 ) -> Result<(), Error> {
     let request_id = request.id.clone();
     let request_method = request.method.clone();
+
     let server_request = match ServerRequest::try_from(request) {
         Ok(server_request) => server_request,
         Err(err) => {
@@ -33,6 +34,18 @@ pub(super) async fn handle_server_request(
         }
         ServerRequest::ToolRequestUserInput { request_id, params } => {
             approvals::user_input::handle_tool_request_user_input(inner, request_id, params).await
+        }
+        ServerRequest::McpServerElicitationRequest { request_id, .. } => {
+            protocol_contract::reject_unsupported_server_request(
+                &mut inner.app,
+                request_id,
+                "mcpServer/elicitation/request",
+            )
+            .await
+        }
+        ServerRequest::PermissionsRequestApproval { request_id, params } => {
+            approvals::permissions::handle_permissions_request_approval(inner, request_id, params)
+                .await
         }
         ServerRequest::DynamicToolCall { request_id, .. } => {
             protocol_contract::reject_unsupported_server_request(

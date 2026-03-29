@@ -14,6 +14,9 @@ pub(super) async fn handle_command_output_delta(
     if !inner.started_tool_calls.contains(&payload.item_id) {
         return;
     }
+    if !payload.delta.trim().is_empty() {
+        inner.mark_turn_progress();
+    }
 
     let update = if inner.client.supports_terminal_output() {
         ToolCallUpdate::new(
@@ -43,6 +46,9 @@ pub(super) async fn handle_terminal_interaction(
 ) {
     if !inner.started_tool_calls.contains(&payload.item_id) {
         return;
+    }
+    if !payload.stdin.trim().is_empty() {
+        inner.mark_turn_progress();
     }
 
     if inner.client.supports_terminal_output() {

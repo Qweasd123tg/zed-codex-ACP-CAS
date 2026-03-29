@@ -23,6 +23,8 @@ pub(in crate::thread) fn collab_tool_title(
         (CollabAgentTool::SendInput, false) => "Send input to agent",
         (CollabAgentTool::Wait, true) => "Wait complete",
         (CollabAgentTool::Wait, false) => "Waiting for agents",
+        (CollabAgentTool::ResumeAgent, true) => "Agent resumed",
+        (CollabAgentTool::ResumeAgent, false) => "Resume agent",
         (CollabAgentTool::CloseAgent, true) => "Agent closed",
         (CollabAgentTool::CloseAgent, false) => "Close agent",
     }

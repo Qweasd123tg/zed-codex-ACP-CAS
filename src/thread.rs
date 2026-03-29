@@ -21,11 +21,11 @@ use codex_app_server_protocol::{
     ThreadStartParams, Turn as AppTurn, TurnDiffUpdatedNotification, TurnInterruptParams,
     TurnStartParams, UserInput,
 };
-use codex_common::approval_presets::{ApprovalPreset, builtin_approval_presets};
 use codex_core::config::Config;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::{AskForApproval, SandboxPolicy};
+use codex_utils_approval_presets::{ApprovalPreset, builtin_approval_presets};
 pub(super) use tracing::warn;
 
 use crate::ACP_CLIENT;
@@ -148,6 +148,9 @@ struct ThreadInner {
     last_plan_steps: Vec<String>,
     carryover_plan_steps: Option<Vec<String>>,
     replay_turns: Vec<AppTurn>,
+    turn_last_progress_at: std::time::Instant,
+    turn_reconnect_warning_count: u32,
+    turn_reconnect_retry_limit_hit: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

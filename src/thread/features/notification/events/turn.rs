@@ -10,6 +10,14 @@ use crate::thread::{
     turn_plan_step_to_entry, turn_state, warn,
 };
 
+fn parse_reconnect_turn_error(message: &str) -> Option<(u32, u32)> {
+    let progress = message.trim().strip_prefix("Reconnecting... ")?;
+    let (current, total) = progress.split_once('/')?;
+    let current = current.trim().parse().ok()?;
+    let total = total.trim().parse().ok()?;
+    Some((current, total))
+}
+
 // Обрабатываем полное обновление плана turn и синхронизируем fallback-plan state.
 pub(in crate::thread) async fn emit_turn_plan_updated(
     inner: &mut ThreadInner,
@@ -20,6 +28,8 @@ pub(in crate::thread) async fn emit_turn_plan_updated(
     if turn_id != expected_turn_id {
         return;
     }
+
+    inner.mark_turn_progress();
 
     // В plan-mode канонический поток — это item/plan + item/plan/delta из <proposed_plan>.
     // turn/plan/updated (update_plan tool) в этом режиме ведёт к UI-артефактам checklist.
@@ -104,6 +114,7 @@ pub(in crate::thread) async fn emit_turn_completed(
     }
 
     maybe_advance_fallback_plan(inner, expected_turn_id, FallbackPlanPhase::Done).await;
+    inner.mark_turn_progress();
     if inner
         .fallback_plan
         .as_ref()
@@ -138,9 +149,32 @@ pub(in crate::thread) async fn emit_turn_error(
     message: String,
 ) {
     if turn_id == expected_turn_id {
+        if let Some((current, total)) = parse_reconnect_turn_error(&message) {
+            inner.note_reconnect_warning(current >= total);
+        } else if !message.trim().is_empty() {
+            inner.mark_turn_progress();
+        }
         inner
             .client
             .send_agent_text(format!("\n[error] {message}"))
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_reconnect_turn_error;
+
+    #[test]
+    fn parses_reconnect_turn_error_progress() {
+        assert_eq!(
+            parse_reconnect_turn_error("Reconnecting... 5/5"),
+            Some((5, 5))
+        );
+    }
+
+    #[test]
+    fn ignores_regular_turn_error_messages() {
+        assert_eq!(parse_reconnect_turn_error("network unavailable"), None);
     }
 }

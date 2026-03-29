@@ -28,8 +28,8 @@ impl Thread {
                 model: config.model.clone(),
                 model_provider: Some(config.model_provider_id.clone()),
                 cwd: Some(cwd.to_string_lossy().to_string()),
-                approval_policy: Some(to_app_approval(*config.approval_policy.get())),
-                sandbox: Some(to_app_sandbox_mode(config.sandbox_policy.get())),
+                approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
+                sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
                 ..Default::default()
             })
             .await?;
@@ -79,6 +79,9 @@ impl Thread {
                 last_plan_steps: Vec::new(),
                 carryover_plan_steps: None,
                 replay_turns: vec![],
+                turn_last_progress_at: std::time::Instant::now(),
+                turn_reconnect_warning_count: 0,
+                turn_reconnect_retry_limit_hit: false,
             }),
             cancel_tx,
         };
@@ -101,8 +104,8 @@ impl Thread {
                 model: config.model.clone(),
                 model_provider: Some(config.model_provider_id.clone()),
                 cwd: Some(cwd.to_string_lossy().to_string()),
-                approval_policy: Some(to_app_approval(*config.approval_policy.get())),
-                sandbox: Some(to_app_sandbox_mode(config.sandbox_policy.get())),
+                approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
+                sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
                 ..Default::default()
             })
             .await?;
@@ -151,6 +154,9 @@ impl Thread {
                 last_plan_steps: Vec::new(),
                 carryover_plan_steps: None,
                 replay_turns: resume.thread.turns,
+                turn_last_progress_at: std::time::Instant::now(),
+                turn_reconnect_warning_count: 0,
+                turn_reconnect_retry_limit_hit: false,
             }),
             cancel_tx,
         })
@@ -176,6 +182,10 @@ impl Thread {
                 model_providers: None,
                 source_kinds: None,
                 archived: Some(false),
+                cwd: effective_cwd
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string()),
+                search_term: None,
             })
             .await?;
 
@@ -183,12 +193,6 @@ impl Thread {
             .data
             .into_iter()
             .filter_map(|thread| {
-                if let Some(expected_cwd) = effective_cwd.as_ref()
-                    && thread.cwd != *expected_cwd
-                {
-                    return None;
-                }
-
                 Some(
                     agent_client_protocol::SessionInfo::new(SessionId::new(thread.id), thread.cwd)
                         .title(Some(thread.preview))

@@ -13,17 +13,12 @@ pub(in crate::thread) fn i64_to_u64_saturating(value: i64) -> u64 {
 }
 
 pub(in crate::thread) fn to_app_approval(policy: AskForApproval) -> AppAskForApproval {
-    match policy {
-        AskForApproval::UnlessTrusted => AppAskForApproval::UnlessTrusted,
-        AskForApproval::OnFailure => AppAskForApproval::OnFailure,
-        AskForApproval::OnRequest => AppAskForApproval::OnRequest,
-        AskForApproval::Never => AppAskForApproval::Never,
-    }
+    policy.into()
 }
 
 pub(in crate::thread) fn to_app_sandbox_mode(policy: &SandboxPolicy) -> AppSandboxMode {
     match policy {
-        SandboxPolicy::ReadOnly => AppSandboxMode::ReadOnly,
+        SandboxPolicy::ReadOnly { .. } => AppSandboxMode::ReadOnly,
         SandboxPolicy::WorkspaceWrite { .. } | SandboxPolicy::ExternalSandbox { .. } => {
             AppSandboxMode::WorkspaceWrite
         }
@@ -33,7 +28,7 @@ pub(in crate::thread) fn to_app_sandbox_mode(policy: &SandboxPolicy) -> AppSandb
 
 pub(in crate::thread) fn policy_to_mode(policy: &AppSandboxPolicy) -> AppSandboxMode {
     match policy {
-        AppSandboxPolicy::ReadOnly => AppSandboxMode::ReadOnly,
+        AppSandboxPolicy::ReadOnly { .. } => AppSandboxMode::ReadOnly,
         AppSandboxPolicy::WorkspaceWrite { .. } | AppSandboxPolicy::ExternalSandbox { .. } => {
             AppSandboxMode::WorkspaceWrite
         }

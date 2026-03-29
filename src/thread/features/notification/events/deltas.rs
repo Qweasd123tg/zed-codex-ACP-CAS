@@ -8,6 +8,15 @@ use crate::thread::{
     maybe_advance_fallback_plan,
 };
 
+fn parse_reconnect_warning(delta: &str) -> Option<(u32, u32)> {
+    let trimmed = delta.trim();
+    let progress = trimmed.strip_prefix("[error] Reconnecting... ")?;
+    let (current, total) = progress.split_once('/')?;
+    let current = current.trim().parse().ok()?;
+    let total = total.trim().parse().ok()?;
+    Some((current, total))
+}
+
 // Обрабатываем агентский text-delta: при первом осмысленном тексте переключаем fallback-plan в summarizing.
 pub(in crate::thread) async fn emit_agent_message_delta(
     inner: &mut ThreadInner,
@@ -16,6 +25,12 @@ pub(in crate::thread) async fn emit_agent_message_delta(
     delta: String,
 ) {
     if turn_id != expected_turn_id {
+        return;
+    }
+
+    if let Some((current, total)) = parse_reconnect_warning(&delta) {
+        inner.note_reconnect_warning(current >= total);
+        inner.client.send_agent_text(delta).await;
         return;
     }
 
@@ -29,6 +44,9 @@ pub(in crate::thread) async fn emit_agent_message_delta(
         maybe_advance_fallback_plan(inner, expected_turn_id, FallbackPlanPhase::Summarizing).await;
     }
 
+    if !delta.trim().is_empty() {
+        inner.mark_turn_progress();
+    }
     inner.client.send_agent_text(delta).await;
 }
 
@@ -40,6 +58,9 @@ pub(in crate::thread) async fn emit_reasoning_delta(
     delta: String,
 ) {
     if turn_id == expected_turn_id {
+        if !delta.trim().is_empty() {
+            inner.mark_turn_progress();
+        }
         inner.client.send_agent_thought(delta).await;
     }
 }
@@ -58,6 +79,9 @@ pub(in crate::thread) async fn emit_plan_delta(
             return;
         }
         inner.active_turn_saw_plan_delta = true;
+        if !delta.trim().is_empty() {
+            inner.mark_turn_progress();
+        }
         inner.client.send_agent_text(delta).await;
     }
 }
@@ -71,6 +95,9 @@ pub(in crate::thread) async fn emit_file_change_output_delta(
     delta: String,
 ) {
     if turn_id == expected_turn_id {
+        if !delta.trim().is_empty() {
+            inner.mark_turn_progress();
+        }
         inner
             .client
             .send_tool_call_update(ToolCallUpdate::new(
@@ -90,6 +117,9 @@ pub(in crate::thread) async fn emit_mcp_tool_call_progress(
     message: String,
 ) {
     if turn_id == expected_turn_id {
+        if !message.trim().is_empty() {
+            inner.mark_turn_progress();
+        }
         inner
             .client
             .send_tool_call_update(ToolCallUpdate::new(
@@ -97,5 +127,23 @@ pub(in crate::thread) async fn emit_mcp_tool_call_progress(
                 ToolCallUpdateFields::new().content(vec![message.into()]),
             ))
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_reconnect_warning;
+
+    #[test]
+    fn parses_reconnect_warning_with_error_prefix() {
+        assert_eq!(
+            parse_reconnect_warning("\n[error] Reconnecting... 4/5"),
+            Some((4, 5))
+        );
+    }
+
+    #[test]
+    fn ignores_regular_agent_text_for_reconnect_warning() {
+        assert_eq!(parse_reconnect_warning("Привет"), None);
     }
 }

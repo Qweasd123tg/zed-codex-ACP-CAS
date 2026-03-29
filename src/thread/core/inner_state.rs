@@ -2,7 +2,7 @@
 
 use crate::thread::session_config::{policy_to_mode, to_app_approval, to_app_sandbox_mode};
 use crate::thread::{AppSandboxPolicy, EditApprovalMode, ModeKind, ThreadInner};
-use codex_common::approval_presets::ApprovalPreset;
+use codex_utils_approval_presets::ApprovalPreset;
 use tracing::warn;
 
 impl ThreadInner {
@@ -23,6 +23,9 @@ impl ThreadInner {
         self.file_change_paths_this_turn.clear();
         self.synced_paths_this_turn.clear();
         self.last_plan_steps.clear();
+        self.turn_last_progress_at = std::time::Instant::now();
+        self.turn_reconnect_warning_count = 0;
+        self.turn_reconnect_retry_limit_hit = false;
     }
 
     pub(super) fn prepare_for_new_turn(
@@ -54,6 +57,19 @@ impl ThreadInner {
         }
         self.active_turn_id = None;
         self.active_turn_mode_kind = None;
+    }
+
+    pub(super) fn mark_turn_progress(&mut self) {
+        self.turn_last_progress_at = std::time::Instant::now();
+        self.turn_reconnect_warning_count = 0;
+        self.turn_reconnect_retry_limit_hit = false;
+    }
+
+    pub(super) fn note_reconnect_warning(&mut self, reached_retry_limit: bool) {
+        self.turn_reconnect_warning_count = self.turn_reconnect_warning_count.saturating_add(1);
+        if reached_retry_limit {
+            self.turn_reconnect_retry_limit_hit = true;
+        }
     }
 
     pub(super) fn apply_mode_preset(

@@ -10,6 +10,37 @@ use super::{
 
 use tracing::info;
 
+const TURN_MESSAGE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+const RECONNECT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(12);
+const RECONNECT_SILENT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(20);
+const RECONNECT_STALL_WARNING_THRESHOLD: u32 = 5;
+const RECONNECT_STALL_MESSAGE: &str = "\n[error] Turn appears stuck after repeated reconnect failures. Ending this turn so the UI does not spin forever. Check network/auth and retry.";
+
+fn should_abort_reconnect_stall(
+    warning_count: u32,
+    retry_limit_hit: bool,
+    since_last_progress: std::time::Duration,
+) -> bool {
+    (retry_limit_hit
+        && warning_count >= RECONNECT_STALL_WARNING_THRESHOLD
+        && since_last_progress >= RECONNECT_STALL_GRACE_PERIOD)
+        || (warning_count >= 1 && since_last_progress >= RECONNECT_SILENT_STALL_GRACE_PERIOD)
+}
+
+async fn maybe_abort_reconnect_stall(inner: &mut ThreadInner, turn_id: &str) -> Option<StopReason> {
+    if !should_abort_reconnect_stall(
+        inner.turn_reconnect_warning_count,
+        inner.turn_reconnect_retry_limit_hit,
+        inner.turn_last_progress_at.elapsed(),
+    ) {
+        return None;
+    }
+
+    inner.client.send_agent_text(RECONNECT_STALL_MESSAGE).await;
+    inner.finalize_active_turn(turn_id);
+    Some(StopReason::EndTurn)
+}
+
 // Отправляем turn-start один раз, затем стримим item-уведомления до прихода финального статуса.
 pub(super) async fn run_single_turn(
     inner: &mut ThreadInner,
@@ -48,6 +79,8 @@ pub(super) async fn run_single_turn(
     let mut cancel_rx = cancel_tx.subscribe();
 
     loop {
+        let watchdog = tokio::time::sleep(TURN_MESSAGE_POLL_INTERVAL);
+        tokio::pin!(watchdog);
         tokio::select! {
             result = cancel_rx.changed() => {
                 if result.is_ok() && !interrupted
@@ -61,6 +94,11 @@ pub(super) async fn run_single_turn(
                     interrupted = true;
                 }
             }
+            _ = &mut watchdog => {
+                if let Some(stop_reason) = maybe_abort_reconnect_stall(inner, &turn_id).await {
+                    return Ok(stop_reason);
+                }
+            }
             message = inner.app.next_message() => {
                 let message = message?;
                 if let Some(stop_reason) = notification_dispatch::handle_message(inner, message, &turn_id).await? {
@@ -71,6 +109,9 @@ pub(super) async fn run_single_turn(
                         std::time::Duration::from_millis(200),
                     )
                     .await?;
+                    return Ok(stop_reason);
+                }
+                if let Some(stop_reason) = maybe_abort_reconnect_stall(inner, &turn_id).await {
                     return Ok(stop_reason);
                 }
             }
@@ -112,4 +153,36 @@ pub(super) async fn prompt_plan_implementation(inner: &mut ThreadInner) -> Resul
         RequestPermissionOutcome::Selected(SelectedPermissionOutcome { option_id, .. })
             if option_id.0.as_ref() == PLAN_IMPLEMENTATION_YES_OPTION_ID
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_abort_reconnect_stall;
+
+    #[test]
+    fn aborts_after_reconnect_retry_limit_with_long_stall() {
+        assert!(should_abort_reconnect_stall(
+            5,
+            true,
+            std::time::Duration::from_secs(12)
+        ));
+    }
+
+    #[test]
+    fn keeps_waiting_before_retry_limit_is_hit() {
+        assert!(!should_abort_reconnect_stall(
+            4,
+            false,
+            std::time::Duration::from_secs(19)
+        ));
+    }
+
+    #[test]
+    fn aborts_after_single_reconnect_warning_with_long_silence() {
+        assert!(should_abort_reconnect_stall(
+            1,
+            false,
+            std::time::Duration::from_secs(20)
+        ));
+    }
 }

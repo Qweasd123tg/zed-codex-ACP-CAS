@@ -10,11 +10,12 @@ use anyhow::Context;
 use codex_app_server_protocol::{
     ClientInfo, ClientNotification, ClientRequest, FileChangeRequestApprovalResponse,
     InitializeCapabilities, InitializeParams, InitializeResponse, JSONRPCError, JSONRPCErrorError,
-    JSONRPCMessage, JSONRPCResponse, ModelListParams, ModelListResponse, RequestId,
-    ThreadCompactStartParams, ThreadCompactStartResponse, ThreadListParams, ThreadListResponse,
-    ThreadResumeParams, ThreadResumeResponse, ThreadRollbackParams, ThreadRollbackResponse,
-    ThreadStartParams, ThreadStartResponse, ToolRequestUserInputResponse, TurnInterruptParams,
-    TurnInterruptResponse, TurnStartParams, TurnStartResponse,
+    JSONRPCMessage, JSONRPCResponse, ModelListParams, ModelListResponse,
+    PermissionsRequestApprovalResponse, RequestId, ThreadCompactStartParams,
+    ThreadCompactStartResponse, ThreadListParams, ThreadListResponse, ThreadResumeParams,
+    ThreadResumeResponse, ThreadRollbackParams, ThreadRollbackResponse, ThreadStartParams,
+    ThreadStartResponse, ToolRequestUserInputResponse, TurnInterruptParams, TurnInterruptResponse,
+    TurnStartParams, TurnStartResponse,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -88,6 +89,7 @@ impl AppServerProcess {
                 },
                 capabilities: Some(InitializeCapabilities {
                     experimental_api: true,
+                    opt_out_notification_methods: None,
                 }),
             },
         };
@@ -222,6 +224,15 @@ impl AppServerProcess {
         &mut self,
         request_id: RequestId,
         response: ToolRequestUserInputResponse,
+    ) -> Result<(), Error> {
+        self.send_server_request_response(request_id, response)
+            .await
+    }
+
+    pub async fn send_permissions_request_approval_response(
+        &mut self,
+        request_id: RequestId,
+        response: PermissionsRequestApprovalResponse,
     ) -> Result<(), Error> {
         self.send_server_request_response(request_id, response)
             .await

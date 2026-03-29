@@ -21,6 +21,8 @@ pub(in crate::thread) async fn handle_threads_command(
             model_providers: None,
             source_kinds: None,
             archived: Some(false),
+            cwd: None,
+            search_term: None,
         })
         .await?;
 

@@ -30,12 +30,12 @@ use agent_client_protocol::{
 };
 use codex_app_server_protocol::{
     CollabAgentState, CollabAgentStatus, CollabAgentTool, CollabAgentToolCallStatus, CommandAction,
-    PatchChangeKind, SandboxMode as AppSandboxMode, SandboxPolicy as AppSandboxPolicy,
-    ToolRequestUserInputQuestion,
+    PatchChangeKind, ReadOnlyAccess as AppReadOnlyAccess, SandboxMode as AppSandboxMode,
+    SandboxPolicy as AppSandboxPolicy, ToolRequestUserInputQuestion,
 };
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::protocol::SandboxPolicy;
+use codex_protocol::protocol::{ReadOnlyAccess, SandboxPolicy};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -830,6 +830,7 @@ fn mode_state_uses_custom_auto_ask_edits_id() {
 fn app_sandbox_policy_from_preserves_workspace_write_settings() {
     let policy = SandboxPolicy::WorkspaceWrite {
         writable_roots: vec![],
+        read_only_access: ReadOnlyAccess::FullAccess,
         network_access: true,
         exclude_tmpdir_env_var: true,
         exclude_slash_tmp: true,
@@ -839,6 +840,7 @@ fn app_sandbox_policy_from_preserves_workspace_write_settings() {
         AppSandboxPolicy::from(policy),
         AppSandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
+            read_only_access: AppReadOnlyAccess::FullAccess,
             network_access: true,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: true,
