@@ -19,21 +19,20 @@ pub(in crate::thread) async fn handle_dynamic_tool_call(
     request_id: RequestId,
     params: DynamicToolCallParams,
 ) -> Result<(), Error> {
-    if let Some(active_turn_id) = inner.active_turn_id.as_deref()
-        && active_turn_id != params.turn_id
-    {
+    if let Err(response) = validate_dynamic_tool_turn(
+        inner.active_turn_id.as_deref(),
+        &params.turn_id,
+        &params.tool,
+    ) {
         warn!(
             request_turn_id = %params.turn_id,
-            active_turn_id,
+            active_turn_id = ?inner.active_turn_id,
             tool = %params.tool,
             "Rejecting stale dynamic tool call request"
         );
         return inner
             .app
-            .send_dynamic_tool_call_response(
-                request_id,
-                stale_turn_response(&params.tool, active_turn_id),
-            )
+            .send_dynamic_tool_call_response(request_id, response)
             .await;
     }
 
@@ -67,6 +66,18 @@ pub(in crate::thread) async fn handle_dynamic_tool_call(
             response_from_permission_outcome(outcome, &params.tool),
         )
         .await
+}
+
+fn validate_dynamic_tool_turn(
+    active_turn_id: Option<&str>,
+    request_turn_id: &str,
+    tool: &str,
+) -> Result<(), DynamicToolCallResponse> {
+    match active_turn_id {
+        Some(active_turn_id) if active_turn_id == request_turn_id => Ok(()),
+        Some(active_turn_id) => Err(stale_turn_response(tool, Some(active_turn_id))),
+        None => Err(stale_turn_response(tool, None)),
+    }
 }
 
 fn response_from_permission_outcome(
@@ -103,10 +114,14 @@ fn declined_response(tool: &str) -> DynamicToolCallResponse {
     )
 }
 
-fn stale_turn_response(tool: &str, active_turn_id: &str) -> DynamicToolCallResponse {
+fn stale_turn_response(tool: &str, active_turn_id: Option<&str>) -> DynamicToolCallResponse {
+    let reason = match active_turn_id {
+        Some(active_turn_id) => format!("Active turn: `{active_turn_id}`."),
+        None => "There is no active turn.".to_string(),
+    };
     text_response(
         format!(
-            "Dynamic tool `{tool}` was ignored because its request targeted a stale turn. Active turn: `{active_turn_id}`."
+            "Dynamic tool `{tool}` was ignored because its request targeted a stale turn. {reason}"
         ),
         false,
     )
@@ -146,7 +161,10 @@ mod tests {
         PermissionOptionId, RequestPermissionOutcome, SelectedPermissionOutcome,
     };
 
-    use super::{ACKNOWLEDGE_ONCE, dynamic_tool_raw_input, response_from_permission_outcome};
+    use super::{
+        ACKNOWLEDGE_ONCE, dynamic_tool_raw_input, response_from_permission_outcome,
+        validate_dynamic_tool_turn,
+    };
 
     #[test]
     fn acknowledged_response_is_typed_failure_until_execution_exists() {
@@ -186,6 +204,38 @@ mod tests {
                 "tool": "lookup_ticket",
                 "arguments": { "id": 1 },
             })
+        );
+    }
+
+    #[test]
+    fn rejects_dynamic_tool_call_without_active_turn() {
+        let response = validate_dynamic_tool_turn(None, "turn-1", "lookup_ticket")
+            .expect_err("missing active turn must be rejected");
+
+        assert!(!response.success);
+        assert_eq!(
+            response.content_items,
+            vec![
+                codex_app_server_protocol::DynamicToolCallOutputContentItem::InputText {
+                    text: "Dynamic tool `lookup_ticket` was ignored because its request targeted a stale turn. There is no active turn.".to_string(),
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_dynamic_tool_call_for_mismatched_turn() {
+        let response = validate_dynamic_tool_turn(Some("turn-2"), "turn-1", "lookup_ticket")
+            .expect_err("mismatched turn must be rejected");
+
+        assert!(!response.success);
+        assert_eq!(
+            response.content_items,
+            vec![
+                codex_app_server_protocol::DynamicToolCallOutputContentItem::InputText {
+                    text: "Dynamic tool `lookup_ticket` was ignored because its request targeted a stale turn. Active turn: `turn-2`.".to_string(),
+                }
+            ]
         );
     }
 }

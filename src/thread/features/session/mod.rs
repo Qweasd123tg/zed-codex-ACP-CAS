@@ -5,6 +5,7 @@ use crate::thread::{SessionClient, ThreadInner, ThreadItem};
 pub(in crate::thread) mod controls;
 pub(in crate::thread) mod events;
 pub(in crate::thread) mod modes;
+pub(in crate::thread) mod thread_switch;
 
 // Роутер started-item для session-level событий вне tool-card жизненного цикла.
 pub(in crate::thread) async fn handle_item_started(

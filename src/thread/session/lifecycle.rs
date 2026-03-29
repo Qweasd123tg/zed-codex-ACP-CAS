@@ -1,7 +1,7 @@
 //! Поток старта и остановки сессии: создание session, bootstrap capability и очистка.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -29,7 +29,7 @@ const RESUME_STARTUP_RETRY_DELAY_MS: u64 = 300;
 
 pub(crate) fn build_session_mcp_config_overrides(
     base_mcp_servers: &HashMap<String, McpServerConfig>,
-    cwd: &PathBuf,
+    cwd: &Path,
     mcp_servers: Vec<McpServer>,
 ) -> Result<Option<HashMap<String, JsonValue>>, Error> {
     if mcp_servers.is_empty() {
@@ -102,7 +102,7 @@ fn insert_http_mcp_server(target: &mut HashMap<String, McpServerConfig>, server:
 
 fn insert_stdio_mcp_server(
     target: &mut HashMap<String, McpServerConfig>,
-    cwd: &PathBuf,
+    cwd: &Path,
     server: McpServerStdio,
 ) {
     let McpServerStdio {
@@ -120,7 +120,7 @@ fn insert_stdio_mcp_server(
                 args,
                 env: env_to_map(env),
                 env_vars: vec![],
-                cwd: Some(cwd.clone()),
+                cwd: Some(cwd.to_path_buf()),
             },
             required: false,
             enabled: true,
@@ -243,6 +243,7 @@ impl Thread {
                 edit_approval_mode: EditApprovalMode::AutoApprove,
                 collaboration_mode_kind: ModeKind::Default,
                 current_model: start.model,
+                current_model_provider: start.model_provider,
                 reasoning_effort,
                 agent_labels,
                 compaction_in_progress: false,
@@ -413,6 +414,7 @@ impl Thread {
                 edit_approval_mode: EditApprovalMode::AutoApprove,
                 collaboration_mode_kind: ModeKind::Default,
                 current_model: resume.model,
+                current_model_provider: resume.model_provider,
                 reasoning_effort,
                 agent_labels,
                 compaction_in_progress: false,
@@ -474,13 +476,11 @@ impl Thread {
         let sessions = response
             .data
             .into_iter()
-            .filter_map(|thread| {
+            .map(|thread| {
                 let title = thread_display_title(&thread);
-                Some(
-                    agent_client_protocol::SessionInfo::new(SessionId::new(thread.id), thread.cwd)
-                        .title(Some(title))
-                        .updated_at(Some(thread.updated_at.to_string())),
-                )
+                agent_client_protocol::SessionInfo::new(SessionId::new(thread.id), thread.cwd)
+                    .title(Some(title))
+                    .updated_at(Some(thread.updated_at.to_string()))
             })
             .collect();
 

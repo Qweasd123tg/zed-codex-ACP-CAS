@@ -235,7 +235,7 @@ fn resume_picker_raw_input(candidates: &[Thread], query: Option<&str>) -> serde_
                 "updated_at": thread.updated_at,
                 "updated_at_relative": format_relative_timestamp(thread.updated_at),
                 "name": thread.name,
-                "preview": crate::thread::prompt_commands::normalize_preview(&thread.preview),
+                "preview": thread.preview,
                 "display_title": thread_display_title(thread),
             })
         }).collect::<Vec<_>>()
@@ -252,7 +252,7 @@ mod tests {
     fn raw_input_keeps_full_preview_text() {
         let thread = Thread {
             id: "019-test".to_string(),
-            preview: "very long preview text that should stay intact in raw input".to_string(),
+            preview: "line one\n\nline   two".to_string(),
             ephemeral: false,
             model_provider: "openai".to_string(),
             created_at: 10,
@@ -275,14 +275,8 @@ mod tests {
 
         let raw = resume_picker_raw_input(&[thread], Some("019"));
         assert_eq!(raw["count"], 1);
-        assert_eq!(
-            raw["threads"][0]["preview"],
-            "very long preview text that should stay intact in raw input"
-        );
-        assert_eq!(
-            raw["threads"][0]["display_title"],
-            "very long preview text that should stay intact in raw input"
-        );
+        assert_eq!(raw["threads"][0]["preview"], "line one\n\nline   two");
+        assert_eq!(raw["threads"][0]["display_title"], "line one line two");
         assert_eq!(raw["threads"][0]["branch"], "main");
     }
 }

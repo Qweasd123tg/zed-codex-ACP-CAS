@@ -8,6 +8,7 @@ use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_fo
 use crate::thread::features::resume::common::{
     format_relative_timestamp, list_all_threads_with_archived, thread_display_title,
 };
+use crate::thread::features::session::thread_switch::flush_thread_switch_transport_state;
 use crate::thread::{ThreadInner, replay::replay_turns, turn_notify::notify_config_update};
 use agent_client_protocol::{
     Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
@@ -131,6 +132,10 @@ pub(in crate::thread) async fn handle_archive_command(
     let is_current_thread = selected.id == inner.thread_id;
     let title = thread_display_title(&selected);
 
+    if is_current_thread {
+        flush_thread_switch_transport_state(inner).await?;
+    }
+
     inner
         .app
         .thread_archive(ThreadArchiveParams {
@@ -139,7 +144,35 @@ pub(in crate::thread) async fn handle_archive_command(
         .await?;
 
     if is_current_thread {
-        start_replacement_thread(inner).await?;
+        if let Err(error) = start_replacement_thread(inner).await {
+            warn!(
+                thread_id = %selected.id,
+                error = %error,
+                "failed to start replacement thread after archiving current thread; attempting restore"
+            );
+            match inner
+                .app
+                .thread_unarchive(ThreadUnarchiveParams {
+                    thread_id: selected.id.clone(),
+                })
+                .await
+            {
+                Ok(_) => {
+                    inner
+                        .client
+                        .send_agent_text(format!(
+                            "Failed to start a fresh session after archiving `{title}`. Restored the original thread.\n\nError: {error}"
+                        ))
+                        .await;
+                    return Ok(StopReason::EndTurn);
+                }
+                Err(unarchive_error) => {
+                    return Err(Error::internal_error().data(format!(
+                        "Archived current thread `{title}` but failed to start a fresh session ({error}) and failed to restore it ({unarchive_error})."
+                    )));
+                }
+            }
+        }
         inner
             .client
             .send_agent_text(format!(
@@ -222,13 +255,16 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
         .app
         .thread_start(ThreadStartParams {
             model: Some(inner.current_model.clone()),
+            model_provider: Some(inner.current_model_provider.clone()),
             cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
             approval_policy: Some(inner.approval_policy),
-            sandbox: Some(inner.sandbox_mode.clone()),
+            sandbox: Some(inner.sandbox_mode),
             config: inner.session_mcp_config_overrides.clone(),
             ..Default::default()
         })
         .await?;
+
+    flush_thread_switch_transport_state(inner).await?;
 
     inner.thread_id = start.thread.id.clone();
     inner.workspace_cwd = start.thread.cwd.clone();
@@ -237,6 +273,7 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
     inner.sandbox_mode = crate::thread::session_config::policy_to_mode(&start.sandbox);
     inner.sync_sandbox_mode_from_policy("start_replacement_thread");
     inner.current_model = start.model;
+    inner.current_model_provider = start.model_provider;
     inner.compaction_in_progress = false;
     inner.last_used_tokens = None;
     inner.context_window_size = None;
@@ -289,13 +326,13 @@ async fn resolve_thread_for_archive(
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
 
-    if !archived && normalized_query.is_none() {
-        if let Some(current) = all_threads
+    if !archived
+        && normalized_query.is_none()
+        && let Some(current) = all_threads
             .iter()
             .find(|thread| thread.id == inner.thread_id)
-        {
-            return Ok(Some(current.clone()));
-        }
+    {
+        return Ok(Some(current.clone()));
     }
 
     if let Some(query) = normalized_query.as_deref()
@@ -461,9 +498,41 @@ fn thread_picker_raw_input(candidates: &[Thread], archived: bool) -> serde_json:
                 "updated_at": thread.updated_at,
                 "updated_at_relative": format_relative_timestamp(thread.updated_at),
                 "name": thread.name,
-                "preview": crate::thread::prompt_commands::normalize_preview(&thread.preview),
+                "preview": thread.preview,
                 "display_title": thread_display_title(thread),
             })
         }).collect::<Vec<_>>()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::thread_picker_raw_input;
+    use codex_app_server_protocol::{SessionSource, Thread, ThreadStatus};
+    use std::path::PathBuf;
+
+    #[test]
+    fn thread_picker_raw_input_keeps_original_preview_text() {
+        let thread = Thread {
+            id: "019-test".to_string(),
+            preview: "line one\n\nline   two".to_string(),
+            ephemeral: false,
+            model_provider: "openai".to_string(),
+            created_at: 10,
+            updated_at: 20,
+            status: ThreadStatus::Idle,
+            path: None,
+            cwd: PathBuf::from("/tmp/workspace"),
+            cli_version: "0.0.0".to_string(),
+            source: SessionSource::Cli,
+            agent_nickname: None,
+            agent_role: None,
+            git_info: None,
+            name: None,
+            turns: Vec::new(),
+        };
+
+        let raw = thread_picker_raw_input(&[thread], false);
+        assert_eq!(raw["threads"][0]["preview"], "line one\n\nline   two");
+    }
 }

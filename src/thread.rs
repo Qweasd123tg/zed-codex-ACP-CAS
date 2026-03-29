@@ -127,6 +127,7 @@ struct ThreadInner {
     edit_approval_mode: EditApprovalMode,
     collaboration_mode_kind: ModeKind,
     current_model: String,
+    current_model_provider: String,
     reasoning_effort: ReasoningEffort,
     agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
     compaction_in_progress: bool,
