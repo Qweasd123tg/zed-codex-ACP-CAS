@@ -11,12 +11,13 @@ use codex_app_server_protocol::{
     ClientInfo, ClientNotification, ClientRequest, FileChangeRequestApprovalResponse,
     InitializeCapabilities, InitializeParams, InitializeResponse, JSONRPCError, JSONRPCErrorError,
     JSONRPCMessage, JSONRPCResponse, ModelListParams, ModelListResponse,
-    PermissionsRequestApprovalResponse, RequestId, ThreadCompactStartParams,
-    ThreadCompactStartResponse, ThreadListParams, ThreadListResponse, ThreadReadParams,
-    ThreadReadResponse, ThreadResumeParams, ThreadResumeResponse, ThreadRollbackParams,
-    ThreadRollbackResponse, ThreadSetNameParams, ThreadSetNameResponse, ThreadStartParams,
-    ThreadStartResponse, ToolRequestUserInputResponse, TurnInterruptParams, TurnInterruptResponse,
-    TurnStartParams, TurnStartResponse,
+    PermissionsRequestApprovalResponse, RequestId, ThreadArchiveParams, ThreadArchiveResponse,
+    ThreadCompactStartParams, ThreadCompactStartResponse, ThreadListParams, ThreadListResponse,
+    ThreadReadParams, ThreadReadResponse, ThreadResumeParams, ThreadResumeResponse,
+    ThreadRollbackParams, ThreadRollbackResponse, ThreadSetNameParams, ThreadSetNameResponse,
+    ThreadStartParams, ThreadStartResponse, ThreadUnarchiveParams, ThreadUnarchiveResponse,
+    ToolRequestUserInputResponse, TurnInterruptParams, TurnInterruptResponse, TurnStartParams,
+    TurnStartResponse,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -193,6 +194,30 @@ impl AppServerProcess {
             params,
         };
         self.request(request, request_id, "thread/name/set").await
+    }
+
+    pub async fn thread_archive(
+        &mut self,
+        params: ThreadArchiveParams,
+    ) -> Result<ThreadArchiveResponse, Error> {
+        let request_id = self.next_request_id();
+        let request = ClientRequest::ThreadArchive {
+            request_id: request_id.clone(),
+            params,
+        };
+        self.request(request, request_id, "thread/archive").await
+    }
+
+    pub async fn thread_unarchive(
+        &mut self,
+        params: ThreadUnarchiveParams,
+    ) -> Result<ThreadUnarchiveResponse, Error> {
+        let request_id = self.next_request_id();
+        let request = ClientRequest::ThreadUnarchive {
+            request_id: request_id.clone(),
+            params,
+        };
+        self.request(request, request_id, "thread/unarchive").await
     }
 
     pub async fn turn_start(

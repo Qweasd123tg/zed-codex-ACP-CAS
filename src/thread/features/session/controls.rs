@@ -1,12 +1,25 @@
 //! Обработчики slash-команд управления сессией (без `/resume`).
 //! Сюда вынесены compact/undo/reasoning/plan/context ветки.
 
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
-use crate::thread::{ThreadInner, replay::replay_turns, turn_notify::notify_config_update};
-use agent_client_protocol::{Error, SessionInfoUpdate, SessionUpdate, StopReason};
-use codex_app_server_protocol::{
-    ThreadCompactStartParams, ThreadRollbackParams, ThreadSetNameParams,
+use crate::thread::features::resume::common::{
+    format_relative_timestamp, list_all_threads_with_archived, thread_display_title,
 };
+use crate::thread::{ThreadInner, replay::replay_turns, turn_notify::notify_config_update};
+use agent_client_protocol::{
+    Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+    SelectedPermissionOutcome, SessionInfoUpdate, SessionUpdate, StopReason, ToolCallId,
+    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+};
+use codex_app_server_protocol::{
+    Thread, ThreadArchiveParams, ThreadCompactStartParams, ThreadRollbackParams,
+    ThreadSetNameParams, ThreadSortKey, ThreadStartParams, ThreadUnarchiveParams,
+};
+use serde_json::json;
+use tracing::warn;
 
 pub(in crate::thread) async fn handle_compact_command(
     inner: &mut ThreadInner,
@@ -107,6 +120,67 @@ pub(in crate::thread) async fn handle_context_command(
     Ok(StopReason::EndTurn)
 }
 
+pub(in crate::thread) async fn handle_archive_command(
+    inner: &mut ThreadInner,
+    thread_id: Option<String>,
+) -> Result<StopReason, Error> {
+    let Some(selected) = resolve_thread_for_archive(inner, thread_id.as_deref(), false).await?
+    else {
+        return Ok(StopReason::EndTurn);
+    };
+    let is_current_thread = selected.id == inner.thread_id;
+    let title = thread_display_title(&selected);
+
+    inner
+        .app
+        .thread_archive(ThreadArchiveParams {
+            thread_id: selected.id.clone(),
+        })
+        .await?;
+
+    if is_current_thread {
+        start_replacement_thread(inner).await?;
+        inner
+            .client
+            .send_agent_text(format!(
+                "Archived current thread `{title}` and started a fresh session."
+            ))
+            .await;
+    } else {
+        inner
+            .client
+            .send_agent_text(format!("Archived thread `{title}`."))
+            .await;
+    }
+
+    Ok(StopReason::EndTurn)
+}
+
+pub(in crate::thread) async fn handle_unarchive_command(
+    inner: &mut ThreadInner,
+    thread_id: Option<String>,
+) -> Result<StopReason, Error> {
+    let Some(selected) = resolve_thread_for_archive(inner, thread_id.as_deref(), true).await?
+    else {
+        return Ok(StopReason::EndTurn);
+    };
+    let title = thread_display_title(&selected);
+
+    inner
+        .app
+        .thread_unarchive(ThreadUnarchiveParams {
+            thread_id: selected.id,
+        })
+        .await?;
+
+    inner
+        .client
+        .send_agent_text(format!("Unarchived thread `{title}`."))
+        .await;
+
+    Ok(StopReason::EndTurn)
+}
+
 pub(in crate::thread) async fn handle_rename_command(
     inner: &mut ThreadInner,
     name: Option<String>,
@@ -141,4 +215,254 @@ pub(in crate::thread) async fn handle_rename_command(
         .send_agent_text(format!("Thread renamed to `{name}`."))
         .await;
     Ok(StopReason::EndTurn)
+}
+
+async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> {
+    let start = inner
+        .app
+        .thread_start(ThreadStartParams {
+            model: Some(inner.current_model.clone()),
+            cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
+            approval_policy: Some(inner.approval_policy),
+            sandbox: Some(inner.sandbox_mode.clone()),
+            ..Default::default()
+        })
+        .await?;
+
+    inner.thread_id = start.thread.id.clone();
+    inner.workspace_cwd = start.thread.cwd.clone();
+    inner.approval_policy = start.approval_policy;
+    inner.sandbox_policy = start.sandbox.clone();
+    inner.sandbox_mode = crate::thread::session_config::policy_to_mode(&start.sandbox);
+    inner.sync_sandbox_mode_from_policy("start_replacement_thread");
+    inner.current_model = start.model;
+    inner.compaction_in_progress = false;
+    inner.last_used_tokens = None;
+    inner.context_window_size = None;
+    inner.agent_labels = HashMap::new();
+    remember_agent_label(
+        &mut inner.agent_labels,
+        inner.thread_id.clone(),
+        start.thread.agent_nickname.clone(),
+        start.thread.agent_role.clone(),
+    );
+    inner.carryover_plan_steps = None;
+    inner.reset_turn_transient_state();
+    inner.reasoning_effort = crate::thread::session_config::resolve_reasoning_effort(
+        &inner.models,
+        &inner.current_model,
+        start.reasoning_effort,
+    );
+
+    inner
+        .client
+        .send_notification(SessionUpdate::SessionInfoUpdate(
+            SessionInfoUpdate::new().title(thread_display_title(&start.thread)),
+        ))
+        .await;
+    notify_config_update(inner).await;
+    Ok(())
+}
+
+async fn resolve_thread_for_archive(
+    inner: &mut ThreadInner,
+    query: Option<&str>,
+    archived: bool,
+) -> Result<Option<Thread>, Error> {
+    let all_threads =
+        list_all_threads_with_archived(inner, ThreadSortKey::UpdatedAt, None, None, archived)
+            .await?;
+
+    if all_threads.is_empty() {
+        let message = if archived {
+            "No archived threads found."
+        } else {
+            "No active threads found."
+        };
+        inner.client.send_agent_text(message).await;
+        return Ok(None);
+    }
+
+    let normalized_query = query
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+
+    if !archived && normalized_query.is_none() {
+        if let Some(current) = all_threads
+            .iter()
+            .find(|thread| thread.id == inner.thread_id)
+        {
+            return Ok(Some(current.clone()));
+        }
+    }
+
+    if let Some(query) = normalized_query.as_deref()
+        && let Some(exact) = all_threads.iter().find(|thread| thread.id == query)
+    {
+        return Ok(Some(exact.clone()));
+    }
+
+    let candidates = match normalized_query.as_deref() {
+        Some(query) => all_threads
+            .into_iter()
+            .filter(|thread| thread_matches_query(thread, query))
+            .collect::<Vec<_>>(),
+        None => all_threads,
+    };
+
+    if candidates.is_empty() {
+        let message = if archived {
+            format!(
+                "No archived threads found for `{}`.",
+                normalized_query.unwrap_or_default()
+            )
+        } else {
+            format!(
+                "No active threads found for `{}`.",
+                normalized_query.unwrap_or_default()
+            )
+        };
+        inner.client.send_agent_text(message).await;
+        return Ok(None);
+    }
+
+    if candidates.len() == 1 {
+        return Ok(Some(candidates[0].clone()));
+    }
+
+    pick_thread_from_candidates(inner, candidates, archived).await
+}
+
+async fn pick_thread_from_candidates(
+    inner: &mut ThreadInner,
+    candidates: Vec<Thread>,
+    archived: bool,
+) -> Result<Option<Thread>, Error> {
+    let tool_call_id = format!(
+        "{}-selector-{}",
+        if archived { "unarchive" } else { "archive" },
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let title = if archived {
+        format!(
+            "Select archived thread to restore ({} match(es))",
+            candidates.len()
+        )
+    } else {
+        format!("Select thread to archive ({} match(es))", candidates.len())
+    };
+
+    let mut options = Vec::new();
+    let mut id_by_option = HashMap::new();
+    for (idx, thread) in candidates.iter().enumerate() {
+        let option_id = format!("thread-select-{}", idx + 1);
+        options.push(PermissionOption::new(
+            option_id.clone(),
+            thread_picker_label(thread),
+            PermissionOptionKind::AllowOnce,
+        ));
+        id_by_option.insert(option_id, thread.id.clone());
+    }
+    options.push(PermissionOption::new(
+        "thread-select-cancel",
+        "Cancel",
+        PermissionOptionKind::RejectOnce,
+    ));
+
+    let outcome = inner
+        .client
+        .request_permission(
+            ToolCallUpdate::new(
+                ToolCallId::new(tool_call_id),
+                ToolCallUpdateFields::new()
+                    .title(title)
+                    .kind(ToolKind::Think)
+                    .status(ToolCallStatus::Pending)
+                    .content(vec![
+                        "Search in the picker list. Open View Raw Input for full previews and paths."
+                            .into(),
+                    ])
+                    .raw_input(thread_picker_raw_input(&candidates, archived)),
+            ),
+            options,
+        )
+        .await?;
+
+    let selected_option_id = match outcome {
+        RequestPermissionOutcome::Cancelled => return Ok(None),
+        RequestPermissionOutcome::Selected(SelectedPermissionOutcome { option_id, .. }) => {
+            option_id.0.to_string()
+        }
+        _ => return Ok(None),
+    };
+
+    let Some(selected_thread_id) = id_by_option.get(&selected_option_id) else {
+        warn!(
+            selected_option_id,
+            "archive picker returned unknown option id"
+        );
+        return Ok(None);
+    };
+
+    Ok(candidates
+        .into_iter()
+        .find(|thread| thread.id == *selected_thread_id))
+}
+
+fn thread_matches_query(thread: &Thread, query: &str) -> bool {
+    if thread.id.contains(query) {
+        return true;
+    }
+    let needle = query.to_lowercase();
+    thread.preview.to_lowercase().contains(&needle)
+        || thread
+            .name
+            .as_ref()
+            .is_some_and(|name| name.to_lowercase().contains(&needle))
+}
+
+fn thread_picker_label(thread: &Thread) -> String {
+    let branch = thread
+        .git_info
+        .as_ref()
+        .and_then(|git| git.branch.as_deref())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("-");
+
+    format!(
+        "{} · {} · {}",
+        format_relative_timestamp(thread.updated_at),
+        branch,
+        thread_display_title(thread)
+    )
+}
+
+fn thread_picker_raw_input(candidates: &[Thread], archived: bool) -> serde_json::Value {
+    json!({
+        "archived": archived,
+        "count": candidates.len(),
+        "threads": candidates.iter().map(|thread| {
+            json!({
+                "id": thread.id,
+                "cwd": thread.cwd,
+                "branch": thread
+                    .git_info
+                    .as_ref()
+                    .and_then(|git| git.branch.as_deref())
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("-"),
+                "created_at": thread.created_at,
+                "created_at_relative": format_relative_timestamp(thread.created_at),
+                "updated_at": thread.updated_at,
+                "updated_at_relative": format_relative_timestamp(thread.updated_at),
+                "name": thread.name,
+                "preview": crate::thread::prompt_commands::normalize_preview(&thread.preview),
+                "display_title": thread_display_title(thread),
+            })
+        }).collect::<Vec<_>>()
+    })
 }

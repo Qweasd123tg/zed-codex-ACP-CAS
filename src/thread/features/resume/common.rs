@@ -13,6 +13,16 @@ pub(in crate::thread) async fn list_all_threads(
     cwd: Option<String>,
     search_term: Option<String>,
 ) -> Result<Vec<Thread>, Error> {
+    list_all_threads_with_archived(inner, sort_key, cwd, search_term, false).await
+}
+
+pub(in crate::thread) async fn list_all_threads_with_archived(
+    inner: &mut ThreadInner,
+    sort_key: ThreadSortKey,
+    cwd: Option<String>,
+    search_term: Option<String>,
+    archived: bool,
+) -> Result<Vec<Thread>, Error> {
     let mut threads = Vec::new();
     let mut cursor = None;
 
@@ -25,7 +35,7 @@ pub(in crate::thread) async fn list_all_threads(
                 sort_key: Some(sort_key),
                 model_providers: None,
                 source_kinds: None,
-                archived: Some(false),
+                archived: Some(archived),
                 cwd: cwd.clone(),
                 search_term: search_term.clone(),
             })

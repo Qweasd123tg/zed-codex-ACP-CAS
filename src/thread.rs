@@ -186,6 +186,12 @@ enum SessionCommand {
         thread_id: Option<String>,
         include_history: bool,
     },
+    Archive {
+        thread_id: Option<String>,
+    },
+    Unarchive {
+        thread_id: Option<String>,
+    },
     Compact,
     Undo {
         num_turns: u32,

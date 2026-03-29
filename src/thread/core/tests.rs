@@ -249,6 +249,37 @@ fn parses_rename_command_without_name() {
 }
 
 #[test]
+fn parses_archive_command_with_query() {
+    let prompt: Vec<ContentBlock> = vec!["/archive 019d-test".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Archive {
+            thread_id: Some("019d-test".to_string()),
+        })
+    );
+}
+
+#[test]
+fn parses_delete_command_without_query() {
+    let prompt: Vec<ContentBlock> = vec!["/delete".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Archive { thread_id: None })
+    );
+}
+
+#[test]
+fn parses_unarchive_command_with_query() {
+    let prompt: Vec<ContentBlock> = vec!["/unarchive old-thread".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Unarchive {
+            thread_id: Some("old-thread".to_string()),
+        })
+    );
+}
+
+#[test]
 fn parses_plan_command_without_value() {
     let prompt: Vec<ContentBlock> = vec!["/plan".into()];
     assert_eq!(

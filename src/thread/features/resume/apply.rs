@@ -1,10 +1,11 @@
 //! Применение выбранного thread: `thread_resume`, sync конфигурации и UI-уведомление.
 
-use agent_client_protocol::{Error, StopReason};
+use agent_client_protocol::{Error, SessionInfoUpdate, SessionUpdate, StopReason};
 use codex_app_server_protocol::ThreadResumeParams;
 use std::time::Duration;
 
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
+use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::session_lifecycle::thread_resume_with_startup_retry;
 use crate::thread::{ThreadInner, replay, session_config, turn_notify};
 
@@ -58,6 +59,12 @@ pub(in crate::thread) async fn handle_resume_command(
         &inner.current_model,
         resume.reasoning_effort,
     );
+    inner
+        .client
+        .send_notification(SessionUpdate::SessionInfoUpdate(
+            SessionInfoUpdate::new().title(thread_display_title(&resume.thread)),
+        ))
+        .await;
     if include_history {
         let workspace_cwd = inner.workspace_cwd.clone();
         warm_agent_labels_for_turns(inner, &resume.thread.turns).await;

@@ -110,6 +110,27 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
+    if let Some(rest) = text.strip_prefix("/archive") {
+        let query = rest.trim();
+        return Some(SessionCommand::Archive {
+            thread_id: (!query.is_empty()).then(|| query.to_string()),
+        });
+    }
+
+    if let Some(rest) = text.strip_prefix("/delete") {
+        let query = rest.trim();
+        return Some(SessionCommand::Archive {
+            thread_id: (!query.is_empty()).then(|| query.to_string()),
+        });
+    }
+
+    if let Some(rest) = text.strip_prefix("/unarchive") {
+        let query = rest.trim();
+        return Some(SessionCommand::Unarchive {
+            thread_id: (!query.is_empty()).then(|| query.to_string()),
+        });
+    }
+
     let mut parts = text.split_whitespace();
     match parts.next()? {
         "/threads" => Some(SessionCommand::Threads),
@@ -177,6 +198,12 @@ pub(super) async fn dispatch_session_command(
             )
             .await?,
         )),
+        SessionCommand::Archive { thread_id } => Ok(CommandDispatchOutcome::Stop(
+            session::controls::handle_archive_command(inner, thread_id).await?,
+        )),
+        SessionCommand::Unarchive { thread_id } => Ok(CommandDispatchOutcome::Stop(
+            session::controls::handle_unarchive_command(inner, thread_id).await?,
+        )),
         SessionCommand::Compact => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_compact_command(inner).await?,
         )),
@@ -220,6 +247,27 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
         )
         .input(AvailableCommandInput::Unstructured(
             UnstructuredCommandInput::new("optional partial thread id and/or --no-history"),
+        )),
+        AvailableCommand::new(
+            "archive",
+            "Archive the current thread or a matched thread so it disappears from normal lists",
+        )
+        .input(AvailableCommandInput::Unstructured(
+            UnstructuredCommandInput::new("optional partial thread id"),
+        )),
+        AvailableCommand::new(
+            "delete",
+            "Alias for /archive. Hides a thread from normal lists without hard deleting data",
+        )
+        .input(AvailableCommandInput::Unstructured(
+            UnstructuredCommandInput::new("optional partial thread id"),
+        )),
+        AvailableCommand::new(
+            "unarchive",
+            "Restore an archived thread back into normal lists",
+        )
+        .input(AvailableCommandInput::Unstructured(
+            UnstructuredCommandInput::new("optional partial thread id"),
         )),
         AvailableCommand::new(
             "compact",

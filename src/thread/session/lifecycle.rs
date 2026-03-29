@@ -14,6 +14,7 @@ use super::{
     ThreadSortKey, ThreadStartParams,
 };
 use crate::thread::features::collab::remember_agent_label;
+use crate::thread::features::resume::common::thread_display_title;
 use codex_app_server_protocol::ThreadStartResponse;
 use tracing::warn;
 
@@ -302,9 +303,10 @@ impl Thread {
             .data
             .into_iter()
             .filter_map(|thread| {
+                let title = thread_display_title(&thread);
                 Some(
                     agent_client_protocol::SessionInfo::new(SessionId::new(thread.id), thread.cwd)
-                        .title(Some(thread.name.unwrap_or(thread.preview)))
+                        .title(Some(title))
                         .updated_at(Some(thread.updated_at.to_string())),
                 )
             })
