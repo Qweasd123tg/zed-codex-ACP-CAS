@@ -3,6 +3,7 @@
 use agent_client_protocol::{Error, StopReason};
 use codex_app_server_protocol::ThreadResumeParams;
 
+use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use crate::thread::{ThreadInner, replay, session_config, turn_notify};
 
 pub(in crate::thread) async fn handle_resume_command(
@@ -28,6 +29,13 @@ pub(in crate::thread) async fn handle_resume_command(
     inner.compaction_in_progress = false;
     inner.last_used_tokens = None;
     inner.context_window_size = None;
+    inner.agent_labels.clear();
+    remember_agent_label(
+        &mut inner.agent_labels,
+        inner.thread_id.clone(),
+        resume.thread.agent_nickname.clone(),
+        resume.thread.agent_role.clone(),
+    );
     inner.reset_turn_transient_state();
 
     if let Ok(models) = inner.app.model_list().await {
@@ -40,7 +48,15 @@ pub(in crate::thread) async fn handle_resume_command(
     );
     if include_history {
         let workspace_cwd = inner.workspace_cwd.clone();
-        replay::replay_turns(&inner.client, &workspace_cwd, resume.thread.turns).await;
+        warm_agent_labels_for_turns(inner, &resume.thread.turns).await;
+        let agent_labels = inner.agent_labels.clone();
+        replay::replay_turns(
+            &inner.client,
+            &workspace_cwd,
+            &agent_labels,
+            resume.thread.turns,
+        )
+        .await;
     }
 
     turn_notify::notify_config_update(inner).await;

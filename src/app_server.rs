@@ -12,10 +12,10 @@ use codex_app_server_protocol::{
     InitializeCapabilities, InitializeParams, InitializeResponse, JSONRPCError, JSONRPCErrorError,
     JSONRPCMessage, JSONRPCResponse, ModelListParams, ModelListResponse,
     PermissionsRequestApprovalResponse, RequestId, ThreadCompactStartParams,
-    ThreadCompactStartResponse, ThreadListParams, ThreadListResponse, ThreadResumeParams,
-    ThreadResumeResponse, ThreadRollbackParams, ThreadRollbackResponse, ThreadStartParams,
-    ThreadStartResponse, ToolRequestUserInputResponse, TurnInterruptParams, TurnInterruptResponse,
-    TurnStartParams, TurnStartResponse,
+    ThreadCompactStartResponse, ThreadListParams, ThreadListResponse, ThreadReadParams,
+    ThreadReadResponse, ThreadResumeParams, ThreadResumeResponse, ThreadRollbackParams,
+    ThreadRollbackResponse, ThreadStartParams, ThreadStartResponse, ToolRequestUserInputResponse,
+    TurnInterruptParams, TurnInterruptResponse, TurnStartParams, TurnStartResponse,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -143,6 +143,18 @@ impl AppServerProcess {
             params,
         };
         self.request(request, request_id, "thread/list").await
+    }
+
+    pub async fn thread_read(
+        &mut self,
+        params: ThreadReadParams,
+    ) -> Result<ThreadReadResponse, Error> {
+        let request_id = self.next_request_id();
+        let request = ClientRequest::ThreadRead {
+            request_id: request_id.clone(),
+            params,
+        };
+        self.request(request, request_id, "thread/read").await
     }
 
     pub async fn thread_compact_start(

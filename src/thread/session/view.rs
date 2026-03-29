@@ -4,7 +4,7 @@ use super::{
     AvailableCommandsUpdate, ConfigOptionUpdate, CurrentModeUpdate, Error, LoadSessionResponse,
     SessionConfigOption, SessionUpdate, Thread, session_config,
 };
-use crate::thread::{prompt_commands, replay};
+use crate::thread::{features::collab, prompt_commands, replay};
 
 impl Thread {
     // Оппортунистически обновляем кэш моделей перед обработкой load-запроса.
@@ -86,11 +86,17 @@ impl Thread {
     }
 
     pub async fn replay_loaded_history(&self) {
-        let (client, workspace_cwd, turns) = {
+        let (client, workspace_cwd, turns, agent_labels) = {
             let mut inner = self.inner.lock().await;
             let turns = std::mem::take(&mut inner.replay_turns);
-            (inner.client.clone(), inner.workspace_cwd.clone(), turns)
+            collab::warm_agent_labels_for_turns(&mut inner, &turns).await;
+            (
+                inner.client.clone(),
+                inner.workspace_cwd.clone(),
+                turns,
+                inner.agent_labels.clone(),
+            )
         };
-        replay::replay_turns(&client, &workspace_cwd, turns).await;
+        replay::replay_turns(&client, &workspace_cwd, &agent_labels, turns).await;
     }
 }

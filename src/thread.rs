@@ -17,9 +17,9 @@ use agent_client_protocol::{
 use codex_app_server_protocol::{
     AskForApproval as AppAskForApproval, ItemCompletedNotification, ItemStartedNotification,
     Model as AppModel, SandboxMode as AppSandboxMode, SandboxPolicy as AppSandboxPolicy,
-    ServerRequest, ThreadItem, ThreadListParams, ThreadResumeParams, ThreadSortKey,
-    ThreadStartParams, Turn as AppTurn, TurnDiffUpdatedNotification, TurnInterruptParams,
-    TurnStartParams, UserInput,
+    ServerRequest, ThreadItem, ThreadListParams, ThreadReadParams, ThreadResumeParams,
+    ThreadSortKey, ThreadStartParams, Turn as AppTurn, TurnDiffUpdatedNotification,
+    TurnInterruptParams, TurnStartParams, UserInput,
 };
 use codex_core::config::Config;
 use codex_protocol::config_types::ModeKind;
@@ -127,6 +127,7 @@ struct ThreadInner {
     collaboration_mode_kind: ModeKind,
     current_model: String,
     reasoning_effort: ReasoningEffort,
+    agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
     compaction_in_progress: bool,
     last_used_tokens: Option<u64>,
     context_window_size: Option<u64>,

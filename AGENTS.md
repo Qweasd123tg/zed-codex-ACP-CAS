@@ -67,6 +67,34 @@ cargo build --release --target-dir target-test
 4. Для turn-зависимых веток сохранять guard по `expected_turn_id`.
 5. После изменений mode/config отправлять `notify_config_update` или `notify_mode_and_config_update`.
 
+## Правила изменений в `collab/subagents`
+Текущий контракт в коде завязан на `ThreadItem::CollabAgentToolCall` и enum-ы из `codex-app-server-protocol`.
+
+Поддерживаемые collab-инструменты:
+- `SpawnAgent`
+- `SendInput`
+- `ResumeAgent`
+- `Wait`
+- `CloseAgent`
+
+Поддерживаемые статусы агентов:
+- `PendingInit`
+- `Running`
+- `Completed`
+- `Errored`
+- `Shutdown`
+- `NotFound`
+
+При изменениях collab/subagents соблюдать:
+1. Не выносить subagents в отдельный pipeline: это обычная ветка общего `ThreadItem`-потока.
+2. При изменении `CollabAgentTool` синхронно обновлять `src/thread/features/collab/render.rs` (`collab_tool_title`), `src/thread/core/tests.rs` и docs.
+3. При изменении `CollabAgentToolCallStatus` или `CollabAgentStatus` синхронно обновлять `src/thread/features/collab/status.rs`, `src/thread/features/collab/content.rs`, `src/thread/core/tests.rs` и docs.
+4. Сохранять симметрию `started -> completed -> replay`; live- и replay-рендер не должны расходиться по title/status/content.
+5. Не терять поля `sender_thread_id`, `receiver_thread_ids`, `prompt`, `agents_states[*].status`, `agents_states[*].message`; если upstream добавляет новые поля, сначала документировать и аккуратно прокидывать их в raw/content.
+6. `collab`-карточки оставлять в `ToolKind::Think`, если нет явной причины менять UX-контракт.
+7. Если `agent_nickname` / `agent_role` доступны через thread metadata, поднимать их в title/content и не заставлять пользователя читать голые `thread_id`.
+8. `Raw Input` и `Raw Output` для `collab` держать человекочитаемыми: prompt/target в input, краткая summary статусов в output; не сливать туда шумный JSON без необходимости.
+
 ## Тестирование
 Предпочтительный формат: unit-тесты рядом с реализацией (`#[cfg(test)]`).
 Ключевые тестовые точки:
@@ -77,6 +105,7 @@ cargo build --release --target-dir target-test
 При изменениях парсинга/протокола добавлять:
 - happy-path сценарии,
 - edge/invalid сценарии.
+- Для `collab/subagents` отдельно проверять title/status/content mapping и replay/live-симметрию.
 
 Перед PR обязательно прогонять `fmt`, `clippy`, `test`.
 

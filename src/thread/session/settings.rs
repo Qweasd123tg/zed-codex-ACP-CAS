@@ -8,6 +8,7 @@ use super::{
     APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, EditApprovalMode, Error, ModeKind,
     ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort, SessionConfigId, SessionModeId, Thread, replay,
 };
+use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use codex_app_server_protocol::ThreadRollbackParams;
 
 impl Thread {
@@ -130,7 +131,21 @@ impl Thread {
 
         if replay_history {
             let workspace_cwd = inner.workspace_cwd.clone();
-            replay::replay_turns(&inner.client, &workspace_cwd, response.thread.turns).await;
+            remember_agent_label(
+                &mut inner.agent_labels,
+                response.thread.id.clone(),
+                response.thread.agent_nickname.clone(),
+                response.thread.agent_role.clone(),
+            );
+            warm_agent_labels_for_turns(&mut inner, &response.thread.turns).await;
+            let agent_labels = inner.agent_labels.clone();
+            replay::replay_turns(
+                &inner.client,
+                &workspace_cwd,
+                &agent_labels,
+                response.thread.turns,
+            )
+            .await;
         }
 
         Ok(remaining_turns)

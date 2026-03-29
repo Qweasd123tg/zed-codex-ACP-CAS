@@ -1,6 +1,7 @@
 //! Обработчики slash-команд управления сессией (без `/resume`).
 //! Сюда вынесены compact/undo/reasoning/plan/context ветки.
 
+use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use crate::thread::{ThreadInner, replay::replay_turns, turn_notify::notify_config_update};
 use agent_client_protocol::{Error, StopReason};
 use codex_app_server_protocol::{ThreadCompactStartParams, ThreadRollbackParams};
@@ -49,7 +50,21 @@ pub(in crate::thread) async fn handle_undo_command(
         .await?;
 
     let workspace_cwd = inner.workspace_cwd.clone();
-    replay_turns(&inner.client, &workspace_cwd, response.thread.turns).await;
+    remember_agent_label(
+        &mut inner.agent_labels,
+        response.thread.id.clone(),
+        response.thread.agent_nickname.clone(),
+        response.thread.agent_role.clone(),
+    );
+    warm_agent_labels_for_turns(inner, &response.thread.turns).await;
+    let agent_labels = inner.agent_labels.clone();
+    replay_turns(
+        &inner.client,
+        &workspace_cwd,
+        &agent_labels,
+        response.thread.turns,
+    )
+    .await;
     inner
         .client
         .send_agent_text(format!("Rolled back last {num_turns} turn(s)."))

@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-02-25`.
+Обновлено: `2026-03-29`.
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -39,6 +39,7 @@ flowchart TD
     ServerRequests --> ApprovalsCommand[src/thread/features/approvals/command.rs]
     ServerRequests --> ApprovalsFile[src/thread/features/approvals/file_change.rs]
     ServerRequests --> ApprovalsUserInput[src/thread/features/approvals/user_input.rs]
+    ServerRequests --> ApprovalsPermissions[src/thread/features/approvals/permissions.rs]
 
     NotificationFeature --> NotificationDeltas[src/thread/features/notification/events/deltas.rs]
     NotificationFeature --> NotificationTurn[src/thread/features/notification/events/turn.rs]
@@ -65,6 +66,7 @@ flowchart TD
 
     TurnExecution --> PlanParse[src/thread/features/plan/parse.rs]
     TurnExecution --> PlanFallback[src/thread/features/plan/fallback.rs]
+    TurnExecution --> ReconnectGuard[src/thread/turn/execution.rs]
 ```
 
 ## 3) Почему `notification` есть и в `features`, и отдельно
@@ -112,6 +114,21 @@ flowchart LR
 
 Ключевая инварианта: симметрия `started -> completed -> replay`.
 
+Текущий протокольный контракт в коде:
+- `CollabAgentTool`: `SpawnAgent`, `SendInput`, `ResumeAgent`, `Wait`, `CloseAgent`.
+- `CollabAgentToolCallStatus`: `InProgress`, `Completed`, `Failed`.
+- `CollabAgentStatus`: `PendingInit`, `Running`, `Completed`, `Errored`, `Shutdown`, `NotFound`.
+
+Если upstream расширяет этот контракт, менять вместе:
+- `src/thread/features/collab/render.rs` для title/kind/live/replay поведения;
+- `src/thread/features/collab/status.rs` для ACP-status mapping и summary line;
+- `src/thread/features/collab/content.rs` для text payload, `raw_input`/`raw_output` и новых полей `agents_states[*]`;
+- `src/thread/core/tests.rs` для фиксированных title/status/content ожиданий;
+- `README.md` и `AGENTS.md`, чтобы правила и user-facing docs не отставали от кода.
+
+Отдельная инварианта по данным: не терять `sender_thread_id`, `receiver_thread_ids`, `prompt`, `agents_states[*].status`, `agents_states[*].message` при live/update/replay.
+Текущий UI-договор поверх этого контракта: thread metadata используется как label-cache для `agent_nickname/agent_role`, prompt у `spawn/send_input` уходит в `Raw Input`, а `Raw Output` хранит краткую summary статусов вместо сырого JSON.
+
 ## 6) Что менять вместе (чеклист)
 
 1. Новый `ThreadItem` в потоке:
@@ -137,6 +154,7 @@ flowchart LR
 - `src/thread/features/approvals/command.rs`
 - `src/thread/features/approvals/file_change.rs`
 - `src/thread/features/approvals/user_input.rs`
+- `src/thread/features/approvals/permissions.rs`
 
 5. Изменение session/config:
 - `src/thread/session/config/mod.rs`
@@ -145,6 +163,16 @@ flowchart LR
 - `src/thread/features/session/modes.rs`
 - `src/thread/features/session/events.rs`
 - `src/thread/turn/notify.rs` (`notify_config_update`, `notify_mode_and_config_update`)
+
+6. Изменение collab/subagents контракта:
+- `src/thread/features/collab/render.rs`
+- `src/thread/features/collab/status.rs`
+- `src/thread/features/collab/content.rs`
+- `src/thread/core/item_handlers.rs`
+- `src/thread/core/replay.rs`
+- `src/thread/core/tests.rs`
+- `README.md`
+- `AGENTS.md`
 
 ## 7) Зоны повышенной связности и риски
 
@@ -165,6 +193,15 @@ flowchart LR
 
 Риск: пропущенная ветка маршрутизации или двойная обработка одного события.
 
+### Reconnect / stalled turn guard
+- `src/thread/turn/execution.rs`
+- `src/thread/core/inner_state.rs`
+- `src/thread/core/terminal_updates.rs`
+- `src/thread/features/notification/events/deltas.rs`
+- `src/thread/features/notification/events/turn.rs`
+
+Риск: если не синхронизировать эти файлы вместе, можно либо снова получить вечную загрузку ACP UI, либо преждевременно завершать живой turn.
+
 ### Replay/Resume
 - `src/thread/features/resume/*`
 - `src/thread/core/replay.rs`
@@ -177,14 +214,14 @@ flowchart LR
 - `src/thread/core/item_handlers.rs`
 - `src/thread/core/replay.rs`
 
-Риск: рассинхрон карточек live/replay или несовпадение started/completed фаз.
+Риск: рассинхрон карточек live/replay, несовпадение started/completed фаз или потеря новых protocol-полей (`agents_states[*].message`, новые enum-варианты).
 
 ## 8) Feature-срезы
 
 | Модуль | Роль |
 |---|---|
-| `src/thread/features/approvals/*` | Approval-flow для command/file-change/request_user_input |
-| `src/thread/features/collab/*` | Рендер и статусы collab/subagent tool-call карточек |
+| `src/thread/features/approvals/*` | Approval-flow для command/file-change/request_user_input/permissions request |
+| `src/thread/features/collab/*` | Рендер, контент и статусы collab/subagent tool-call карточек |
 | `src/thread/features/file/*` | File-change lifecycle, preview/final diff helper-ы |
 | `src/thread/features/notification/*` | Доменные обработчики notification-событий |
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
@@ -210,7 +247,7 @@ flowchart LR
 script/export_thread_feature_map.py
 ```
 
-Артефакты:
+Артефакты генерируются локально и сейчас не хранятся в репозитории как tracked-файлы:
 - `docs/thread-feature-map.graph.json` — граф (`nodes`/`edges`) для сайтов/скриптов.
 - `docs/thread-feature-map.graph.mmd` — Mermaid graph (вставлять в `https://mermaid.live`).
 - `docs/thread-feature-map.markmap.md` — mind map markdown (вставлять в `https://markmap.js.org/repl`).

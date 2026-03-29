@@ -12,6 +12,7 @@ use super::{
     ModeKind, SessionClient, SessionId, Thread, ThreadInner, ThreadListParams, ThreadResumeParams,
     ThreadSortKey, ThreadStartParams,
 };
+use crate::thread::features::collab::remember_agent_label;
 
 impl Thread {
     // Сначала запускаем сессию app-server, чтобы последующие capability-вызовы имели валидный session id.
@@ -44,6 +45,13 @@ impl Thread {
             resolve_reasoning_effort(&models, &start.model, start.reasoning_effort);
 
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
+        let mut agent_labels = HashMap::new();
+        remember_agent_label(
+            &mut agent_labels,
+            start.thread.id.clone(),
+            start.thread.agent_nickname.clone(),
+            start.thread.agent_role.clone(),
+        );
         let thread = Thread {
             inner: tokio::sync::Mutex::new(ThreadInner {
                 session_id: session_id.clone(),
@@ -58,6 +66,7 @@ impl Thread {
                 collaboration_mode_kind: ModeKind::Default,
                 current_model: start.model,
                 reasoning_effort,
+                agent_labels,
                 compaction_in_progress: false,
                 last_used_tokens: None,
                 context_window_size: None,
@@ -118,6 +127,13 @@ impl Thread {
         let reasoning_effort =
             resolve_reasoning_effort(&models, &resume.model, resume.reasoning_effort);
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
+        let mut agent_labels = HashMap::new();
+        remember_agent_label(
+            &mut agent_labels,
+            resume.thread.id.clone(),
+            resume.thread.agent_nickname.clone(),
+            resume.thread.agent_role.clone(),
+        );
 
         Ok(Thread {
             inner: tokio::sync::Mutex::new(ThreadInner {
@@ -133,6 +149,7 @@ impl Thread {
                 collaboration_mode_kind: ModeKind::Default,
                 current_model: resume.model,
                 reasoning_effort,
+                agent_labels,
                 compaction_in_progress: false,
                 last_used_tokens: None,
                 context_window_size: None,
