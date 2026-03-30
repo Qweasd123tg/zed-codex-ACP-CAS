@@ -16,6 +16,42 @@ This project is usable, but still beta.
   - Windows `x86_64-pc-windows-msvc`
 - Behavior may still change between releases
 
+## Screenshots
+
+### Resume and thread management
+
+Resume picker with workspace-scoped thread selection:
+
+![Resume picker](screenshot/resume.png)
+
+Context selector and session controls:
+
+![Selector context](screenshot/selector%20context.png)
+
+Context limits and usage view:
+
+![Selector limits](screenshot/selector%20limits.png)
+
+### Thread operations
+
+Archive flow:
+
+![Archive flow](screenshot/archive.png)
+
+Rename flow:
+
+![Rename flow](screenshot/rename.png)
+
+Unarchive flow:
+
+![Unarchive flow](screenshot/unarchive.png)
+
+### Collaboration UI
+
+Sub-agent and collaboration tool-call rendering:
+
+![Subagents UI](screenshot/subagents.png)
+
 ## Supported Now
 
 - ACP prompt capabilities: embedded context and image input
