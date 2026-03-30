@@ -156,6 +156,28 @@ Then configure Zed to use the binary path:
 }
 ```
 
+### Add To Zed
+
+1. Install or build `codex-acp` and make sure the binary path is stable.
+2. Open your Zed settings JSON.
+3. Add a custom agent server entry pointing to the `codex-acp` binary.
+4. Restart Zed if the new agent does not appear immediately.
+
+Example:
+
+```json
+{
+  "agent_servers": {
+    "codex-acp-cas": {
+      "type": "custom",
+      "command": "/home/your-user/.local/bin/codex-acp"
+    }
+  }
+}
+```
+
+If `codex` is not already available in your environment, make sure it is installed and visible in `PATH`, because this adapter starts `codex app-server` under the hood.
+
 ### Build From Source
 
 Requirements:
