@@ -137,6 +137,7 @@ struct ThreadInner {
     compaction_in_progress: bool,
     last_used_tokens: Option<u64>,
     context_window_size: Option<u64>,
+    context_usage_source: Option<ContextUsageSource>,
     account_rate_limits: Option<AppRateLimitSnapshot>,
     models: Vec<AppModel>,
     active_turn_id: Option<String>,
@@ -159,6 +160,12 @@ struct ThreadInner {
     turn_last_progress_at: std::time::Instant,
     turn_reconnect_warning_count: u32,
     turn_reconnect_retry_limit_hit: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContextUsageSource {
+    Live,
+    Cached,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

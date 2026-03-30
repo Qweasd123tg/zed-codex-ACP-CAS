@@ -1,7 +1,8 @@
 //! Обновления runtime-настроек сессии (mode/model/reasoning/context), доступные ACP-клиентам.
 
 use super::session_config::{
-    CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, find_model_for_current,
+    CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
+    combined_limits_reset_message, context_usage_message, find_model_for_current,
     normalize_reasoning_effort_for_model, parse_reasoning_effort, reasoning_effort_value,
 };
 use super::{
@@ -78,6 +79,7 @@ impl Thread {
         );
         inner.last_used_tokens = None;
         inner.context_window_size = None;
+        inner.context_usage_source = None;
         Ok(())
     }
 
@@ -105,8 +107,26 @@ impl Thread {
     ) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
         match value.0.as_ref() {
-            CONTEXT_STATUS_VALUE => Ok(()),
-            CONTEXT_LIMITS_VALUE => Ok(()),
+            CONTEXT_STATUS_VALUE => {
+                inner
+                    .client
+                    .send_agent_text(context_usage_message(
+                        inner.last_used_tokens,
+                        inner.context_window_size,
+                        inner.context_usage_source,
+                    ))
+                    .await;
+                Ok(())
+            }
+            CONTEXT_LIMITS_VALUE => {
+                inner
+                    .client
+                    .send_agent_text(combined_limits_reset_message(
+                        inner.account_rate_limits.as_ref(),
+                    ))
+                    .await;
+                Ok(())
+            }
             CONTEXT_COMPACT_VALUE => {
                 let message = start_context_compaction(&mut inner).await?;
                 inner.client.send_agent_text(message).await;

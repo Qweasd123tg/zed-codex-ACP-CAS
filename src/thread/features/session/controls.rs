@@ -82,6 +82,7 @@ pub(in crate::thread) async fn start_context_compaction(
     // Статистика токенов может оставаться устаревшей (часто 100%) до следующего завершённого turn модели.
     // Сразу после /compact очищаем кэш usage, чтобы процент контекста не вводил в заблуждение.
     inner.last_used_tokens = None;
+    inner.context_usage_source = None;
     notify_config_update(inner).await;
     Ok("Context compaction started. Wait for \"Context compacted.\" before sending the next prompt.".to_string())
 }
@@ -242,6 +243,7 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
     inner.compaction_in_progress = false;
     inner.last_used_tokens = None;
     inner.context_window_size = None;
+    inner.context_usage_source = None;
     inner.agent_labels = HashMap::new();
     remember_agent_label(
         &mut inner.agent_labels,

@@ -15,9 +15,9 @@ use super::session_config::{
     policy_to_mode, resolve_reasoning_effort, to_app_approval, to_app_sandbox_mode,
 };
 use super::{
-    AppServerProcess, ClientCapabilities, Config, EditApprovalMode, Error, ListSessionsResponse,
-    ModeKind, SessionClient, SessionId, Thread, ThreadInner, ThreadListParams, ThreadResumeParams,
-    ThreadSortKey, ThreadStartParams,
+    AppServerProcess, ClientCapabilities, Config, ContextUsageSource, EditApprovalMode, Error,
+    ListSessionsResponse, ModeKind, SessionClient, SessionId, Thread, ThreadInner,
+    ThreadListParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
 };
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
@@ -257,6 +257,7 @@ impl Thread {
                 compaction_in_progress: false,
                 last_used_tokens: None,
                 context_window_size: None,
+                context_usage_source: None,
                 account_rate_limits,
                 models,
                 active_turn_id: None,
@@ -443,6 +444,7 @@ impl Thread {
                 compaction_in_progress: false,
                 last_used_tokens: cached_context_usage.map(|(used, _)| used),
                 context_window_size: cached_context_usage.map(|(_, size)| size),
+                context_usage_source: cached_context_usage.map(|_| ContextUsageSource::Cached),
                 account_rate_limits,
                 models,
                 active_turn_id: None,

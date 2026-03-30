@@ -1,8 +1,9 @@
 //! Маппинг конфигурации сессии между ACP-опциями и runtime-настройками Codex app-server.
 
 use crate::thread::{
-    AppAskForApproval, AppModel, AppSandboxMode, EditApprovalMode, ModeKind, ReasoningEffort,
-    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption, ThreadInner,
+    AppAskForApproval, AppModel, AppSandboxMode, ContextUsageSource, EditApprovalMode, ModeKind,
+    ReasoningEffort, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+    ThreadInner,
 };
 
 #[path = "context.rs"]
@@ -28,6 +29,7 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) current_used_tokens: Option<u64>,
     pub(in crate::thread) current_context_window_size: Option<u64>,
     pub(in crate::thread) current_usage_percent: Option<u64>,
+    pub(in crate::thread) current_context_usage_source: Option<ContextUsageSource>,
     pub(in crate::thread) current_account_rate_limits:
         Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
     pub(in crate::thread) compaction_in_progress: bool,
@@ -45,6 +47,7 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         current_used_tokens: inner.last_used_tokens,
         current_context_window_size: inner.context_window_size,
         current_usage_percent: usage_percent(inner.last_used_tokens, inner.context_window_size),
+        current_context_usage_source: inner.context_usage_source,
         current_account_rate_limits: inner.account_rate_limits.as_ref(),
         compaction_in_progress: inner.compaction_in_progress,
         approval: inner.approval_policy,
@@ -62,6 +65,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         current_used_tokens,
         current_context_window_size,
         current_usage_percent,
+        current_context_usage_source,
         current_account_rate_limits,
         compaction_in_progress,
         approval,
@@ -180,6 +184,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 current_used_tokens,
                 current_context_window_size,
                 current_usage_percent,
+                current_context_usage_source,
                 current_account_rate_limits,
                 compaction_in_progress,
             ),
@@ -190,7 +195,10 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
     options
 }
 
-pub(super) use context::{CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE};
+pub(super) use context::{
+    CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, context_usage_message,
+};
+pub(super) use limits::combined_limits_reset_message;
 pub(super) use reasoning::{
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
     reasoning_effort_value, resolve_reasoning_effort,

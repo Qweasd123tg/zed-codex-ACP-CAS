@@ -74,6 +74,18 @@ pub(in crate::thread) async fn handle_notification(
             events::usage::emit_account_rate_limits_updated(inner, rate_limits).await;
             Ok(None)
         }
+        ServerNotification::ConfigWarning(warning) => {
+            events::warnings::emit_config_warning(inner, warning).await;
+            Ok(None)
+        }
+        ServerNotification::DeprecationNotice(notice) => {
+            events::warnings::emit_deprecation_notice(inner, notice).await;
+            Ok(None)
+        }
+        ServerNotification::WindowsWorldWritableWarning(warning) => {
+            events::warnings::emit_windows_world_writable_warning(inner, warning).await;
+            Ok(None)
+        }
         ServerNotification::ThreadNameUpdated(ThreadNameUpdatedNotification {
             thread_id,
             thread_name,

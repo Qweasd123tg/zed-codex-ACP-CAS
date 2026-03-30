@@ -7,3 +7,5 @@ pub(in crate::thread) mod deltas;
 pub(in crate::thread) mod turn;
 #[path = "usage.rs"]
 pub(in crate::thread) mod usage;
+#[path = "warnings.rs"]
+pub(in crate::thread) mod warnings;

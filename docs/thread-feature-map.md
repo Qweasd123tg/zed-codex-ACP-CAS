@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-03-29`.
+Обновлено: `2026-03-30`.
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -45,6 +45,7 @@ flowchart TD
     NotificationFeature --> NotificationDeltas[src/thread/features/notification/events/deltas.rs]
     NotificationFeature --> NotificationTurn[src/thread/features/notification/events/turn.rs]
     NotificationFeature --> NotificationUsage[src/thread/features/notification/events/usage.rs]
+    NotificationFeature --> NotificationWarnings[src/thread/features/notification/events/warnings.rs]
     NotificationFeature --> ItemHandlers[src/thread/core/item_handlers.rs]
     NotificationFeature --> TerminalUpdates[src/thread/core/terminal_updates.rs]
     NotificationFeature --> TurnDiff[src/thread/turn/diff.rs]
@@ -167,8 +168,11 @@ flowchart LR
 
 5. Изменение session/config, archive и thread title:
 - `src/thread/session/config/mod.rs`
+- `src/thread/session/config/context.rs`
+- `src/thread/session/config/limits.rs`
 - `src/thread/session/config/modes.rs`
 - `src/thread/session/config/reasoning.rs`
+- `src/thread/session/settings.rs`
 - `src/thread/features/session/modes.rs`
 - `src/thread/features/session/controls.rs`
 - `src/thread/features/session/events.rs`
@@ -207,6 +211,7 @@ flowchart LR
 - `src/thread/core/server_requests.rs`
 
 Риск: пропущенная ветка маршрутизации или двойная обработка одного события.
+Отдельно сюда же относятся advisory notifications (`configWarning`, deprecation notice, Windows sandbox warnings): их легко забыть в `_ => Ok(None)` и снова сделать UX немым.
 
 ### Reconnect / stalled turn guard
 - `src/thread/turn/execution.rs`
@@ -242,10 +247,10 @@ flowchart LR
 | `src/thread/features/approvals/*` | Approval-flow для command/file-change/request_user_input/permissions request |
 | `src/thread/features/collab/*` | Рендер, контент и статусы collab/subagent tool-call карточек |
 | `src/thread/features/file/*` | File-change lifecycle, preview/final diff helper-ы |
-| `src/thread/features/notification/*` | Доменные обработчики notification-событий |
+| `src/thread/features/notification/*` | Доменные обработчики notification-событий, включая usage/reconnect/warning forwarding |
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
 | `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread, transport scrub при переключении |
-| `src/thread/features/session/*` | `/compact`, `/undo`, `/context`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, archive/unarchive picker UI, session replay события и title update |
+| `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, archive/unarchive picker UI, session replay события, title update и runtime handling нижних session selectors |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
 | `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw payload |
 | `src/thread/features/status_mapping.rs` | app-server status -> ACP status |

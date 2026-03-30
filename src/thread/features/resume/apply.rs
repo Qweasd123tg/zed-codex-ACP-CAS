@@ -8,7 +8,7 @@ use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::features::session::thread_switch::flush_thread_switch_transport_state;
 use crate::thread::session_lifecycle::thread_resume_with_startup_retry;
 use crate::thread::session_usage_cache::restore_cached_context_usage;
-use crate::thread::{ThreadInner, replay, session_config, turn_notify};
+use crate::thread::{ContextUsageSource, ThreadInner, replay, session_config, turn_notify};
 
 pub(in crate::thread) async fn handle_resume_command(
     inner: &mut ThreadInner,
@@ -50,6 +50,7 @@ pub(in crate::thread) async fn handle_resume_command(
     );
     inner.last_used_tokens = cached_context_usage.map(|(used, _)| used);
     inner.context_window_size = cached_context_usage.map(|(_, size)| size);
+    inner.context_usage_source = cached_context_usage.map(|_| ContextUsageSource::Cached);
     inner.agent_labels.clear();
     remember_agent_label(
         &mut inner.agent_labels,
@@ -63,8 +64,13 @@ pub(in crate::thread) async fn handle_resume_command(
     if let Ok(models) = inner.app.model_list().await {
         inner.models = models.data;
     }
-    if let Ok(response) = inner.app.get_account_rate_limits().await {
-        inner.account_rate_limits = Some(response.rate_limits);
+    match inner.app.get_account_rate_limits().await {
+        Ok(response) => {
+            inner.account_rate_limits = Some(response.rate_limits);
+        }
+        Err(_) => {
+            inner.account_rate_limits = None;
+        }
     }
     flush_thread_switch_transport_state(inner).await?;
     inner.reasoning_effort = session_config::resolve_reasoning_effort(

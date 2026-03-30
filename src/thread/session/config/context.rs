@@ -3,7 +3,7 @@
 use codex_app_server_protocol::RateLimitSnapshot;
 
 use super::limits::{combined_limits_reset_message, combined_limits_status_label};
-use crate::thread::SessionConfigSelectOption;
+use crate::thread::{ContextUsageSource, SessionConfigSelectOption};
 
 pub(in crate::thread) const CONTEXT_STATUS_VALUE: &str = "status";
 pub(in crate::thread) const CONTEXT_LIMITS_VALUE: &str = "limits_status";
@@ -13,6 +13,7 @@ pub(in crate::thread) fn context_control_options(
     used: Option<u64>,
     size: Option<u64>,
     usage_percent: Option<u64>,
+    usage_source: Option<ContextUsageSource>,
     rate_limits: Option<&RateLimitSnapshot>,
     compaction_in_progress: bool,
 ) -> Vec<SessionConfigSelectOption> {
@@ -21,7 +22,7 @@ pub(in crate::thread) fn context_control_options(
             CONTEXT_STATUS_VALUE,
             context_status_label(used, size, usage_percent, compaction_in_progress),
         )
-        .description(context_usage_message(used, size)),
+        .description(context_usage_message(used, size, usage_source)),
         SessionConfigSelectOption::new(
             CONTEXT_LIMITS_VALUE,
             combined_limits_status_label(rate_limits),
@@ -32,17 +33,35 @@ pub(in crate::thread) fn context_control_options(
     ]
 }
 
-pub(in crate::thread) fn context_usage_message(used: Option<u64>, size: Option<u64>) -> String {
+pub(in crate::thread) fn context_usage_message(
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_source: Option<ContextUsageSource>,
+) -> String {
     match (used, size) {
         (Some(used), Some(size)) if size > 0 => {
-            format!("Context usage: {used}/{size} tokens.")
+            format!(
+                "Context usage: {used}/{size} tokens.\nSource: {}.",
+                context_usage_source_label(usage_source)
+            )
         }
         (Some(used), None) => {
-            format!("Context usage: {used} tokens (window size is not available yet).")
+            format!(
+                "Context usage: {used} tokens (window size is not available yet).\nSource: {}.",
+                context_usage_source_label(usage_source)
+            )
         }
         _ => {
             "Context usage is not available yet. App-server reports it after the first completed model turn, and resume restores the last cached value when available.".to_string()
         }
+    }
+}
+
+fn context_usage_source_label(source: Option<ContextUsageSource>) -> &'static str {
+    match source {
+        Some(ContextUsageSource::Live) => "live",
+        Some(ContextUsageSource::Cached) => "cached",
+        None => "---",
     }
 }
 
@@ -68,20 +87,28 @@ mod tests {
         CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, context_control_options,
         context_usage_message,
     };
+    use crate::thread::ContextUsageSource;
     use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
     use codex_protocol::account::PlanType;
 
     #[test]
     fn context_messages_include_usage() {
         assert_eq!(
-            context_usage_message(Some(157_835), Some(258_400)),
-            "Context usage: 157835/258400 tokens."
+            context_usage_message(Some(157_835), Some(258_400), Some(ContextUsageSource::Live)),
+            "Context usage: 157835/258400 tokens.\nSource: live."
         );
     }
 
     #[test]
     fn context_options_include_status_actions_and_compact() {
-        let options = context_control_options(Some(157_835), Some(258_400), Some(61), None, false);
+        let options = context_control_options(
+            Some(157_835),
+            Some(258_400),
+            Some(61),
+            Some(ContextUsageSource::Live),
+            None,
+            false,
+        );
         assert_eq!(options[0].value.0.as_ref(), CONTEXT_STATUS_VALUE);
         assert_eq!(options[1].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
         assert_eq!(options[2].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
@@ -89,7 +116,7 @@ mod tests {
 
     #[test]
     fn context_options_use_dashes_when_usage_is_unknown() {
-        let options = context_control_options(None, None, None, None, false);
+        let options = context_control_options(None, None, None, None, None, false);
         assert_eq!(options[0].name, "---");
         assert_eq!(options[1].name, "5h -- · wk --");
         assert_eq!(options[2].name, "Compact now");
@@ -97,8 +124,19 @@ mod tests {
 
     #[test]
     fn context_status_shows_percentage_only() {
-        let options = context_control_options(Some(195_499), Some(258_400), Some(76), None, false);
+        let options = context_control_options(
+            Some(195_499),
+            Some(258_400),
+            Some(76),
+            Some(ContextUsageSource::Cached),
+            None,
+            false,
+        );
         assert_eq!(options[0].name, "76% ctx");
+        assert_eq!(
+            options[0].description.as_deref(),
+            Some("Context usage: 195499/258400 tokens.\nSource: cached.")
+        );
     }
 
     #[test]
@@ -124,6 +162,7 @@ mod tests {
             Some(195_499),
             Some(258_400),
             Some(76),
+            Some(ContextUsageSource::Live),
             Some(&snapshot),
             false,
         );

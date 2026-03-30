@@ -3,8 +3,8 @@
 use codex_app_server_protocol::RateLimitSnapshot;
 
 use crate::thread::{
-    ThreadInner, session_config::i64_to_u64_saturating, session_usage_cache::persist_context_usage,
-    turn_notify::notify_config_update,
+    ContextUsageSource, ThreadInner, session_config::i64_to_u64_saturating,
+    session_usage_cache::persist_context_usage, turn_notify::notify_config_update,
 };
 
 // Синхронизируем usage-конфиг при очередном token-usage update для активного thread.
@@ -23,6 +23,7 @@ pub(in crate::thread) async fn emit_thread_token_usage_updated(
     // in-window total последнего turn.
     let mut used = i64_to_u64_saturating(last_total_tokens);
     inner.last_used_tokens = Some(used);
+    inner.context_usage_source = Some(ContextUsageSource::Live);
     let size = model_context_window
         .map(i64_to_u64_saturating)
         .filter(|size| *size > 0);

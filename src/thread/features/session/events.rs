@@ -51,6 +51,7 @@ pub(in crate::thread) fn mark_context_compaction_started(inner: &mut ThreadInner
 pub(in crate::thread) async fn emit_context_compaction_completed(inner: &mut ThreadInner) {
     inner.compaction_in_progress = false;
     inner.last_used_tokens = None;
+    inner.context_usage_source = None;
     notify_config_update(inner).await;
     inner.client.send_agent_thought("Context compacted.").await;
 }
