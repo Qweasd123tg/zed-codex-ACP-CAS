@@ -2,9 +2,10 @@
 
 use agent_client_protocol::Error;
 use codex_app_server_protocol::{
-    FileChangeOutputDeltaNotification, JSONRPCNotification, McpToolCallProgressNotification,
-    ReasoningSummaryTextDeltaNotification, ReasoningTextDeltaNotification, ServerNotification,
-    ThreadNameUpdatedNotification, ThreadTokenUsageUpdatedNotification,
+    AccountRateLimitsUpdatedNotification, FileChangeOutputDeltaNotification, JSONRPCNotification,
+    McpToolCallProgressNotification, ReasoningSummaryTextDeltaNotification,
+    ReasoningTextDeltaNotification, ServerNotification, ThreadNameUpdatedNotification,
+    ThreadTokenUsageUpdatedNotification,
 };
 
 use crate::thread::{
@@ -64,6 +65,13 @@ pub(in crate::thread) async fn handle_notification(
                 token_usage.model_context_window,
             )
             .await;
+            Ok(None)
+        }
+        ServerNotification::AccountRateLimitsUpdated(AccountRateLimitsUpdatedNotification {
+            rate_limits,
+            ..
+        }) => {
+            events::usage::emit_account_rate_limits_updated(inner, rate_limits).await;
             Ok(None)
         }
         ServerNotification::ThreadNameUpdated(ThreadNameUpdatedNotification {

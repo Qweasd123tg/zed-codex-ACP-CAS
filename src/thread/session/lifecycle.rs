@@ -219,6 +219,11 @@ impl Thread {
             .await
             .map(|response| response.data)
             .unwrap_or_default();
+        let account_rate_limits = app
+            .get_account_rate_limits()
+            .await
+            .ok()
+            .map(|response| response.rate_limits);
         let reasoning_effort =
             resolve_reasoning_effort(&models, &start.model, start.reasoning_effort);
 
@@ -252,6 +257,7 @@ impl Thread {
                 compaction_in_progress: false,
                 last_used_tokens: None,
                 context_window_size: None,
+                account_rate_limits,
                 models,
                 active_turn_id: None,
                 active_turn_mode_kind: None,
@@ -394,6 +400,11 @@ impl Thread {
             .await
             .map(|response| response.data)
             .unwrap_or_default();
+        let account_rate_limits = app
+            .get_account_rate_limits()
+            .await
+            .ok()
+            .map(|response| response.rate_limits);
         let reasoning_effort =
             resolve_reasoning_effort(&models, &resume.model, resume.reasoning_effort);
         let context_usage_cache_path = context_usage_cache_path(&config.codex_home);
@@ -432,6 +443,7 @@ impl Thread {
                 compaction_in_progress: false,
                 last_used_tokens: cached_context_usage.map(|(used, _)| used),
                 context_window_size: cached_context_usage.map(|(_, size)| size),
+                account_rate_limits,
                 models,
                 active_turn_id: None,
                 active_turn_mode_kind: None,

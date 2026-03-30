@@ -1,5 +1,7 @@
 //! Usage notification-ветки (token usage / context window updates).
 
+use codex_app_server_protocol::RateLimitSnapshot;
+
 use crate::thread::{
     ThreadInner, session_config::i64_to_u64_saturating, session_usage_cache::persist_context_usage,
     turn_notify::notify_config_update,
@@ -48,5 +50,14 @@ pub(in crate::thread) async fn emit_thread_token_usage_updated(
             );
         }
     }
+    notify_config_update(inner).await;
+}
+
+// Лимиты аккаунта отображаются в config selector и должны обновляться live.
+pub(in crate::thread) async fn emit_account_rate_limits_updated(
+    inner: &mut ThreadInner,
+    rate_limits: RateLimitSnapshot,
+) {
+    inner.account_rate_limits = Some(rate_limits);
     notify_config_update(inner).await;
 }

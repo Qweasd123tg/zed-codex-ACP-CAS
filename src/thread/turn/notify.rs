@@ -6,13 +6,7 @@ use super::{ConfigOptionUpdate, CurrentModeUpdate, SessionUpdate, ThreadInner};
 
 // Отправляем текущий режим и сразу следом обновление конфигурации.
 pub(super) async fn notify_mode_and_config_update(inner: &ThreadInner) {
-    let current_mode_id = mode_state(
-        inner.approval_policy,
-        inner.sandbox_mode,
-        inner.edit_approval_mode,
-        inner.collaboration_mode_kind,
-    )
-    .current_mode_id;
+    let current_mode_id = mode_state(inner.collaboration_mode_kind).current_mode_id;
     inner
         .client
         .send_notification(SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(

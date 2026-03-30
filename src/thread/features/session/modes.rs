@@ -1,11 +1,15 @@
 //! Режимные slash-команды сессии: `/plan on|off`.
 
-use agent_client_protocol::{Error, Plan, SessionUpdate, StopReason};
+use agent_client_protocol::{Error, StopReason};
 use codex_protocol::config_types::ModeKind;
 
 use crate::thread::{
-    APPROVAL_PRESETS, AUTO_MODE_ID, EditApprovalMode, ThreadInner,
-    features::plan::collaboration_mode_label, turn_notify::notify_mode_and_config_update,
+    ThreadInner,
+    features::plan::{
+        clear_visible_plan_state, collaboration_mode_label, has_visible_plan_state,
+        should_clear_visible_plan_for_mode_change,
+    },
+    turn_notify::notify_mode_and_config_update,
 };
 
 pub(in crate::thread) async fn handle_plan_mode_command(
@@ -24,26 +28,11 @@ pub(in crate::thread) async fn handle_plan_mode_command(
     }
 
     if let Some(mode) = mode {
-        if mode == ModeKind::Plan
-            && let Some(default_preset) = APPROVAL_PRESETS
-                .iter()
-                .find(|preset| preset.id == AUTO_MODE_ID)
-        {
-            inner.apply_mode_preset(
-                default_preset,
-                EditApprovalMode::AutoApprove,
-                ModeKind::Plan,
-            );
-        } else {
-            inner.collaboration_mode_kind = mode;
-        }
-        if mode == ModeKind::Default {
-            inner.last_plan_steps.clear();
-            inner.carryover_plan_steps = None;
-            inner
-                .client
-                .send_notification(SessionUpdate::Plan(Plan::new(Vec::new())))
-                .await;
+        let previous_mode = inner.collaboration_mode_kind;
+        let had_visible_plan_state = has_visible_plan_state(inner);
+        inner.collaboration_mode_kind = mode;
+        if should_clear_visible_plan_for_mode_change(previous_mode, mode, had_visible_plan_state) {
+            clear_visible_plan_state(inner).await;
         }
         inner.sync_sandbox_mode_from_policy("handle_plan_mode_command");
         notify_mode_and_config_update(inner).await;

@@ -2,9 +2,9 @@
 
 use crate::thread::{
     APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, AppAskForApproval, AppModel,
-    AppSandboxMode, AppSandboxPolicy, AskForApproval, EditApprovalMode, ModeKind, ModelId,
-    ModelInfo, PLAN_SESSION_MODE_ID, SandboxPolicy, SessionMode, SessionModeId, SessionModeState,
-    SessionModelState,
+    AppSandboxMode, AppSandboxPolicy, AskForApproval, DEFAULT_SESSION_MODE_ID, EditApprovalMode,
+    ModeKind, ModelId, ModelInfo, PLAN_SESSION_MODE_ID, SandboxPolicy, SessionMode, SessionModeId,
+    SessionModeState, SessionModelState,
 };
 
 // Сатурируем signed-значения, чтобы избежать underflow при конвертации счётчиков протокола.
@@ -36,12 +36,28 @@ pub(in crate::thread) fn policy_to_mode(policy: &AppSandboxPolicy) -> AppSandbox
     }
 }
 
-pub(in crate::thread) fn mode_state(
+pub(in crate::thread) fn mode_state(collaboration_mode_kind: ModeKind) -> SessionModeState {
+    let current_mode_id = SessionModeId::new(match collaboration_mode_kind {
+        ModeKind::Plan => PLAN_SESSION_MODE_ID,
+        _ => DEFAULT_SESSION_MODE_ID,
+    });
+
+    SessionModeState::new(
+        current_mode_id,
+        vec![
+            SessionMode::new(DEFAULT_SESSION_MODE_ID, "Chat")
+                .description("Standard back-and-forth coding mode."),
+            SessionMode::new(PLAN_SESSION_MODE_ID, "Plan")
+                .description("Plan-first mode with visible step tracking."),
+        ],
+    )
+}
+
+pub(in crate::thread) fn current_permission_mode_id(
     approval: AppAskForApproval,
     sandbox: AppSandboxMode,
     edit_approval_mode: EditApprovalMode,
-    collaboration_mode_kind: ModeKind,
-) -> SessionModeState {
+) -> SessionModeId {
     let current = APPROVAL_PRESETS
         .iter()
         .find(|preset| {
@@ -54,36 +70,54 @@ pub(in crate::thread) fn mode_state(
                 .find(|preset| preset.id == "read-only")
                 .expect("read-only preset should exist")
         });
-    let current_mode_id = if collaboration_mode_kind == ModeKind::Plan {
-        SessionModeId::new(PLAN_SESSION_MODE_ID)
-    } else if current.id == AUTO_MODE_ID && edit_approval_mode == EditApprovalMode::AskEveryEdit {
+
+    if current.id == AUTO_MODE_ID && edit_approval_mode == EditApprovalMode::AskEveryEdit {
         SessionModeId::new(AUTO_ASK_EDITS_MODE_ID)
     } else {
         SessionModeId::new(current.id)
-    };
-
-    let mut available_modes = Vec::new();
-    for preset in APPROVAL_PRESETS.iter() {
-        if preset.id == AUTO_MODE_ID {
-            available_modes.push(
-                SessionMode::new(AUTO_MODE_ID, preset.label).description(
-                    "Default mode: file edits are auto-approved (Plan mode still asks).",
-                ),
-            );
-            available_modes.push(
-                SessionMode::new(AUTO_ASK_EDITS_MODE_ID, "Default (Ask on edits)")
-                    .description("Default mode with confirmation popup for every file edit."),
-            );
-        } else {
-            available_modes
-                .push(SessionMode::new(preset.id, preset.label).description(preset.description));
-        }
     }
-    available_modes.push(SessionMode::new(PLAN_SESSION_MODE_ID, "Plan").description(
-        "Plan-first mode with visible step tracking (uses Default sandbox/approval).",
-    ));
+}
 
-    SessionModeState::new(current_mode_id, available_modes)
+pub(in crate::thread) fn permission_modes(
+    approval: AppAskForApproval,
+    sandbox: AppSandboxMode,
+    edit_approval_mode: EditApprovalMode,
+) -> Vec<SessionMode> {
+    let current_mode_id = current_permission_mode_id(approval, sandbox, edit_approval_mode);
+    let mut available_modes = Vec::new();
+    if current_mode_id.0.as_ref() == "read-only"
+        && let Some(read_only_preset) = APPROVAL_PRESETS
+            .iter()
+            .find(|preset| preset.id == "read-only")
+    {
+        available_modes.push(
+            SessionMode::new(read_only_preset.id, read_only_preset.label)
+                .description(read_only_preset.description),
+        );
+    }
+    if let Some(default_preset) = APPROVAL_PRESETS
+        .iter()
+        .find(|preset| preset.id == AUTO_MODE_ID)
+    {
+        available_modes.push(
+            SessionMode::new(AUTO_MODE_ID, default_preset.label)
+                .description("Default mode: file edits are auto-approved (Plan mode still asks)."),
+        );
+        available_modes.push(
+            SessionMode::new(AUTO_ASK_EDITS_MODE_ID, "Default (Ask on edits)")
+                .description("Default mode with confirmation popup for every file edit."),
+        );
+    }
+    if let Some(full_access_preset) = APPROVAL_PRESETS
+        .iter()
+        .find(|preset| preset.id == "full-access")
+    {
+        available_modes.push(
+            SessionMode::new(full_access_preset.id, full_access_preset.label)
+                .description(full_access_preset.description),
+        );
+    }
+    available_modes
 }
 
 pub(in crate::thread) fn session_model_state(

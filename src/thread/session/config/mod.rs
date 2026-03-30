@@ -7,14 +7,16 @@ use crate::thread::{
 
 #[path = "context.rs"]
 mod context;
+#[path = "limits.rs"]
+mod limits;
 #[path = "modes.rs"]
 mod modes;
 #[path = "reasoning.rs"]
 mod reasoning;
 
 pub(super) use modes::{
-    i64_to_u64_saturating, mode_state, policy_to_mode, session_model_state, to_app_approval,
-    to_app_sandbox_mode,
+    current_permission_mode_id, i64_to_u64_saturating, mode_state, permission_modes,
+    policy_to_mode, session_model_state, to_app_approval, to_app_sandbox_mode,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -26,6 +28,8 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) current_used_tokens: Option<u64>,
     pub(in crate::thread) current_context_window_size: Option<u64>,
     pub(in crate::thread) current_usage_percent: Option<u64>,
+    pub(in crate::thread) current_account_rate_limits:
+        Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
     pub(in crate::thread) compaction_in_progress: bool,
     pub(in crate::thread) approval: AppAskForApproval,
     pub(in crate::thread) sandbox: AppSandboxMode,
@@ -41,6 +45,7 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         current_used_tokens: inner.last_used_tokens,
         current_context_window_size: inner.context_window_size,
         current_usage_percent: usage_percent(inner.last_used_tokens, inner.context_window_size),
+        current_account_rate_limits: inner.account_rate_limits.as_ref(),
         compaction_in_progress: inner.compaction_in_progress,
         approval: inner.approval_policy,
         sandbox: inner.sandbox_mode,
@@ -57,6 +62,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         current_used_tokens,
         current_context_window_size,
         current_usage_percent,
+        current_account_rate_limits,
         compaction_in_progress,
         approval,
         sandbox,
@@ -64,12 +70,8 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         collaboration_mode_kind,
     } = input;
 
-    let mode_state = mode_state(
-        approval,
-        sandbox,
-        edit_approval_mode,
-        collaboration_mode_kind,
-    );
+    let mode_state = mode_state(collaboration_mode_kind);
+    let current_permissions_id = current_permission_mode_id(approval, sandbox, edit_approval_mode);
     let current_model_entry = find_model_for_current(models, current_model);
     let current_model_id = current_model_entry
         .map(|model| model.id.clone())
@@ -77,7 +79,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
     let current_effort_value = reasoning_effort_value(current_reasoning_effort);
     let current_effort_label = reasoning::reasoning_effort_option_label(current_reasoning_effort);
 
-    let mut options = Vec::with_capacity(3);
+    let mut options = Vec::with_capacity(5);
     let mut mode_options = Vec::with_capacity(mode_state.available_modes.len());
     for mode in mode_state.available_modes {
         mode_options.push(
@@ -85,14 +87,26 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         );
     }
     options.push(
+        SessionConfigOption::select("mode", "Mode", mode_state.current_mode_id.0, mode_options)
+            .category(SessionConfigOptionCategory::Mode)
+            .description("Choose how the agent should collaborate in this session"),
+    );
+
+    let mut permission_options = Vec::new();
+    for permission_mode in permission_modes(approval, sandbox, edit_approval_mode) {
+        permission_options.push(
+            SessionConfigSelectOption::new(permission_mode.id.0, permission_mode.name)
+                .description(permission_mode.description),
+        );
+    }
+    options.push(
         SessionConfigOption::select(
-            "mode",
-            "Approval Preset",
-            mode_state.current_mode_id.0,
-            mode_options,
+            "permissions",
+            "Permissions",
+            current_permissions_id.0,
+            permission_options,
         )
-        .category(SessionConfigOptionCategory::Mode)
-        .description("Choose an approval and sandboxing preset for your session"),
+        .description("Choose file edit and sandbox permission behavior"),
     );
 
     let mut model_options = Vec::with_capacity(models.len() + 1);
@@ -166,18 +180,17 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 current_used_tokens,
                 current_context_window_size,
                 current_usage_percent,
+                current_account_rate_limits,
                 compaction_in_progress,
             ),
         )
-        .description("Inspect context usage or start compaction"),
+        .description("Inspect context usage, limits, or start compaction"),
     );
 
     options
 }
 
-pub(super) use context::{
-    CONTEXT_COMPACT_VALUE, CONTEXT_STATUS_VALUE, CONTEXT_USAGE_VALUE, context_usage_message,
-};
+pub(super) use context::{CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE};
 pub(super) use reasoning::{
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
     reasoning_effort_value, resolve_reasoning_effort,

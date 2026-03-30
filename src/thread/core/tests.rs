@@ -15,19 +15,22 @@ use super::features::file::changes::{
 use super::features::plan::{
     collaboration_mode_for_turn, fallback_plan_can_enter_summarizing,
     fallback_plan_entries_for_steps, fallback_plan_should_advance, limit_plan_entries,
-    plan_entries_all_pending, plan_from_plan_item_text, plan_from_text, promote_first_pending_step,
+    parse_collaboration_mode, plan_entries_all_pending, plan_from_plan_item_text, plan_from_text,
+    promote_first_pending_step, should_clear_visible_plan_for_mode_change,
 };
 use super::features::tool_call_ui::kind::{command_looks_like_verification, command_tool_kind};
 use super::features::tool_call_ui::title::command_tool_title;
 use super::prompt_commands::parse_session_command;
 use super::session_config::{
-    mode_state, parse_reasoning_effort, policy_to_mode, to_app_approval, to_app_sandbox_mode,
+    current_permission_mode_id, mode_state, parse_reasoning_effort, permission_modes,
+    policy_to_mode, to_app_approval, to_app_sandbox_mode,
 };
 use super::turn_diff::parse_turn_unified_diff_files;
 use super::unified_diff::{apply_unified_diff_to_text, unified_diff_to_old_new};
 use super::{
-    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, EditApprovalMode, FallbackPlanPhase,
-    FallbackPlanState, MAX_VISIBLE_PLAN_ENTRIES, NONE_OF_THE_ABOVE, SessionCommand,
+    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID,
+    EditApprovalMode, FallbackPlanPhase, FallbackPlanState, MAX_VISIBLE_PLAN_ENTRIES,
+    NONE_OF_THE_ABOVE, PLAN_SESSION_MODE_ID, SessionCommand,
 };
 use agent_client_protocol::{
     Content, ContentBlock, PermissionOptionKind, Plan, PlanEntry, PlanEntryPriority,
@@ -259,6 +262,11 @@ fn parses_plan_command_with_on_value() {
             mode: Some(ModeKind::Plan),
         })
     );
+}
+
+#[test]
+fn parse_collaboration_mode_accepts_chat_alias() {
+    assert_eq!(parse_collaboration_mode("chat"), Some(ModeKind::Default));
 }
 
 #[test]
@@ -1031,13 +1039,88 @@ fn mode_state_uses_custom_auto_ask_edits_id() {
         .iter()
         .find(|preset| preset.id == AUTO_MODE_ID)
         .expect("auto preset should exist");
-    let state = mode_state(
+    let current_mode_id = current_permission_mode_id(
         to_app_approval(auto_preset.approval),
         to_app_sandbox_mode(&auto_preset.sandbox),
         EditApprovalMode::AskEveryEdit,
-        ModeKind::Default,
     );
-    assert_eq!(state.current_mode_id.0.as_ref(), AUTO_ASK_EDITS_MODE_ID);
+    assert_eq!(current_mode_id.0.as_ref(), AUTO_ASK_EDITS_MODE_ID);
+}
+
+#[test]
+fn mode_state_hides_read_only_when_not_current() {
+    let auto_preset = APPROVAL_PRESETS
+        .iter()
+        .find(|preset| preset.id == AUTO_MODE_ID)
+        .expect("auto preset should exist");
+    let modes = permission_modes(
+        to_app_approval(auto_preset.approval),
+        to_app_sandbox_mode(&auto_preset.sandbox),
+        EditApprovalMode::AutoApprove,
+    );
+
+    assert!(modes.iter().all(|mode| mode.id.0.as_ref() != "read-only"));
+}
+
+#[test]
+fn mode_state_keeps_read_only_when_current() {
+    let read_only_preset = APPROVAL_PRESETS
+        .iter()
+        .find(|preset| preset.id == "read-only")
+        .expect("read-only preset should exist");
+    let current_mode_id = current_permission_mode_id(
+        to_app_approval(read_only_preset.approval),
+        to_app_sandbox_mode(&read_only_preset.sandbox),
+        EditApprovalMode::AskEveryEdit,
+    );
+    let modes = permission_modes(
+        to_app_approval(read_only_preset.approval),
+        to_app_sandbox_mode(&read_only_preset.sandbox),
+        EditApprovalMode::AskEveryEdit,
+    );
+
+    assert_eq!(current_mode_id.0.as_ref(), "read-only");
+    assert!(modes.iter().any(|mode| mode.id.0.as_ref() == "read-only"));
+}
+
+#[test]
+fn mode_state_contains_only_default_and_plan() {
+    let state = mode_state(ModeKind::Default);
+    assert_eq!(state.current_mode_id.0.as_ref(), DEFAULT_SESSION_MODE_ID);
+    assert_eq!(state.available_modes.len(), 2);
+    assert_eq!(
+        state.available_modes[0].id.0.as_ref(),
+        DEFAULT_SESSION_MODE_ID
+    );
+    assert_eq!(state.available_modes[1].id.0.as_ref(), PLAN_SESSION_MODE_ID);
+}
+
+#[test]
+fn leaving_plan_mode_clears_visible_plan_state() {
+    assert!(should_clear_visible_plan_for_mode_change(
+        ModeKind::Plan,
+        ModeKind::Default,
+        false,
+    ));
+    assert!(should_clear_visible_plan_for_mode_change(
+        ModeKind::Default,
+        ModeKind::Default,
+        true,
+    ));
+}
+
+#[test]
+fn staying_in_plan_mode_preserves_visible_plan_state() {
+    assert!(!should_clear_visible_plan_for_mode_change(
+        ModeKind::Plan,
+        ModeKind::Plan,
+        true,
+    ));
+    assert!(!should_clear_visible_plan_for_mode_change(
+        ModeKind::Default,
+        ModeKind::Plan,
+        true,
+    ));
 }
 
 #[test]

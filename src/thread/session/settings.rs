@@ -1,35 +1,47 @@
 //! Обновления runtime-настроек сессии (mode/model/reasoning/context), доступные ACP-клиентам.
 
 use super::session_config::{
-    CONTEXT_COMPACT_VALUE, CONTEXT_STATUS_VALUE, CONTEXT_USAGE_VALUE, context_usage_message,
-    find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
-    reasoning_effort_value,
+    CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, find_model_for_current,
+    normalize_reasoning_effort_for_model, parse_reasoning_effort, reasoning_effort_value,
 };
 use super::{
-    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, EditApprovalMode, Error, ModeKind,
-    ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort, SessionConfigId, SessionModeId, Thread, replay,
+    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID,
+    EditApprovalMode, Error, ModeKind, ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort,
+    SessionConfigId, SessionModeId, Thread, replay,
 };
-use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use crate::thread::features::session::controls::start_context_compaction;
+use crate::thread::features::{
+    collab::{remember_agent_label, warm_agent_labels_for_turns},
+    plan::{
+        clear_visible_plan_state, has_visible_plan_state, should_clear_visible_plan_for_mode_change,
+    },
+};
 use codex_app_server_protocol::ThreadRollbackParams;
 
 impl Thread {
-    // Переключаем collaboration mode атомарно, чтобы избежать смешанного рендера событий.
     pub async fn set_mode(&self, mode: SessionModeId) -> Result<(), Error> {
+        let next_mode = match mode.0.as_ref() {
+            PLAN_SESSION_MODE_ID => ModeKind::Plan,
+            DEFAULT_SESSION_MODE_ID => ModeKind::Default,
+            _ => return Err(Error::invalid_params()),
+        };
         let mut inner = self.inner.lock().await;
-        if mode.0.as_ref() == PLAN_SESSION_MODE_ID {
-            let default_preset = APPROVAL_PRESETS
-                .iter()
-                .find(|preset| preset.id == AUTO_MODE_ID)
-                .ok_or_else(Error::invalid_params)?;
-            inner.apply_mode_preset(
-                default_preset,
-                EditApprovalMode::AutoApprove,
-                ModeKind::Plan,
-            );
-            return Ok(());
+        let previous_mode = inner.collaboration_mode_kind;
+        let had_visible_plan_state = has_visible_plan_state(&inner);
+        inner.collaboration_mode_kind = next_mode;
+        if should_clear_visible_plan_for_mode_change(
+            previous_mode,
+            next_mode,
+            had_visible_plan_state,
+        ) {
+            clear_visible_plan_state(&mut inner).await;
         }
+        Ok(())
+    }
 
+    pub async fn set_permission_mode(&self, mode: SessionModeId) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+        let collaboration_mode_kind = inner.collaboration_mode_kind;
         if mode.0.as_ref() == AUTO_ASK_EDITS_MODE_ID {
             let default_preset = APPROVAL_PRESETS
                 .iter()
@@ -38,7 +50,7 @@ impl Thread {
             inner.apply_mode_preset(
                 default_preset,
                 EditApprovalMode::AskEveryEdit,
-                ModeKind::Default,
+                collaboration_mode_kind,
             );
             return Ok(());
         }
@@ -52,7 +64,7 @@ impl Thread {
         } else {
             EditApprovalMode::AskEveryEdit
         };
-        inner.apply_mode_preset(preset, edit_approval_mode, ModeKind::Default);
+        inner.apply_mode_preset(preset, edit_approval_mode, collaboration_mode_kind);
         Ok(())
     }
 
@@ -94,16 +106,7 @@ impl Thread {
         let mut inner = self.inner.lock().await;
         match value.0.as_ref() {
             CONTEXT_STATUS_VALUE => Ok(()),
-            CONTEXT_USAGE_VALUE => {
-                inner
-                    .client
-                    .send_agent_text(context_usage_message(
-                        inner.last_used_tokens,
-                        inner.context_window_size,
-                    ))
-                    .await;
-                Ok(())
-            }
+            CONTEXT_LIMITS_VALUE => Ok(()),
             CONTEXT_COMPACT_VALUE => {
                 let message = start_context_compaction(&mut inner).await?;
                 inner.client.send_agent_text(message).await;
@@ -120,6 +123,7 @@ impl Thread {
     ) -> Result<(), Error> {
         match config_id.0.as_ref() {
             "mode" => self.set_mode(SessionModeId::new(value.0)).await,
+            "permissions" => self.set_permission_mode(SessionModeId::new(value.0)).await,
             "model" => self.set_model(ModelId::new(value.0)).await,
             "reasoning_effort" => {
                 let effort = parse_reasoning_effort(&value.0)

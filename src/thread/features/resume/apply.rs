@@ -63,6 +63,9 @@ pub(in crate::thread) async fn handle_resume_command(
     if let Ok(models) = inner.app.model_list().await {
         inner.models = models.data;
     }
+    if let Ok(response) = inner.app.get_account_rate_limits().await {
+        inner.account_rate_limits = Some(response.rate_limits);
+    }
     flush_thread_switch_transport_state(inner).await?;
     inner.reasoning_effort = session_config::resolve_reasoning_effort(
         &inner.models,

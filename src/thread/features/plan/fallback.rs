@@ -5,6 +5,26 @@ use codex_protocol::config_types::ModeKind;
 
 use crate::thread::{FallbackPlanPhase, FallbackPlanState, MAX_VISIBLE_PLAN_ENTRIES, ThreadInner};
 
+pub(in crate::thread) fn should_clear_visible_plan_for_mode_change(
+    current_mode: ModeKind,
+    next_mode: ModeKind,
+    has_visible_plan_state: bool,
+) -> bool {
+    next_mode != ModeKind::Plan && (current_mode == ModeKind::Plan || has_visible_plan_state)
+}
+
+pub(in crate::thread) fn has_visible_plan_state(inner: &ThreadInner) -> bool {
+    inner.fallback_plan.is_some()
+        || !inner.last_plan_steps.is_empty()
+        || inner.carryover_plan_steps.is_some()
+}
+
+pub(in crate::thread) async fn clear_visible_plan_state(inner: &mut ThreadInner) {
+    inner.fallback_plan = None;
+    inner.carryover_plan_steps = None;
+    clear_plan_output(inner).await;
+}
+
 pub(in crate::thread) async fn initialize_fallback_plan_for_turn(
     inner: &mut ThreadInner,
     turn_id: &str,
@@ -12,7 +32,7 @@ pub(in crate::thread) async fn initialize_fallback_plan_for_turn(
 ) {
     if collaboration_mode_kind == ModeKind::Plan {
         inner.fallback_plan = None;
-        clear_plan(inner).await;
+        clear_plan_output(inner).await;
         return;
     }
 
@@ -22,7 +42,7 @@ pub(in crate::thread) async fn initialize_fallback_plan_for_turn(
         .filter(|steps| !steps.is_empty())
     else {
         inner.fallback_plan = None;
-        clear_plan(inner).await;
+        clear_plan_output(inner).await;
         return;
     };
 
@@ -152,7 +172,7 @@ fn limit_plan_entries(mut entries: Vec<PlanEntry>) -> Vec<PlanEntry> {
     entries
 }
 
-async fn clear_plan(inner: &mut ThreadInner) {
+async fn clear_plan_output(inner: &mut ThreadInner) {
     inner.last_plan_steps.clear();
     inner
         .client

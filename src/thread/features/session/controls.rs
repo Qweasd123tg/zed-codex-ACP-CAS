@@ -256,6 +256,9 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
         &inner.current_model,
         start.reasoning_effort,
     );
+    if let Ok(response) = inner.app.get_account_rate_limits().await {
+        inner.account_rate_limits = Some(response.rate_limits);
+    }
 
     inner
         .client

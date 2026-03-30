@@ -16,10 +16,10 @@ use agent_client_protocol::{
 };
 use codex_app_server_protocol::{
     AskForApproval as AppAskForApproval, ItemCompletedNotification, ItemStartedNotification,
-    Model as AppModel, SandboxMode as AppSandboxMode, SandboxPolicy as AppSandboxPolicy,
-    ServerRequest, ThreadItem, ThreadListParams, ThreadReadParams, ThreadResumeParams,
-    ThreadSortKey, ThreadStartParams, Turn as AppTurn, TurnDiffUpdatedNotification,
-    TurnInterruptParams, TurnStartParams, UserInput,
+    Model as AppModel, RateLimitSnapshot as AppRateLimitSnapshot, SandboxMode as AppSandboxMode,
+    SandboxPolicy as AppSandboxPolicy, ServerRequest, ThreadItem, ThreadListParams,
+    ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams, Turn as AppTurn,
+    TurnDiffUpdatedNotification, TurnInterruptParams, TurnStartParams, UserInput,
 };
 use codex_core::config::Config;
 use codex_protocol::config_types::ModeKind;
@@ -99,6 +99,7 @@ const NONE_OF_THE_ABOVE: &str = "None of the above";
 const RESUME_CANCEL_OPTION_ID: &str = "resume-cancel";
 const MAX_VISIBLE_PLAN_ENTRIES: usize = 6;
 const PLAN_SESSION_MODE_ID: &str = "plan";
+const DEFAULT_SESSION_MODE_ID: &str = "default";
 const AUTO_MODE_ID: &str = "auto";
 const AUTO_ASK_EDITS_MODE_ID: &str = "auto-ask-edits";
 const PLAN_IMPLEMENTATION_TOOL_CALL_ID: &str = "plan-implementation";
@@ -136,6 +137,7 @@ struct ThreadInner {
     compaction_in_progress: bool,
     last_used_tokens: Option<u64>,
     context_window_size: Option<u64>,
+    account_rate_limits: Option<AppRateLimitSnapshot>,
     models: Vec<AppModel>,
     active_turn_id: Option<String>,
     active_turn_mode_kind: Option<ModeKind>,

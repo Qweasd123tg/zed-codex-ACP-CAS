@@ -22,9 +22,6 @@ impl Thread {
                 &inner.current_model,
             ))
             .modes(Some(session_config::mode_state(
-                inner.approval_policy,
-                inner.sandbox_mode,
-                inner.edit_approval_mode,
                 inner.collaboration_mode_kind,
             )))
             .config_options(session_config::config_options(
@@ -59,13 +56,7 @@ impl Thread {
             let inner = self.inner.lock().await;
             (
                 inner.client.clone(),
-                session_config::mode_state(
-                    inner.approval_policy,
-                    inner.sandbox_mode,
-                    inner.edit_approval_mode,
-                    inner.collaboration_mode_kind,
-                )
-                .current_mode_id,
+                session_config::mode_state(inner.collaboration_mode_kind).current_mode_id,
             )
         };
         client

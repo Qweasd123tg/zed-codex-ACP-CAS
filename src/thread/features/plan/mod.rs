@@ -11,8 +11,9 @@ mod parse;
 #[cfg(test)]
 pub(in crate::thread) use fallback::fallback_plan_should_advance;
 pub(in crate::thread) use fallback::{
-    fallback_plan_can_enter_summarizing, fallback_plan_entries_for_steps,
-    initialize_fallback_plan_for_turn, maybe_advance_fallback_plan,
+    clear_visible_plan_state, fallback_plan_can_enter_summarizing, fallback_plan_entries_for_steps,
+    has_visible_plan_state, initialize_fallback_plan_for_turn, maybe_advance_fallback_plan,
+    should_clear_visible_plan_for_mode_change,
 };
 pub(in crate::thread) use parse::{
     collaboration_mode_for_turn, collaboration_mode_label, limit_plan_entries,
