@@ -32,10 +32,10 @@ pub async fn run_main(
 ) -> IoResult<()> {
     // Подключаем простой subscriber, чтобы вывод `tracing` был виден.
     // Пользователь может управлять уровнем логов через `RUST_LOG`.
-    tracing_subscriber::fmt()
+    let _subscriber_init = tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(EnvFilter::from_default_env())
-        .init();
+        .try_init();
 
     // Парсим CLI-override-параметры и загружаем конфигурацию.
     let cli_kv_overrides = cli_config_overrides.parse_overrides().map_err(|e| {

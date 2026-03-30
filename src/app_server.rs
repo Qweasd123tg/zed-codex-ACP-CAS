@@ -3,7 +3,9 @@
 //! и протоколом Codex app-server.
 
 use std::collections::VecDeque;
+use std::env;
 use std::process::Stdio;
+use std::time::Duration;
 
 use agent_client_protocol::Error;
 use anyhow::Context;
@@ -25,11 +27,52 @@ use serde::de::DeserializeOwned;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tracing::warn;
+use tracing::{debug, info, warn};
+
+const STARTUP_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const STARTUP_METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const STARTUP_REQUEST_TIMEOUT_ENV: &str = "CODEX_ACP_STARTUP_TIMEOUT_MS";
+const STARTUP_METADATA_REQUEST_TIMEOUT_ENV: &str = "CODEX_ACP_STARTUP_METADATA_TIMEOUT_MS";
+const JSONRPC_INVALID_REQUEST: i64 = -32600;
 
 // Нормализуем I/O-сбои дочернего процесса в ошибки уровня протокола.
 fn io_error(message: impl Into<String>) -> Error {
     Error::internal_error().data(message.into())
+}
+
+fn parse_timeout_override(value: Option<&str>, fallback: Duration) -> Duration {
+    value
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(fallback)
+}
+
+fn configured_timeout(env_name: &str, fallback: Duration) -> Duration {
+    parse_timeout_override(env::var(env_name).ok().as_deref(), fallback)
+}
+
+fn request_timeout(method_name: &str) -> Option<Duration> {
+    match method_name {
+        "initialize" | "thread/start" | "thread/resume" | "thread/list" => Some(
+            configured_timeout(STARTUP_REQUEST_TIMEOUT_ENV, STARTUP_REQUEST_TIMEOUT),
+        ),
+        "model/list" | "account/rateLimits/read" | "thread/read" => Some(configured_timeout(
+            STARTUP_METADATA_REQUEST_TIMEOUT_ENV,
+            STARTUP_METADATA_REQUEST_TIMEOUT,
+        )),
+        _ => None,
+    }
+}
+
+fn should_reject_request_during_startup(method_name: &str) -> bool {
+    matches!(
+        method_name,
+        "mcpServer/elicitation/request"
+            | "account/chatgptAuthTokens/refresh"
+            | "applyPatchApproval"
+            | "execCommandApproval"
+    )
 }
 
 pub struct AppServerProcess {
@@ -44,6 +87,7 @@ pub struct AppServerProcess {
 
 impl AppServerProcess {
     pub async fn spawn(codex_bin: &str) -> Result<Self, Error> {
+        info!(codex_bin, "Starting codex app-server process");
         let mut cmd: TokioCommand = Command::new(codex_bin);
         cmd.arg("app-server")
             .arg("--listen")
@@ -55,8 +99,15 @@ impl AppServerProcess {
 
         let mut child = cmd
             .spawn()
-            .with_context(|| format!("failed to start `{codex_bin}` app-server"))
+            .with_context(|| {
+                format!(
+                    "failed to start `{codex_bin}` app-server; ensure the `codex` binary is installed and available in PATH"
+                )
+            })
             .map_err(|err| io_error(err.to_string()))?;
+        if let Some(pid) = child.id() {
+            info!(pid, codex_bin, "Spawned codex app-server child process");
+        }
 
         let stdin = child
             .stdin
@@ -341,6 +392,48 @@ impl AppServerProcess {
     where
         T: DeserializeOwned,
     {
+        if let Some(timeout) = request_timeout(method_name) {
+            debug!(
+                method = method_name,
+                timeout_ms = timeout.as_millis() as u64,
+                "Sending startup-sensitive app-server request"
+            );
+            let response = tokio::time::timeout(
+                timeout,
+                self.request_inner(request, request_id, method_name, true),
+            )
+            .await
+            .map_err(|_| {
+                warn!(
+                    method = method_name,
+                    timeout_ms = timeout.as_millis() as u64,
+                    queued_messages = self.pending_messages.len(),
+                    "Timed out waiting for app-server startup response"
+                );
+                io_error(format!(
+                    "timed out waiting for `{method_name}` response after {}s with {} queued out-of-band messages; codex app-server may be stuck during startup, auth, or early handshake",
+                    timeout.as_secs(),
+                    self.pending_messages.len()
+                ))
+            })??;
+            debug!(method = method_name, "Received app-server response");
+            return Ok(response);
+        }
+
+        self.request_inner(request, request_id, method_name, false)
+            .await
+    }
+
+    async fn request_inner<T>(
+        &mut self,
+        request: ClientRequest,
+        request_id: RequestId,
+        method_name: &str,
+        reject_startup_requests: bool,
+    ) -> Result<T, Error>
+    where
+        T: DeserializeOwned,
+    {
         self.write_json(&request).await?;
         loop {
             let message = self.read_message().await?;
@@ -357,6 +450,26 @@ impl AppServerProcess {
                         error.message, error.code
                     )));
                 }
+                JSONRPCMessage::Request(request) => {
+                    if reject_startup_requests
+                        && self
+                            .reject_unsupported_request_during_startup(&request, method_name)
+                            .await?
+                    {
+                        continue;
+                    } else {
+                        warn!(
+                            awaiting_method = method_name,
+                            queued_request_method = %request.method,
+                            request_id = ?request.id,
+                            "Queued app-server request while waiting for a response"
+                        );
+                        // Сохраняем стабильный порядок протокола: цикл событий thread затем
+                        // обработает эти сообщения как обычные события потока.
+                        self.pending_messages
+                            .push_back(JSONRPCMessage::Request(request));
+                    }
+                }
                 other => {
                     // Сохраняем стабильный порядок протокола: цикл событий thread затем
                     // обработает эти сообщения как обычные события потока.
@@ -364,6 +477,33 @@ impl AppServerProcess {
                 }
             }
         }
+    }
+
+    async fn reject_unsupported_request_during_startup(
+        &mut self,
+        request: &codex_app_server_protocol::JSONRPCRequest,
+        awaited_method: &str,
+    ) -> Result<bool, Error> {
+        if !should_reject_request_during_startup(&request.method) {
+            return Ok(false);
+        }
+        warn!(
+            awaited_method,
+            request_method = %request.method,
+            request_id = ?request.id,
+            "Rejecting unsupported app-server request during startup-sensitive handshake"
+        );
+        self.send_server_request_error(
+            request.id.clone(),
+            JSONRPC_INVALID_REQUEST,
+            format!(
+                "Cannot handle app-server request `{}` while awaiting `{awaited_method}` during startup",
+                request.method
+            ),
+            None,
+        )
+        .await?;
+        Ok(true)
     }
 
     async fn send_client_notification(
@@ -436,5 +576,81 @@ impl AppServerProcess {
             .await
             .map_err(|err| io_error(format!("failed to flush app-server input: {err}")))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        STARTUP_METADATA_REQUEST_TIMEOUT, STARTUP_REQUEST_TIMEOUT, configured_timeout,
+        parse_timeout_override, request_timeout, should_reject_request_during_startup,
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn applies_longer_timeout_to_critical_startup_requests() {
+        assert_eq!(request_timeout("initialize"), Some(STARTUP_REQUEST_TIMEOUT));
+        assert_eq!(
+            request_timeout("thread/start"),
+            Some(STARTUP_REQUEST_TIMEOUT)
+        );
+        assert_eq!(
+            request_timeout("thread/resume"),
+            Some(STARTUP_REQUEST_TIMEOUT)
+        );
+        assert_eq!(
+            request_timeout("thread/list"),
+            Some(STARTUP_REQUEST_TIMEOUT)
+        );
+    }
+
+    #[test]
+    fn applies_shorter_timeout_to_startup_metadata_requests() {
+        assert_eq!(
+            request_timeout("model/list"),
+            Some(STARTUP_METADATA_REQUEST_TIMEOUT)
+        );
+        assert_eq!(
+            request_timeout("account/rateLimits/read"),
+            Some(STARTUP_METADATA_REQUEST_TIMEOUT)
+        );
+        assert_eq!(
+            request_timeout("thread/read"),
+            Some(STARTUP_METADATA_REQUEST_TIMEOUT)
+        );
+    }
+
+    #[test]
+    fn leaves_runtime_stream_requests_unbounded() {
+        assert_eq!(request_timeout("turn/start"), None);
+        assert_eq!(request_timeout("turn/interrupt"), None);
+    }
+
+    #[test]
+    fn configured_timeout_falls_back_for_missing_invalid_or_zero_values() {
+        let fallback = Duration::from_secs(7);
+        assert_eq!(configured_timeout("__MISSING__", fallback), fallback);
+        assert_eq!(parse_timeout_override(Some("oops"), fallback), fallback);
+        assert_eq!(parse_timeout_override(Some("0"), fallback), fallback);
+        assert_eq!(
+            parse_timeout_override(Some("1500"), fallback),
+            Duration::from_millis(1500)
+        );
+    }
+
+    #[test]
+    fn rejects_only_known_unsupported_startup_requests() {
+        assert!(should_reject_request_during_startup(
+            "mcpServer/elicitation/request"
+        ));
+        assert!(should_reject_request_during_startup(
+            "account/chatgptAuthTokens/refresh"
+        ));
+        assert!(should_reject_request_during_startup("applyPatchApproval"));
+        assert!(should_reject_request_during_startup("execCommandApproval"));
+        assert!(!should_reject_request_during_startup(
+            "toolRequest/userInput"
+        ));
+        assert!(!should_reject_request_during_startup("dynamicToolCall"));
     }
 }

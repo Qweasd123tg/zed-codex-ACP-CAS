@@ -1,5 +1,7 @@
 //! Загрузчики session view и метаданных, которые ACP использует для resume и восстановления контекста.
 
+use tracing::warn;
+
 use super::{
     AvailableCommandsUpdate, ConfigOptionUpdate, CurrentModeUpdate, Error, LoadSessionResponse,
     SessionConfigOption, SessionUpdate, Thread, session_config,
@@ -10,10 +12,16 @@ impl Thread {
     // Не делаем лишний blocking model/list на bootstrap, если модели уже пришли из start/resume.
     pub async fn load(&self) -> Result<LoadSessionResponse, Error> {
         let mut inner = self.inner.lock().await;
-        if inner.models.is_empty()
-            && let Ok(models) = inner.app.model_list().await
-        {
-            inner.models = models.data;
+        if inner.models.is_empty() {
+            match inner.app.model_list().await {
+                Ok(models) => inner.models = models.data,
+                Err(error) => {
+                    warn!(
+                        error = %error,
+                        "Failed to refresh model list while loading session view"
+                    );
+                }
+            }
         }
 
         Ok(LoadSessionResponse::new()

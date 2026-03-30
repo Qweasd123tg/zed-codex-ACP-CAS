@@ -23,10 +23,14 @@ use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::session_usage_cache::{context_usage_cache_path, restore_cached_context_usage};
 use codex_app_server_protocol::ThreadStartResponse;
-use tracing::warn;
+use tracing::{info, warn};
 
 const RESUME_STARTUP_RETRY_ATTEMPTS: usize = 6;
 const RESUME_STARTUP_RETRY_DELAY_MS: u64 = 300;
+
+fn startup_error(stage: &str, error: Error) -> Error {
+    Error::internal_error().data(format!("{stage}: {error}"))
+}
 
 pub(crate) fn build_session_mcp_config_overrides(
     base_mcp_servers: &HashMap<String, McpServerConfig>,
@@ -214,16 +218,20 @@ impl Thread {
         mut app: AppServerProcess,
         start: ThreadStartResponse,
     ) -> Self {
-        let models = app
-            .model_list()
-            .await
-            .map(|response| response.data)
-            .unwrap_or_default();
-        let account_rate_limits = app
-            .get_account_rate_limits()
-            .await
-            .ok()
-            .map(|response| response.rate_limits);
+        let models = match app.model_list().await {
+            Ok(response) => response.data,
+            Err(error) => {
+                warn!(error = %error, "Failed to load model list during session startup");
+                Vec::new()
+            }
+        };
+        let account_rate_limits = match app.get_account_rate_limits().await {
+            Ok(response) => Some(response.rate_limits),
+            Err(error) => {
+                warn!(error = %error, "Failed to read rate limits during session startup");
+                None
+            }
+        };
         let reasoning_effort =
             resolve_reasoning_effort(&models, &start.model, start.reasoning_effort);
 
@@ -292,9 +300,20 @@ impl Thread {
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
     ) -> Result<Self, Error> {
-        let mut app = AppServerProcess::spawn("codex").await?;
-        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
+        info!(
+            session_id = %session_id,
+            cwd = %cwd.display(),
+            "Bootstrapping fresh backend thread for existing ACP session"
+        );
+        let mut app = AppServerProcess::spawn("codex")
+            .await
+            .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
+        info!(session_id = %session_id, "Initializing codex app-server");
+        app.initialize("codex-acp-cas", "Codex ACP CAS")
+            .await
+            .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
 
+        info!(session_id = %session_id, "Starting backend thread");
         let start = app
             .thread_start(ThreadStartParams {
                 model: config.model.clone(),
@@ -305,7 +324,8 @@ impl Thread {
                 config: session_mcp_config_overrides.clone(),
                 ..Default::default()
             })
-            .await?;
+            .await
+            .map_err(|error| startup_error("failed to start backend thread", error))?;
 
         Ok(Self::build_started_thread(
             session_id,
@@ -326,9 +346,16 @@ impl Thread {
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
     ) -> Result<(SessionId, Self), Error> {
-        let mut app = AppServerProcess::spawn("codex").await?;
-        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
+        info!(cwd = %cwd.display(), "Bootstrapping new ACP session");
+        let mut app = AppServerProcess::spawn("codex")
+            .await
+            .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
+        info!("Initializing codex app-server");
+        app.initialize("codex-acp-cas", "Codex ACP CAS")
+            .await
+            .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
 
+        info!(cwd = %cwd.display(), "Starting backend thread for new ACP session");
         let start = app
             .thread_start(ThreadStartParams {
                 model: config.model.clone(),
@@ -339,7 +366,8 @@ impl Thread {
                 config: session_mcp_config_overrides.clone(),
                 ..Default::default()
             })
-            .await?;
+            .await
+            .map_err(|error| startup_error("failed to start backend thread", error))?;
 
         let session_id = SessionId::new(start.thread.id.clone());
         let thread = Self::build_started_thread(
@@ -363,8 +391,18 @@ impl Thread {
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
     ) -> Result<Self, Error> {
-        let mut app = AppServerProcess::spawn("codex").await?;
-        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
+        info!(
+            session_id = %session_id,
+            cwd = %cwd.display(),
+            "Bootstrapping resumed ACP session"
+        );
+        let mut app = AppServerProcess::spawn("codex")
+            .await
+            .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
+        info!(session_id = %session_id, "Initializing codex app-server");
+        app.initialize("codex-acp-cas", "Codex ACP CAS")
+            .await
+            .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
 
         let resume_params = ThreadResumeParams {
             thread_id: session_id.0.to_string(),
@@ -396,16 +434,28 @@ impl Thread {
             Err(error) => return Err(error),
         };
 
-        let models = app
-            .model_list()
-            .await
-            .map(|response| response.data)
-            .unwrap_or_default();
-        let account_rate_limits = app
-            .get_account_rate_limits()
-            .await
-            .ok()
-            .map(|response| response.rate_limits);
+        let models = match app.model_list().await {
+            Ok(response) => response.data,
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    session_id = %session_id,
+                    "Failed to load model list during resumed session startup"
+                );
+                Vec::new()
+            }
+        };
+        let account_rate_limits = match app.get_account_rate_limits().await {
+            Ok(response) => Some(response.rate_limits),
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    session_id = %session_id,
+                    "Failed to read rate limits during resumed session startup"
+                );
+                None
+            }
+        };
         let reasoning_effort =
             resolve_reasoning_effort(&models, &resume.model, resume.reasoning_effort);
         let context_usage_cache_path = context_usage_cache_path(&config.codex_home);
@@ -481,8 +531,20 @@ impl Thread {
         // По умолчанию ведём себя как CLI resume: показываем сессии текущего workspace.
         let effective_cwd = cwd.or_else(|| Some(config.cwd.clone()));
 
-        let mut app = AppServerProcess::spawn("codex").await?;
-        app.initialize("codex-acp-cas", "Codex ACP CAS").await?;
+        info!(
+            cwd = %effective_cwd
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+            "Listing ACP sessions via codex app-server"
+        );
+        let mut app = AppServerProcess::spawn("codex")
+            .await
+            .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
+        info!("Initializing codex app-server for session list");
+        app.initialize("codex-acp-cas", "Codex ACP CAS")
+            .await
+            .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
 
         let response = app
             .thread_list(ThreadListParams {
@@ -497,7 +559,8 @@ impl Thread {
                     .map(|path| path.to_string_lossy().to_string()),
                 search_term: None,
             })
-            .await?;
+            .await
+            .map_err(|error| startup_error("failed to list backend threads", error))?;
 
         let sessions = response
             .data
