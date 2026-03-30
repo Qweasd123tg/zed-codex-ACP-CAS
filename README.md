@@ -14,7 +14,6 @@ This project is usable, but still beta.
   - Linux `x86_64-unknown-linux-gnu`
   - macOS Apple Silicon `aarch64-apple-darwin`
   - Windows `x86_64-pc-windows-msvc`
-  - Linux packages: `.deb` and `.rpm`
 - Behavior may still change between releases
 
 ## Supported Now
@@ -90,8 +89,30 @@ Planned release artifacts:
 - `.tar.gz` for Linux
 - `.tar.gz` for macOS Apple Silicon
 - `.zip` for Windows
-- `.deb` for Debian and Ubuntu
-- `.rpm` for Fedora and similar RPM-based systems
+
+Extract the archive, place `codex-acp` somewhere on your `PATH`, and point Zed at that binary.
+
+Example:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+tar -xzf codex-acp-cas-<version>-x86_64-unknown-linux-gnu.tar.gz
+mv codex-acp "$HOME/.local/bin/codex-acp"
+chmod +x "$HOME/.local/bin/codex-acp"
+```
+
+Then configure Zed to use the binary path:
+
+```json
+{
+  "agent_servers": {
+    "codex-acp-cas": {
+      "type": "custom",
+      "command": "/home/your-user/.local/bin/codex-acp"
+    }
+  }
+}
+```
 
 ### Build From Source
 
@@ -174,7 +195,7 @@ User-facing documentation stays in this README. Deeper project notes are kept se
 Near-term work:
 
 - Finish startup request multiplexing cleanup
-- Improve release automation and packaging
+- Keep release automation simple and binary-first
 - Test release artifacts on Windows and macOS
 - Keep reducing ACP and Zed session lifecycle edge cases
 - Keep simplifying docs for non-maintainer users

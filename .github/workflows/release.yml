@@ -142,69 +142,9 @@ jobs:
             *.sha256
           retention-days: 1
 
-  package-linux:
-    name: Package Linux .deb and .rpm
-    needs: get-version
-    runs-on: ubuntu-22.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Linux build dependencies
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcap-dev
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-gnu
-
-      - name: Cache Rust build outputs
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: release-packages-x86_64-unknown-linux-gnu
-
-      - name: Install packaging tools
-        shell: bash
-        run: |
-          cargo install cargo-deb --locked
-          cargo install cargo-generate-rpm --locked
-
-      - name: Build Linux release binary
-        run: cargo build --release
-
-      - name: Build .deb package
-        shell: bash
-        run: cargo deb --no-build
-
-      - name: Build .rpm package
-        shell: bash
-        run: cargo generate-rpm
-
-      - name: Create package checksums
-        shell: bash
-        run: |
-          find target -type f \( -name "*.deb" -o -name "*.rpm" \) -print0 | while IFS= read -r -d '' file; do
-            sha256sum "$file" > "$file.sha256"
-          done
-
-      - name: Upload Linux package artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages-linux
-          if-no-files-found: error
-          path: |
-            target/**/*.deb
-            target/**/*.rpm
-            target/**/*.deb.sha256
-            target/**/*.rpm.sha256
-          retention-days: 1
-
   create-release:
     name: Create Release
-    needs: [get-version, build-binaries, package-linux]
+    needs: [get-version, build-binaries]
     runs-on: ubuntu-latest
 
     steps:
@@ -230,8 +170,6 @@ jobs:
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.zip
-            artifacts/**/*.deb
-            artifacts/**/*.rpm
             artifacts/**/*.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
