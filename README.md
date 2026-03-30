@@ -32,6 +32,12 @@ Context limits and usage view:
 
 ![Selector limits](screenshot/selector%20limits.png)
 
+### Plan mode
+
+Plan mode and visible planning steps:
+
+![Plan mode](screenshot/plan.png)
+
 ### Thread operations
 
 Archive flow:
