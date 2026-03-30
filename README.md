@@ -1,149 +1,184 @@
-# Codex ACP CAS (Rust)
+# Codex ACP CAS
 
-ACP-адаптер, который подключает Codex к ACP-совместимым клиентам (например, Zed) через мост к `codex app-server`.
+`codex-acp` is a practical fork of the Zed Codex ACP adapter. It connects Codex to ACP-compatible clients such as Zed through `codex app-server`.
 
-## Что это
-Проект реализует ACP `Agent` и маппит lifecycle сессий/turn/tool-calls между ACP и Codex app-server.
+This fork is focused on real daily use: better startup diagnostics, better session lifecycle behavior, more usable resume/archive/rename flows, and Linux-first stability improvements.
 
-Бинарь проекта: `codex-acp`.
+## Status
 
-## Статус
-- Версия ветки: `0.1.x` (бета-стадия, возможны изменения поведения между релизами).
-- Поддерживаемый релизный target: `x86_64-unknown-linux-gnu`.
-- Основной сценарий эксплуатации: Fedora x86_64.
-- `plan mode`: функционально рабочий и активно дорабатывается по поведению/стабильности.
-  Отдельный «красивый» UI для plan mode не планируется; фокус на корректном ACP-потоке и практичном отображении.
+This project is usable, but still beta.
 
-## Поддерживаемые возможности
-Из фактической реализации:
-- ACP prompt capabilities: `embedded_context`, `image`.
-- Сессии: `new_session`, `load_session`, `resume_session`, `list_sessions`.
-- Session-scoped MCP passthrough из ACP для `stdio` и `http` серверов через `thread/start` / `thread/resume` `config`.
-- Replay истории после `load_session`/`/resume`.
-- Отдельный `RequestPermissions` flow через ACP permission popup.
-- Slash-команды:
+- Main real-world target today: Linux on `x86_64-unknown-linux-gnu`
+- Fedora is the most tested environment today
+- GitHub Releases are intended to ship:
+  - Linux `x86_64-unknown-linux-gnu`
+  - macOS Apple Silicon `aarch64-apple-darwin`
+  - Windows `x86_64-pc-windows-msvc`
+  - Linux packages: `.deb` and `.rpm`
+- Behavior may still change between releases
+
+## Supported Now
+
+- ACP prompt capabilities: embedded context and image input
+- Session lifecycle:
+  - `new_session`
+  - `load_session`
+  - `resume_session`
+  - `list_sessions`
+- Session-scoped MCP passthrough for `stdio` and `http`
+- History replay after `load_session` and `resume_session`
+- Session commands:
   - `/threads`
-  - `/resume [partial_id] [--no-history]`
-  - `/archive [partial_id]`
-  - `/unarchive [partial_id]`
-  - `/rename <new thread name>`
+  - `/resume`
+  - `/archive`
+  - `/unarchive`
+  - `/rename`
   - `/compact`
-  - `/undo [N]`
-  - `/plan [on|off|<request>]`
-- Tool-call карточки и статусы для command/mcp/dynamic tool/web/image/file/collab веток.
-  Для `collab/subagents` сейчас поддерживаются `spawn_agent`, `send_input`, `wait`, `resume_agent`, `close_agent`
-  и агрегированные agent-state статусы `pending_init`, `running`, `completed`, `errored`, `shutdown`, `not_found`.
-  В ACP UI для `collab` дополнительно поднимаются `agent_nickname/agent_role` из thread metadata,
-  task prompt уходит в `Raw Input`, а `Raw Output` содержит краткую человекочитаемую summary статусов вместо сырого JSON.
-- Typed `DynamicToolCall` plumbing для `item/tool/call`: request больше не отклоняется как unsupported,
-  ответ уходит назад в `codex app-server`, а `ThreadItem::DynamicToolCall` теперь отображается и в live, и в replay.
+  - `/undo`
+  - `/plan`
+- Better thread title handling for resume/archive/rename flows
+- Tool call cards for command, MCP, web, image, file, collab, and dynamic tool branches
+- Practical plan mode support
+- Better startup and reconnect diagnostics
 
-## Поведение При Reconnect-Сбоях
-- Если `codex app-server` уходит в reconnect-loop и не завершает turn, адаптер не держит ACP UI в вечной загрузке.
-- Для таких случаев есть stall guard: после серии reconnect-warning или после длительной тишины после reconnect turn принудительно завершается с понятным error-text.
-- Advisory notifications из `codex app-server` (`configWarning`, deprecation notice и Windows sandbox warnings) теперь тоже пробрасываются в ACP-чат, а не теряются молча.
+## Why Use This Fork
 
-## Поведение Resume И Восстановления Сессий
-- По умолчанию `/resume` переключает backend-thread и реплеит его историю в текущую ACP-сессию.
-- Для "тихого" переключения контекста без replay старой истории использовать `/resume --no-history`.
-- `/threads` и `/resume` теперь предпочитают сохраненное имя треда (`thread.name`), если оно задано через `/rename`, и только потом падают обратно на preview первого сообщения.
-- `list_sessions` и history-списки тоже теперь используют тот же нормализованный human title, а не сырой `thread.preview`.
-- После `/resume` адаптер теперь сразу шлет `SessionInfoUpdate.title`, чтобы Zed не оставлял в заголовке вкладки последний slash-prompt вроде `/resume`.
-- Важно: это надежно улучшает history/session list, но active header уже открытого ACP-чата в Zed частично живет своей client-side логикой и может не всегда синхронно принять новый title.
-- `/archive` использует нативный `thread/archive` из `codex app-server`: тред исчезает из обычных списков (`/threads`, `/resume`, `list_sessions`), но физически не удаляется и может быть возвращен через `/unarchive`.
-- `/archive` и `/unarchive` умеют показывать picker, если по query найдено несколько тредов; как и у `/resume`, в `View Raw Input` там лежат полные preview и пути.
-- В Zed уже показанные сообщения текущей ACP-сессии сервер очистить не может: у ACP нет штатного API для reset/replace transcript. Если нужен полностью чистый UI, практический путь сейчас — открыть новый чат и уже в нем вызвать `/resume`.
-- Если в env задан `ACP_DISABLE_AUTO_RESTORE=1`, адаптер все равно рекламирует `load_session` / `resume_session` как capability для совместимости с launch-flow Zed, но внутри вместо автоматического восстановления старого backend-thread поднимает свежий backend-thread под тем же ACP session handle. Старый диалог в таком режиме нужно подтягивать вручную через `/resume`.
-- ACP `mcp_servers` теперь пробрасываются в session-scoped overrides для `codex app-server` и сохраняются на время жизни ACP-сессии, поэтому не теряются при внутреннем `start_replacement_thread` после archive/new-backend-thread сценариев.
-- Для повторного `/resume` в одной и той же ACP-сессии адаптер теперь очищает transport-хвост от предыдущего треда и создает новый picker с уникальным `ToolCallId`, чтобы не упираться в повторно использованную интерактивную карточку.
-- Этот transport-scrub теперь не теряет server request молча: stale requests при переключении треда явно отклоняются ответом app-server, а stale notifications просто глушатся как старый фон.
-- Если архивируется текущий активный тред, адаптер сразу поднимает свежий backend-thread под той же ACP-сессией, чтобы чат не умирал после операции.
-- `/rename <new thread name>` использует нативный `thread/name/set` в `codex app-server`, сразу обновляет title текущей ACP-сессии и делает новое имя видимым в `/threads` и `/resume`.
-- Нижние selectors теперь разделяют `Mode` и `Permissions`: смена режима сотрудничества больше не маскирует sandbox/edit policy как единый preset.
-- Нижний selector `Context` показывает заполненность контекста, отдельный статус account limits (`5h`/`wk`) и умеет запускать `Compact now` без отдельной slash-команды.
+Compared with upstream-oriented adapter work, this fork currently focuses more on:
 
-## Ограничения
-- ACP MCP passthrough сейчас поддерживает `stdio` и `http` (`streamable_http`) серверы.
-  ACP `sse`-серверы пока явно игнорируются, потому что текущий `codex app-server` config transport на этой ветке работает только со `stdio` и `streamable_http`.
-- Адаптер пока не рекламирует собственные `thread/start.dynamicTools`, поэтому runtime-path для настоящих client-side dynamic tools сам по себе еще не активируется.
-- Текущий ACP стек основан на `agent-client-protocol 0.9.4`, где нет structured elicitation. Поэтому `DynamicToolCall` сейчас поддержан только частично:
-  ACP показывает интерактивный confirm/reject flow, но typed response назад в app-server пока ограничен текстовым fallback-сообщением, а не реальным выполнением client-side dynamic tool.
+- Better startup diagnostics when Zed or `codex app-server` fails early
+- Better session resume and thread switching behavior
+- Better archive, unarchive, and rename handling
+- More usable ACP rendering for collaboration and sub-agent flows
+- Linux-first practical fixes
 
-## Важно Для Edit/Rewind В Zed
-- Серверная часть rollback в `codex-acp` реализована, но для работы кнопки карандаша (edit старого prompt) нужен клиентский фикс в сборке `zed`.
-- Требуемая часть в Zed: поддержка `truncate` в ACP connection (`crates/agent_servers/src/acp.rs`) с вызовом `ext_method("zed.dev/codex/thread/rollback", { sessionId, numTurns, replayHistory })`.
-- Без этого фикса в старых/ванильных сборках Zed карандаш будет `Unavailable`, потому что ACP-сессия не выдает `message.id` для rewind/edit ветки.
-- Fallback для старых сборок: использовать `/undo N` и отправлять отредактированный prompt вручную.
+## Differences From Upstream
 
-## Авторизация
-Поддерживаемые методы (через `authenticate`):
-- ChatGPT login flow.
-- `CODEX_API_KEY`.
-- `OPENAI_API_KEY`.
+This project does not claim full upstream parity.
 
-## Быстрый старт
-Локальный запуск:
+Current strengths of this fork:
+
+- More robust startup behavior and clearer logging
+- Better session lifecycle handling in ACP clients
+- Better thread titles in lists and resumed sessions
+- Practical plan mode support
+- More complete collab and sub-agent UI mapping
+
+Current gaps:
+
+- No full structured elicitation parity yet
+- `DynamicToolCall` support is still partial
+- Some upstream-style flows are still missing or incomplete, including `close_session`, `/init`, `/logout`, and review-oriented flows
+- Some behavior still depends on Zed-side ACP support
+
+## Limitations
+
+- MCP passthrough supports `stdio` and `http` today
+- MCP `sse` passthrough is not supported yet
+- `DynamicToolCall` is only partially supported
+- Zed rewind/edit support still depends on a client-side ACP fix for rollback wiring
+- Linux is the most tested platform right now
+- Multi-platform release artifacts can exist before all platforms are equally tested in real use
+
+## Install
+
+### From GitHub Releases
+
+Download the artifact for your platform from the releases page.
+
+Planned release artifacts:
+
+- `.tar.gz` for Linux
+- `.tar.gz` for macOS Apple Silicon
+- `.zip` for Windows
+- `.deb` for Debian and Ubuntu
+- `.rpm` for Fedora and similar RPM-based systems
+
+### Build From Source
+
+Requirements:
+
+- Rust toolchain
+- `codex` available in your environment
+
+Build:
 
 ```bash
-cargo run -- --help
+cargo build --release
 ```
 
-После сборки:
+Run:
 
 ```bash
 ./target/release/codex-acp --help
 ```
 
-## Локальный workflow
-Полезные скрипты:
+## Development Checks
+
+Basic local checks:
 
 ```bash
-bash script/run_live_checks.sh quick
-bash script/run_live_checks.sh full
-bash script/build_install_cas.sh
-bash script/smoke_test_cas.sh "$HOME/.local/bin/codex-acp-cas"
-```
-
-Обновление references:
-
-```bash
-bash script/update_references.sh
-bash script/update_references.sh --daily
-bash script/update_references.sh --repo zed
-```
-
-## Сборка и проверки
-Базовый набор:
-
-```bash
-cargo build
 cargo test
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-Проверка под релизный target:
+Release-target check for Linux:
 
 ```bash
 cargo test --release --target x86_64-unknown-linux-gnu
 ```
 
-## Релизы
-Подготовка релиза:
+## Configuration
+
+Useful environment variables:
+
+- `RUST_LOG=codex_acp=debug`
+- `RUST_BACKTRACE=1`
+- `ACP_DISABLE_AUTO_RESTORE=1`
+- `CODEX_ACP_STARTUP_TIMEOUT_MS=<milliseconds>`
+- `CODEX_ACP_STARTUP_METADATA_TIMEOUT_MS=<milliseconds>`
+
+## Troubleshooting
+
+If Zed seems to hang or the adapter looks like it crashed, run Zed from a terminal:
 
 ```bash
-bash script/prepare_release.sh 0.1.0
-git push origin main
-git push origin v0.1.0
+RUST_LOG=codex_acp=debug RUST_BACKTRACE=1 zed
 ```
 
-GitHub Actions release pipeline собирает Linux-артефакт для `x86_64-unknown-linux-gnu` и публикует `tar.gz` + `.sha256`.
+Important log lines:
 
-## Архитектурная документация
-- Карта связности thread-подсистемы: `docs/thread-feature-map.md`.
-- Снимок upstream-референсов и матрица parity/lag: `docs/upstream-feature-matrix.md`.
-- Экспорт для визуализаторов генерируется локально через `script/export_thread_feature_map.py` и сейчас не хранится в репозитории как tracked-артефакт.
-- Правила разработки и проверки: `AGENTS.md`.
+- `Starting codex app-server process`
+- `Initializing codex app-server`
+- `Sending startup-sensitive app-server request`
+- `Queued app-server request while waiting for a response`
+- `Timed out waiting for app-server startup response`
+- `codex app-server closed stdout`
 
-## Лицензия
-Apache-2.0 (`LICENSE`).
+What they usually mean:
+
+- Timeout during `initialize` or `thread/start`: startup path is stuck
+- `failed to start 'codex' app-server`: `codex` is missing or not available in `PATH`
+- Panic backtrace: the adapter or child process crashed directly
+
+## More Docs
+
+User-facing documentation stays in this README. Deeper project notes are kept separately:
+
+- [docs/upstream-feature-matrix.md](docs/upstream-feature-matrix.md)
+- [docs/thread-feature-map.md](docs/thread-feature-map.md)
+- [AGENTS.md](AGENTS.md)
+
+## Roadmap
+
+Near-term work:
+
+- Finish startup request multiplexing cleanup
+- Improve release automation and packaging
+- Test release artifacts on Windows and macOS
+- Keep reducing ACP and Zed session lifecycle edge cases
+- Keep simplifying docs for non-maintainer users
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Qweasd123tg"]
 license = "Apache-2.0"
-description = "An ACP-compatible coding agent powered by Codex"
-repository = "https://github.com/Qweasd123tg/zed-codex-acp-CAS"
-homepage = "https://github.com/Qweasd123tg/zed-codex-acp-CAS"
+description = "A practical Codex ACP adapter fork for Zed and other ACP-compatible clients"
+repository = "https://github.com/Qweasd123tg/zed-codex-ACP-CAS"
+homepage = "https://github.com/Qweasd123tg/zed-codex-ACP-CAS"
 
 [[bin]]
 name = "codex-acp"
@@ -45,6 +45,31 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 codex-core = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
+
+[package.metadata.deb]
+maintainer = "Qweasd123tg"
+copyright = "2026, Qweasd123tg"
+section = "utils"
+priority = "optional"
+depends = "$auto"
+extended-description = """\
+Codex ACP CAS is a practical fork of the Zed Codex ACP adapter.
+It connects Codex to ACP-compatible clients such as Zed through codex app-server.
+"""
+assets = [
+  ["target/release/codex-acp", "usr/bin/codex-acp", "755"],
+  ["README.md", "usr/share/doc/codex-acp/README.md", "644"],
+  ["LICENSE", "usr/share/doc/codex-acp/LICENSE", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "A practical Codex ACP adapter fork for Zed and other ACP-compatible clients"
+release = "1"
+assets = [
+  { source = "target/release/codex-acp", dest = "/usr/bin/codex-acp", mode = "755" },
+  { source = "README.md", dest = "/usr/share/doc/codex-acp/README.md", mode = "644", doc = true },
+  { source = "LICENSE", dest = "/usr/share/licenses/codex-acp/LICENSE", mode = "644", doc = true },
+]
 
 [lints.rust]
 let-underscore = "warn"
