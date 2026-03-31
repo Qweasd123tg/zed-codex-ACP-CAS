@@ -241,6 +241,12 @@ flowchart LR
 Для `/resume --history` к этому добавляется порядок pre-command routing: gate по `history_replay_in_progress` должен стоять раньше background drain, иначе новый prompt может проскочить в окно между unlock и началом replay.
 Фоновый drain перед новым prompt тоже должен считаться transport-scrub, а не обычной live dispatch-веткой: если cleanup упёрся в timeout/message cap, это лучше явно логировать, иначе хвост выглядит как случайный UI-глюк. Текущая безопасная политика здесь — `drain until quiet` с short quiet streak, общим deadline и большим safety ceiling, а не blind stop после `64` сообщений или первого микротаймаута.
 
+### Turn diff writeback
+- `src/thread/turn/diff.rs`
+- `src/thread/turn/execution.rs`
+
+Риск: финальный `turn diff` historically держал `ThreadInner` mutex через `send_tool_call_update(...)`, `read_file_text(...)` и `write_text_file(...)`, а это уже на завершении turn ощущалось как лишний хвостовой фриз. Текущая безопасная граница здесь такая: `latest_turn_diff`, `started_tool_calls` и dedupe по `file_change_paths_this_turn` / `synced_paths_this_turn` снимаются в snapshot под lock, а сам ACP update + writeback идут уже после unlock через fast-path `TurnCompleted` в `src/thread/turn/execution.rs`. Отдельная инварианта: turn-diff writeback не должен повторно синкать пути, уже зарезервированные file-change lifecycle в том же turn.
+
 ### File-change lifecycle
 - `src/thread/features/file/events.rs`
 - `src/thread/features/file/changes.rs`

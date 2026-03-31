@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 use crate::thread::{
-    DEV_NULL, Diff, TURN_DIFF_TOOL_CALL_PREFIX, ThreadInner, ToolCall, ToolCallContent, ToolCallId,
-    ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
-    TurnDiffUpdatedNotification, read_file_text, unified_diff_to_old_new,
+    DEV_NULL, Diff, SessionClient, TURN_DIFF_TOOL_CALL_PREFIX, ThreadInner, ToolCall,
+    ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields, ToolKind, TurnDiffUpdatedNotification, read_file_text,
+    unified_diff_to_old_new,
 };
 
 #[derive(Clone, Debug)]
@@ -25,6 +26,19 @@ struct ResolvedTurnDiffFile {
     new_text: String,
 }
 
+pub(super) struct PreparedTurnDiffRender {
+    pub(super) send_as_new: bool,
+    pub(super) tool_call_id: ToolCallId,
+    pub(super) locations: Vec<ToolCallLocation>,
+    pub(super) content: Vec<ToolCallContent>,
+}
+
+pub(super) struct FinalizedTurnDiffSnapshot {
+    pub(super) client: SessionClient,
+    pub(super) render: Option<PreparedTurnDiffRender>,
+    pub(super) sync_paths: Vec<PathBuf>,
+}
+
 // Обрабатываем обновления turn-diff в одном месте, чтобы логика patch-preview была консистентной.
 pub(super) async fn handle_turn_diff_updated(
     inner: &mut ThreadInner,
@@ -38,21 +52,25 @@ pub(super) async fn handle_turn_diff_updated(
     inner.latest_turn_diff = Some(payload.diff);
 }
 
-pub(super) async fn finalize_turn_diff(inner: &mut ThreadInner, turn_id: &str) {
-    let Some(diff) = inner.latest_turn_diff.take() else {
-        return;
-    };
+pub(super) fn prepare_finalized_turn_diff_snapshot(
+    inner: &mut ThreadInner,
+    turn_id: &str,
+) -> Option<FinalizedTurnDiffSnapshot> {
+    let diff = inner.latest_turn_diff.take()?;
 
     let parsed_files = parse_turn_unified_diff_files(&diff);
     if parsed_files.is_empty() {
-        return;
+        return None;
     }
     let repo_root = find_repo_root(&inner.workspace_cwd);
     let mut resolved_files = Vec::with_capacity(parsed_files.len());
     let mut sync_paths = Vec::new();
     for file in parsed_files {
         let path = resolve_turn_diff_path(&inner.workspace_cwd, repo_root.as_deref(), &file.path);
-        if !file.is_delete {
+        if !file.is_delete
+            && !inner.file_change_paths_this_turn.contains(&path)
+            && !inner.synced_paths_this_turn.contains(path.as_path())
+        {
             sync_paths.push(path.clone());
         }
         resolved_files.push(ResolvedTurnDiffFile {
@@ -62,26 +80,82 @@ pub(super) async fn finalize_turn_diff(inner: &mut ThreadInner, turn_id: &str) {
         });
     }
     if resolved_files.is_empty() {
-        return;
+        return None;
     }
 
-    update_turn_diff_tool_call(inner, turn_id, resolved_files, false).await;
-    sync_turn_diff_files_to_acp(inner, &sync_paths).await;
+    let render = prepare_turn_diff_tool_call(inner, turn_id, resolved_files, false);
+    Some(FinalizedTurnDiffSnapshot {
+        client: inner.client.clone(),
+        render,
+        sync_paths,
+    })
 }
 
-async fn update_turn_diff_tool_call(
+pub(super) async fn emit_finalized_turn_diff_snapshot(
+    snapshot: FinalizedTurnDiffSnapshot,
+) -> Vec<PathBuf> {
+    if let Some(render) = snapshot.render {
+        if render.send_as_new {
+            snapshot
+                .client
+                .send_tool_call(
+                    ToolCall::new(render.tool_call_id, "Turn diff")
+                        .kind(ToolKind::Edit)
+                        .status(ToolCallStatus::Completed)
+                        .locations(render.locations)
+                        .content(render.content),
+                )
+                .await;
+        } else {
+            snapshot
+                .client
+                .send_tool_call_update(ToolCallUpdate::new(
+                    render.tool_call_id,
+                    ToolCallUpdateFields::new()
+                        .status(ToolCallStatus::Completed)
+                        .locations(render.locations)
+                        .content(render.content),
+                ))
+                .await;
+        }
+    }
+
+    let mut synced_paths = Vec::new();
+    for path in snapshot.sync_paths {
+        let Some(content) = read_file_text(&path) else {
+            continue;
+        };
+
+        match snapshot.client.write_text_file(path.clone(), content).await {
+            Ok(()) => synced_paths.push(path),
+            Err(err) => {
+                warn!(
+                    "Failed to sync turn diff into ACP buffer for {}: {err:?}",
+                    path.display()
+                );
+            }
+        }
+    }
+    synced_paths
+}
+
+pub(super) async fn finalize_turn_diff(inner: &mut ThreadInner, turn_id: &str) {
+    let Some(snapshot) = prepare_finalized_turn_diff_snapshot(inner, turn_id) else {
+        return;
+    };
+    let synced_paths = emit_finalized_turn_diff_snapshot(snapshot).await;
+    inner.synced_paths_this_turn.extend(synced_paths);
+}
+
+fn prepare_turn_diff_tool_call(
     inner: &mut ThreadInner,
     turn_id: &str,
     resolved_files: Vec<ResolvedTurnDiffFile>,
     in_progress: bool,
-) {
+) -> Option<PreparedTurnDiffRender> {
     let tool_call_key = format!("{TURN_DIFF_TOOL_CALL_PREFIX}{turn_id}");
     let tool_call_id = ToolCallId::new(tool_call_key.clone());
-    let status = if in_progress {
-        ToolCallStatus::InProgress
-    } else {
-        ToolCallStatus::Completed
-    };
+    let send_as_new = inner.started_tool_calls.insert(tool_call_key.clone());
 
     let mut content = Vec::new();
     let mut locations = Vec::new();
@@ -102,64 +176,21 @@ async fn update_turn_diff_tool_call(
         locations.push(ToolCallLocation::new(path));
     }
     if content.is_empty() {
-        return;
-    }
-
-    if inner.started_tool_calls.insert(tool_call_key.clone()) {
-        inner
-            .client
-            .send_tool_call(
-                ToolCall::new(tool_call_id, "Turn diff")
-                    .kind(ToolKind::Edit)
-                    .status(status)
-                    .locations(locations)
-                    .content(content),
-            )
-            .await;
-    } else {
-        inner
-            .client
-            .send_tool_call_update(ToolCallUpdate::new(
-                tool_call_id,
-                ToolCallUpdateFields::new()
-                    .status(status)
-                    .locations(locations)
-                    .content(content),
-            ))
-            .await;
+        if !in_progress {
+            inner.started_tool_calls.remove(&tool_call_key);
+        }
+        return None;
     }
 
     if !in_progress {
         inner.started_tool_calls.remove(&tool_call_key);
     }
-}
-
-async fn sync_turn_diff_files_to_acp(inner: &mut ThreadInner, sync_paths: &[PathBuf]) {
-    if !inner.client.supports_write_text_file() {
-        return;
-    }
-
-    for path in sync_paths {
-        if inner.synced_paths_this_turn.contains(path.as_path()) {
-            continue;
-        }
-
-        let Some(content) = read_file_text(path) else {
-            continue;
-        };
-
-        match inner.client.write_text_file(path.clone(), content).await {
-            Ok(()) => {
-                inner.synced_paths_this_turn.insert(path.clone());
-            }
-            Err(err) => {
-                warn!(
-                    "Failed to sync turn diff into ACP buffer for {}: {err:?}",
-                    path.display()
-                );
-            }
-        }
-    }
+    Some(PreparedTurnDiffRender {
+        send_as_new,
+        tool_call_id,
+        locations,
+        content,
+    })
 }
 
 pub(super) fn parse_turn_unified_diff_files(unified_diff: &str) -> Vec<TurnUnifiedDiffFile> {

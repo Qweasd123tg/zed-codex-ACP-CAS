@@ -97,6 +97,7 @@ Sub-agent and collaboration tool-call rendering:
 - Safer transport drain: stale server requests are rejected during post-turn and pre-prompt cleanup instead of triggering late approvals
 - Less reconnect spam: reconnect warnings now collapse into one normalized status line while reconnect-assisted stalled turns still abort cleanly
 - Less brittle transport cleanup: background drain and thread-switch flush now wait for the queue to go quiet instead of assuming `64` messages or one tiny timeout is enough
+- Less turn-completion lock contention: turn diff ACP writeback now runs outside the main session mutex and skips paths already reserved by file-change lifecycle
 
 ## Why Use This Fork
 
@@ -123,6 +124,7 @@ Current strengths of this fork:
 - Less chat stall while waiting for shell command approval
 - Less lock contention while file-change start cards are published
 - Less lock contention while file-change completion diff/writeback is published
+- Less lock contention while final turn-diff cards and ACP buffer sync are published
 - Less risk of ghost approvals from stale app-server requests during drain/flush cleanup
 - Clearer reconnect UX with one normalized retry status and cleaner reconnect-assisted stall aborts
 - More reliable pre-prompt and thread-switch cleanup under bursty app-server tails

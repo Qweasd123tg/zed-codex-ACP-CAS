@@ -12,7 +12,7 @@ use super::{
 };
 use codex_app_server_protocol::{
     JSONRPCMessage, ReviewDelivery, ReviewStartParams, ReviewTarget, ServerNotification,
-    ServerRequest, ThreadItem,
+    ServerRequest, ThreadItem, TurnStatus,
 };
 
 use tracing::{info, warn};
@@ -358,6 +358,93 @@ impl Thread {
             }
 
             return Ok(ActiveTurnMessageOutcome::Continue);
+        }
+
+        if let JSONRPCMessage::Notification(notification) = &message
+            && let Ok(ServerNotification::TurnCompleted(payload)) =
+                ServerNotification::try_from(notification.clone())
+        {
+            let turn = payload.turn;
+            let status = turn.status.clone();
+            let turn_error_text = if status == TurnStatus::Failed {
+                turn.error
+                    .as_ref()
+                    .map(|error| format!("\n[turn error] {}", error.message))
+            } else {
+                None
+            };
+            let (completion_disposition, diff_snapshot, client) = {
+                let mut inner = self.inner.lock().await;
+                let disposition = crate::thread::turn_state::register_turn_completion(
+                    &mut inner.completed_turn_ids,
+                    turn_id,
+                    &turn.id,
+                );
+                if disposition == crate::thread::turn_state::TurnCompletionDisposition::Accepted {
+                    plan::maybe_advance_fallback_plan(
+                        &mut inner,
+                        turn_id,
+                        crate::thread::FallbackPlanPhase::Done,
+                    )
+                    .await;
+                    inner.mark_turn_progress();
+                    if inner
+                        .fallback_plan
+                        .as_ref()
+                        .is_some_and(|state| state.turn_id == turn_id)
+                    {
+                        inner.fallback_plan = None;
+                    }
+                    inner.turn_plan_updates_seen.remove(turn_id);
+                }
+                let diff_snapshot = if disposition
+                    == crate::thread::turn_state::TurnCompletionDisposition::Accepted
+                {
+                    crate::thread::turn_diff::prepare_finalized_turn_diff_snapshot(
+                        &mut inner, turn_id,
+                    )
+                } else {
+                    None
+                };
+                (disposition, diff_snapshot, inner.client.clone())
+            };
+
+            match completion_disposition {
+                crate::thread::turn_state::TurnCompletionDisposition::Accepted => {}
+                crate::thread::turn_state::TurnCompletionDisposition::Duplicate => {
+                    warn!(
+                        turn_id = turn.id.as_str(),
+                        "Ignoring duplicate turn completion notification"
+                    );
+                    return Ok(ActiveTurnMessageOutcome::Continue);
+                }
+                crate::thread::turn_state::TurnCompletionDisposition::UnexpectedTurnId => {
+                    return Ok(ActiveTurnMessageOutcome::Continue);
+                }
+            }
+
+            if let Some(snapshot) = diff_snapshot {
+                let synced_paths =
+                    crate::thread::turn_diff::emit_finalized_turn_diff_snapshot(snapshot).await;
+                if !synced_paths.is_empty() {
+                    let mut inner = self.inner.lock().await;
+                    if inner.active_turn_id.as_deref() == Some(turn_id) {
+                        inner.synced_paths_this_turn.extend(synced_paths);
+                    }
+                }
+            }
+
+            if let Some(turn_error_text) = turn_error_text {
+                client.send_agent_text(turn_error_text).await;
+            }
+
+            let stop_reason = match status {
+                TurnStatus::Interrupted => StopReason::Cancelled,
+                TurnStatus::Completed | TurnStatus::Failed | TurnStatus::InProgress => {
+                    StopReason::EndTurn
+                }
+            };
+            return Ok(ActiveTurnMessageOutcome::Stop(stop_reason));
         }
 
         if let JSONRPCMessage::Request(request) = &message
