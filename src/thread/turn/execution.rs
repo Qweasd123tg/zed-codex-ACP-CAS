@@ -20,10 +20,8 @@ use tracing::{info, warn};
 const TURN_MESSAGE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 const RECONNECT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(12);
 const RECONNECT_SILENT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(20);
-const TURN_SILENT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(45);
 const RECONNECT_STALL_WARNING_THRESHOLD: u32 = 5;
 const RECONNECT_STALL_MESSAGE: &str = "\n[error] Turn appears stuck after repeated reconnect failures. Ending this turn so the UI does not spin forever. Check network/auth and retry.";
-const TURN_SILENT_STALL_MESSAGE: &str = "\n[error] Turn produced no progress for 45s. Ending this turn so the UI does not spin forever. Check network/auth and retry.";
 const POST_TURN_NOTIFICATION_DRAIN_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(200);
 
@@ -36,7 +34,6 @@ struct PendingTurnCommandApproval {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StallAbortKind {
     Reconnect,
-    Silent,
 }
 
 fn classify_turn_stall_abort(
@@ -52,10 +49,6 @@ fn classify_turn_stall_abort(
         return Some(StallAbortKind::Reconnect);
     }
 
-    if warning_count == 0 && since_last_progress >= TURN_SILENT_STALL_GRACE_PERIOD {
-        return Some(StallAbortKind::Silent);
-    }
-
     None
 }
 
@@ -68,7 +61,6 @@ async fn maybe_abort_turn_stall(inner: &mut ThreadInner) -> Option<StopReason> {
 
     let message = match abort_kind {
         StallAbortKind::Reconnect => RECONNECT_STALL_MESSAGE,
-        StallAbortKind::Silent => TURN_SILENT_STALL_MESSAGE,
     };
     inner.client.send_agent_text(message).await;
     Some(StopReason::EndTurn)
@@ -479,22 +471,6 @@ mod tests {
         assert_eq!(
             classify_turn_stall_abort(1, false, std::time::Duration::from_secs(20)),
             Some(StallAbortKind::Reconnect)
-        );
-    }
-
-    #[test]
-    fn aborts_after_silent_stall_without_any_reconnect_warning() {
-        assert_eq!(
-            classify_turn_stall_abort(0, false, std::time::Duration::from_secs(45)),
-            Some(StallAbortKind::Silent)
-        );
-    }
-
-    #[test]
-    fn keeps_waiting_before_silent_stall_without_warnings() {
-        assert_eq!(
-            classify_turn_stall_abort(0, false, std::time::Duration::from_secs(44)),
-            None
         );
     }
 }

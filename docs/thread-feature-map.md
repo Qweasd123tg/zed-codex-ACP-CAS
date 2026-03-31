@@ -225,7 +225,7 @@ flowchart LR
 
 Риск: если не синхронизировать эти файлы вместе, можно либо снова получить вечную загрузку ACP UI, либо преждевременно завершать живой turn.
 Отдельная инварианта: watchdog-abort stalled turn должен проходить через тот же `finalize + drain post-turn notifications`, что и обычное завершение; иначе transport-хвост протечёт в следующий prompt.
-Отдельный UX-контракт: reconnect warnings не должны спамить чат сырой backend-строкой на каждую дельту/error. Безопасная текущая схема: `src/thread/features/notification/events/reconnect.rs` нормализует `Reconnecting... N/N`, live handlers показывают один статус на первую волну reconnect warning-ов, а watchdog в `src/thread/turn/execution.rs` различает `reconnect-assisted stall` и `silent stall with no progress at all`, чтобы offline/no-network кейс не крутился бесконечно.
+Отдельный UX-контракт: reconnect warnings не должны спамить чат сырой backend-строкой на каждую дельту/error. Безопасная текущая схема: `src/thread/features/notification/events/reconnect.rs` нормализует `Reconnecting... N/N`, live handlers показывают один статус на первую волну reconnect warning-ов, а watchdog в `src/thread/turn/execution.rs` оставляет только reconnect-assisted stall abort без агрессивного default cutoff на “полную тишину”, потому что долгие silent runs у агента могут быть легитимны.
 
 ### Replay/Resume
 - `src/thread/features/resume/*`
