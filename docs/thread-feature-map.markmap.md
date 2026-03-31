@@ -22,6 +22,11 @@ Paste this file into https://markmap.js.org/repl
 - Used by
   - ServerRequests - src/thread/core/server_requests.rs
 
+## ApprovalsPermissions - src/thread/features/approvals/permissions.rs
+- Depends on: none
+- Used by
+  - ServerRequests - src/thread/core/server_requests.rs
+
 ## ApprovalsUserInput - src/thread/features/approvals/user_input.rs
 - Depends on: none
 - Used by
@@ -107,6 +112,7 @@ Paste this file into https://markmap.js.org/repl
   - NotificationDeltas - src/thread/features/notification/events/deltas.rs
   - NotificationTurn - src/thread/features/notification/events/turn.rs
   - NotificationUsage - src/thread/features/notification/events/usage.rs
+  - NotificationWarnings - src/thread/features/notification/events/warnings.rs
   - TerminalUpdates - src/thread/core/terminal_updates.rs
   - TurnDiff - src/thread/turn/diff.rs
 - Used by
@@ -118,6 +124,11 @@ Paste this file into https://markmap.js.org/repl
   - NotificationFeature - src/thread/features/notification/mod.rs
 
 ## NotificationUsage - src/thread/features/notification/events/usage.rs
+- Depends on: none
+- Used by
+  - NotificationFeature - src/thread/features/notification/mod.rs
+
+## NotificationWarnings - src/thread/features/notification/events/warnings.rs
 - Depends on: none
 - Used by
   - NotificationFeature - src/thread/features/notification/mod.rs
@@ -153,6 +164,11 @@ Paste this file into https://markmap.js.org/repl
 - Used by
   - UserClient - User/Zed
 
+## ReconnectGuard - src/thread/turn/execution.rs
+- Depends on: none
+- Used by
+  - TurnExecution - src/thread/turn/execution.rs
+
 ## Replay - src/thread/core/replay.rs
 - Depends on
   - CollabRender - src/thread/features/collab/render.rs
@@ -186,6 +202,7 @@ Paste this file into https://markmap.js.org/repl
 - Depends on
   - ApprovalsCommand - src/thread/features/approvals/command.rs
   - ApprovalsFile - src/thread/features/approvals/file_change.rs
+  - ApprovalsPermissions - src/thread/features/approvals/permissions.rs
   - ApprovalsUserInput - src/thread/features/approvals/user_input.rs
 - Used by
   - NotificationDispatch - src/thread/notification/dispatch.rs (edge: JSONRPCRequest)
@@ -267,6 +284,7 @@ Paste this file into https://markmap.js.org/repl
   - AppServer - src/app_server.rs
   - PlanFallback - src/thread/features/plan/fallback.rs
   - PlanParse - src/thread/features/plan/parse.rs
+  - ReconnectGuard - src/thread/turn/execution.rs
 - Used by
   - PromptFlow - src/thread/prompt/flow.rs
 

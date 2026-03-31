@@ -3,6 +3,7 @@ flowchart TD
     AppServer[src/app_server.rs]
     ApprovalsCommand[src/thread/features/approvals/command.rs]
     ApprovalsFile[src/thread/features/approvals/file_change.rs]
+    ApprovalsPermissions[src/thread/features/approvals/permissions.rs]
     ApprovalsUserInput[src/thread/features/approvals/user_input.rs]
     CollabContent[CollabContent]
     CollabRender[src/thread/features/collab/render.rs]
@@ -19,11 +20,13 @@ flowchart TD
     NotificationFeature[src/thread/features/notification/mod.rs]
     NotificationTurn[src/thread/features/notification/events/turn.rs]
     NotificationUsage[src/thread/features/notification/events/usage.rs]
+    NotificationWarnings[src/thread/features/notification/events/warnings.rs]
     PlanEvents[src/thread/features/plan/events.rs]
     PlanFallback[src/thread/features/plan/fallback.rs]
     PlanParse[src/thread/features/plan/parse.rs]
     PromptCommands[src/thread/prompt/commands.rs]
     PromptFlow[src/thread/prompt/flow.rs]
+    ReconnectGuard[src/thread/turn/execution.rs]
     Replay[src/thread/core/replay.rs]
     ResumeApply[src/thread/features/resume/apply.rs]
     ResumeListing[src/thread/features/resume/listing.rs]
@@ -60,9 +63,11 @@ flowchart TD
     ServerRequests --> ApprovalsCommand
     ServerRequests --> ApprovalsFile
     ServerRequests --> ApprovalsUserInput
+    ServerRequests --> ApprovalsPermissions
     NotificationFeature --> NotificationDeltas
     NotificationFeature --> NotificationTurn
     NotificationFeature --> NotificationUsage
+    NotificationFeature --> NotificationWarnings
     NotificationFeature --> ItemHandlers
     NotificationFeature --> TerminalUpdates
     NotificationFeature --> TurnDiff
@@ -82,6 +87,7 @@ flowchart TD
     FileEvents --> FileChanges
     TurnExecution --> PlanParse
     TurnExecution --> PlanFallback
+    TurnExecution --> ReconnectGuard
     ResumeSelector --> ResumeApply
     ResumeApply --> Replay
     Replay --> SessionReplay

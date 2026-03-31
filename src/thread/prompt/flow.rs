@@ -24,7 +24,8 @@ impl Thread {
             Some(SessionCommand::Undo { num_turns }) => Some(*num_turns),
             _ => None,
         };
-        let mut plan_prompt: Option<String> = None;
+        let mut prompt_override: Option<String> = None;
+        let mut prompt_override_mode_kind: Option<ModeKind> = None;
         let mut review_target: Option<ReviewTarget> = None;
         let mut inner = self.inner.lock().await;
         if inner.history_replay_in_progress {
@@ -70,8 +71,9 @@ impl Thread {
                 prompt_commands::CommandDispatchOutcome::Stop(stop_reason) => {
                     return Ok(stop_reason);
                 }
-                prompt_commands::CommandDispatchOutcome::PlanPrompt(prompt) => {
-                    plan_prompt = Some(prompt);
+                prompt_commands::CommandDispatchOutcome::PromptOverride { prompt, mode_kind } => {
+                    prompt_override = Some(prompt);
+                    prompt_override_mode_kind = Some(mode_kind);
                 }
                 prompt_commands::CommandDispatchOutcome::ReviewStart(target) => {
                     review_target = Some(target);
@@ -100,7 +102,7 @@ impl Thread {
             return self.run_review_turn_ext(target).await;
         }
 
-        let input = if let Some(prompt) = plan_prompt.as_ref() {
+        let input = if let Some(prompt) = prompt_override.as_ref() {
             prompt_commands::build_prompt_items(vec![ContentBlock::from(prompt.clone())])
         } else {
             prompt_commands::build_prompt_items(request.prompt)
@@ -109,11 +111,8 @@ impl Thread {
             return Err(Error::invalid_params().data("prompt is empty"));
         }
 
-        let collaboration_mode_kind = if plan_prompt.is_some() {
-            ModeKind::Plan
-        } else {
-            inner.collaboration_mode_kind
-        };
+        let collaboration_mode_kind =
+            prompt_override_mode_kind.unwrap_or(inner.collaboration_mode_kind);
         drop(inner);
         let stop_reason = self
             .run_single_turn_ext(input, collaboration_mode_kind)

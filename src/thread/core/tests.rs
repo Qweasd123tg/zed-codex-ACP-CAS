@@ -259,6 +259,32 @@ fn parses_fork_command_with_args_for_usage_handling() {
 }
 
 #[test]
+fn parses_init_command_without_args() {
+    let prompt: Vec<ContentBlock> = vec!["/init".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Init { args: None })
+    );
+}
+
+#[test]
+fn parses_init_command_with_args_for_usage_handling() {
+    let prompt: Vec<ContentBlock> = vec!["/init please".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Init {
+            args: Some("please".to_string()),
+        })
+    );
+}
+
+#[test]
+fn does_not_parse_init_prefix_as_command() {
+    let prompt: Vec<ContentBlock> = vec!["/initiate".into()];
+    assert_eq!(parse_session_command(&prompt), None);
+}
+
+#[test]
 fn parses_review_command_without_instructions() {
     let prompt: Vec<ContentBlock> = vec!["/review".into()];
     assert_eq!(
@@ -358,6 +384,7 @@ fn builtin_commands_include_review_new_and_fork() {
         .map(|command| command.name)
         .collect::<Vec<_>>();
 
+    assert!(names.contains(&"init".to_string()));
     assert!(names.contains(&"review".to_string()));
     assert!(names.contains(&"new".to_string()));
     assert!(names.contains(&"fork".to_string()));

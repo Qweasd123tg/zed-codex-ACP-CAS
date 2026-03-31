@@ -69,6 +69,7 @@ Sub-agent and collaboration tool-call rendering:
 - Session-scoped MCP passthrough for `stdio` and `http`
 - History replay after `load_session` and `resume_session`
 - Session commands:
+  - `/init`
   - `/review`
   - `/threads`
   - `/resume`
@@ -139,7 +140,7 @@ Current gaps:
 - No full structured elicitation parity yet
 - Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
-- Some upstream-style flows are still missing or incomplete, including `close_session`, `/init`, and `/logout`
+- Some upstream-style flows are still missing or incomplete, including `close_session` and `/logout`
 - `soft /new` and `/fork` switch only the backend thread; current Zed-side ACP behavior still does not clear sidebar chat history for in-place thread switches
 - Some behavior still depends on Zed-side ACP support
 
@@ -314,7 +315,6 @@ Later candidates:
 
 - `/diff`
 - `/debug-config`
-- `/init`
 - `thread/read`
 
 Not a priority for this fork right now:

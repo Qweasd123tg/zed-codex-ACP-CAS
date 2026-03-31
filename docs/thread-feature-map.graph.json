@@ -1,10 +1,10 @@
 {
   "title": "Thread Feature Map (Curated)",
   "source": "docs/thread-feature-map.md",
-  "generated_at": "2026-02-25T18:04:44.966672+00:00",
+  "generated_at": "2026-03-31T15:16:14.618479+00:00",
   "stats": {
-    "nodes": 45,
-    "edges": 47
+    "nodes": 48,
+    "edges": 50
   },
   "nodes": [
     {
@@ -24,6 +24,12 @@
       "label": "src/thread/features/approvals/file_change.rs",
       "kind": "file",
       "path": "src/thread/features/approvals/file_change.rs"
+    },
+    {
+      "id": "ApprovalsPermissions",
+      "label": "src/thread/features/approvals/permissions.rs",
+      "kind": "file",
+      "path": "src/thread/features/approvals/permissions.rs"
     },
     {
       "id": "ApprovalsUserInput",
@@ -120,6 +126,12 @@
       "path": "src/thread/features/notification/events/usage.rs"
     },
     {
+      "id": "NotificationWarnings",
+      "label": "src/thread/features/notification/events/warnings.rs",
+      "kind": "file",
+      "path": "src/thread/features/notification/events/warnings.rs"
+    },
+    {
       "id": "PlanEvents",
       "label": "src/thread/features/plan/events.rs",
       "kind": "file",
@@ -148,6 +160,12 @@
       "label": "src/thread/prompt/flow.rs",
       "kind": "file",
       "path": "src/thread/prompt/flow.rs"
+    },
+    {
+      "id": "ReconnectGuard",
+      "label": "src/thread/turn/execution.rs",
+      "kind": "file",
+      "path": "src/thread/turn/execution.rs"
     },
     {
       "id": "Replay",
@@ -335,6 +353,10 @@
       "to": "ApprovalsUserInput"
     },
     {
+      "from": "ServerRequests",
+      "to": "ApprovalsPermissions"
+    },
+    {
       "from": "NotificationFeature",
       "to": "NotificationDeltas"
     },
@@ -345,6 +367,10 @@
     {
       "from": "NotificationFeature",
       "to": "NotificationUsage"
+    },
+    {
+      "from": "NotificationFeature",
+      "to": "NotificationWarnings"
     },
     {
       "from": "NotificationFeature",
@@ -421,6 +447,10 @@
     {
       "from": "TurnExecution",
       "to": "PlanFallback"
+    },
+    {
+      "from": "TurnExecution",
+      "to": "ReconnectGuard"
     },
     {
       "from": "ResumeSelector",

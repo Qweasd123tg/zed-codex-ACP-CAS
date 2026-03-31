@@ -204,6 +204,9 @@ struct FallbackPlanState {
 #[derive(Debug, PartialEq, Eq)]
 // Slash-команды, которые распознаются до обычного выполнения промпта.
 enum SessionCommand {
+    Init {
+        args: Option<String>,
+    },
     Review {
         instructions: Option<String>,
     },

@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-03-31`.
+Обновлено: `2026-03-31` (`/init` prompt bootstrap surfaced in `PromptCommands`/`PromptFlow`).
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -153,13 +153,19 @@ flowchart LR
 - `src/thread/features/notification/events/turn.rs`
 - `src/thread/prompt/flow.rs`
 
-3. Изменение file-change lifecycle:
+3. Изменение slash/prompt workflow (`/init`, `/review`, `/plan <prompt>` и похожие fixed prompt-turn ветки):
+- `src/thread/prompt/commands.rs`
+- `src/thread/prompt/flow.rs`
+- `src/thread/core/tests.rs`
+- `README.md` / `docs/upstream-feature-matrix.md` для surfaced command parity
+
+4. Изменение file-change lifecycle:
 - `src/thread/features/file/events.rs`
 - `src/thread/features/file/changes.rs`
 - `src/thread/features/approvals/file_change.rs`
 - `src/thread/turn/diff.rs`
 
-4. Изменение approval-flow:
+5. Изменение approval-flow:
 - `src/thread/core/server_requests.rs`
 - `src/thread/features/approvals/command.rs`
 - `src/thread/features/approvals/file_change.rs`
@@ -167,7 +173,7 @@ flowchart LR
 - `src/thread/features/approvals/permissions.rs`
 - `src/thread/turn/execution.rs`
 
-5. Изменение session/config, archive и thread title:
+6. Изменение session/config, archive и thread title:
 - `src/thread/session/config/mod.rs`
 - `src/thread/session/config/context.rs`
 - `src/thread/session/config/limits.rs`
@@ -282,6 +288,7 @@ flowchart LR
 | `src/thread/features/file/*` | File-change lifecycle, preview/final diff helper-ы |
 | `src/thread/features/notification/*` | Доменные обработчики notification-событий, включая usage/reconnect/warning forwarding |
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
+| `src/thread/prompt/*` | Парсинг slash-команд, fixed prompt-turn override-ы (`/init`, `/plan <prompt>`), routing в review/session-turn flow |
 | `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread, transport scrub при переключении |
 | `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, archive/unarchive picker UI, session replay события, title update, history replay fencing и runtime handling нижних session selectors |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |

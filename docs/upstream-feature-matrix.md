@@ -22,8 +22,8 @@
 
 ## Короткий Вывод
 
-- По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `9/15` полных совпадений, `0/15` частичных совпадений и `6/15` явных пробелов.
-- Основные пробелы относительно официального адаптера: `close_session`, `init`/`logout` и отдельные client-native UX-ветки, которые в текущем Zed ACP пока не дают достаточной отдачи.
+- По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `10/15` полных совпадений, `0/15` частичных совпадений и `5/15` явных пробелов.
+- Основные пробелы относительно официального адаптера: `close_session`, `/logout` и отдельные client-native UX-ветки, которые в текущем Zed ACP пока не дают достаточной отдачи.
 - Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/plan`, app-server-ориентированный flow восстановления тредов, нижний `Context` control и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
 
 ## 1. Parity С Официальным `zed codex acp`
@@ -38,7 +38,7 @@
 | `/compact` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У нас команда реализована в `src/thread/features/session/controls.rs`. |
 | `/undo` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У нас `undo` тоже вынесен в `src/thread/features/session/controls.rs`. Сам rollback-flow работает, но visual edit/rewind button в текущем `Zed` по-прежнему зависит от client-side ACP fix; для нативной кнопки нужен патч/пересборка `Zed`. |
 | `/review` | `codex-acp-upstream` + `codex` (`review/start`) | `<= 2026-02-18`, `c0b82cc`; локально `2026-03-31` | `[x]` | `[x]` | У форка теперь есть user-facing inline review-flow через один основной entrypoint `/review`. Bare команда открывает ACP picker для uncommitted/base-branch/commit/custom сценариев, а кастомные инструкции задаются через `/review <text>`. |
-| `/init` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[ ]` | Отдельной `/init`-ветки в `src/thread/prompt/commands.rs` нет. |
+| `/init` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc`; локально `2026-03-31` | `[x]` | `[x]` | `/init` теперь surfaced как builtin slash-команда в `src/thread/prompt/commands.rs` и идет как fixed prompt-turn с каноническим `AGENTS.md` bootstrap prompt. |
 | `/logout` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[ ]` | У нас есть только `authenticate`, но нет slash/logout handler. |
 | ACP approvals для command / file change / tool user input | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У форка это идет через `src/thread/core/server_requests.rs` и `src/thread/features/approvals/*`; для command approval popup теперь surfaced reason, очищенная inner shell-команда, `cwd`, network context и additional permissions. |
 | `RequestPermissions` tool | `codex`, sync в `codex-acp-upstream` | `2026-03-08`, `e6b93841c`; в official adapter попало через `2026-03-13`, `be20828` | `[x]` | `[x]` | У нас есть отдельная typed-ветка `ServerRequest::PermissionsRequestApproval` и ACP popup в `src/thread/features/approvals/permissions.rs`. |
@@ -100,7 +100,6 @@
 
 - `/diff`, если появится понятный UX-контракт: показывать git diff рабочего дерева, session-local diff, или оба режима.
 - `/debug-config` как developer-facing dump текущего runtime/config состояния.
-- `/init` как bootstrap-команда для project instructions / `AGENTS.md`-style setup.
 - `thread/read` surfaced UX для preview старых тредов без немедленного `resume`.
 
 ## 6. Пока Можно Спокойно Не Трогать

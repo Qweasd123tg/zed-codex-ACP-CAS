@@ -9,6 +9,9 @@ use agent_client_protocol::{
     EmbeddedResourceResource, ResourceLink, TextResourceContents, UnstructuredCommandInput,
 };
 use codex_app_server_protocol::{ReviewTarget, UserInput};
+use codex_protocol::config_types::ModeKind;
+
+const INIT_COMMAND_PROMPT: &str = include_str!("prompt_for_init_command.md");
 
 // Преобразуем ACP-блоки контента в обычные user input перед парсингом команд.
 pub(super) fn build_prompt_items(prompt: Vec<ContentBlock>) -> Vec<UserInput> {
@@ -125,6 +128,12 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
+    if let Some(rest) = slash_command_rest(text, "/init") {
+        return Some(SessionCommand::Init {
+            args: (!rest.is_empty()).then(|| rest.to_string()),
+        });
+    }
+
     if let Some(rest) = text.strip_prefix("/archive") {
         let query = rest.trim();
         return Some(SessionCommand::Archive {
@@ -177,7 +186,7 @@ fn extract_command_text(prompt: &[ContentBlock]) -> Option<&str> {
 #[derive(Debug, PartialEq)]
 pub(super) enum CommandDispatchOutcome {
     Stop(StopReason),
-    PlanPrompt(String),
+    PromptOverride { prompt: String, mode_kind: ModeKind },
     ReviewStart(ReviewTarget),
 }
 
@@ -187,6 +196,17 @@ pub(super) async fn dispatch_session_command(
     command: SessionCommand,
 ) -> Result<CommandDispatchOutcome, Error> {
     match command {
+        SessionCommand::Init { args } => {
+            if args.is_some() {
+                inner.client.send_agent_text("Usage: `/init`").await;
+                return Ok(CommandDispatchOutcome::Stop(StopReason::EndTurn));
+            }
+
+            Ok(CommandDispatchOutcome::PromptOverride {
+                prompt: INIT_COMMAND_PROMPT.to_string(),
+                mode_kind: ModeKind::Default,
+            })
+        }
         SessionCommand::Threads => Ok(CommandDispatchOutcome::Stop(
             resume::listing::handle_threads_command(inner).await?,
         )),
@@ -226,7 +246,10 @@ pub(super) async fn dispatch_session_command(
         SessionCommand::PlanMode { raw_value, mode } => Ok(CommandDispatchOutcome::Stop(
             session::modes::handle_plan_mode_command(inner, raw_value, mode).await?,
         )),
-        SessionCommand::PlanPrompt { prompt } => Ok(CommandDispatchOutcome::PlanPrompt(prompt)),
+        SessionCommand::PlanPrompt { prompt } => Ok(CommandDispatchOutcome::PromptOverride {
+            prompt,
+            mode_kind: ModeKind::Plan,
+        }),
         SessionCommand::New { args } => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_new_command(inner, args).await?,
         )),
@@ -253,6 +276,10 @@ pub(super) fn normalize_preview(preview: &str) -> String {
 
 pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
     vec![
+        AvailableCommand::new(
+            "init",
+            "Create an AGENTS.md file with instructions for Codex",
+        ),
         AvailableCommand::new(
             "review",
             "Open a review preset picker, or use `/review <instructions>` for a custom review",
