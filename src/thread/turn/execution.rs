@@ -1,5 +1,8 @@
 //! Хелперы выполнения turn, связывающие prompt input с API жизненного цикла turn в app-server.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use super::{
     Error, ModeKind, PLAN_IMPLEMENTATION_NO_OPTION_ID, PLAN_IMPLEMENTATION_TITLE,
     PLAN_IMPLEMENTATION_TOOL_CALL_ID, PLAN_IMPLEMENTATION_YES_OPTION_ID, PermissionOption,
@@ -20,6 +23,12 @@ const RECONNECT_STALL_WARNING_THRESHOLD: u32 = 5;
 const RECONNECT_STALL_MESSAGE: &str = "\n[error] Turn appears stuck after repeated reconnect failures. Ending this turn so the UI does not spin forever. Check network/auth and retry.";
 const POST_TURN_NOTIFICATION_DRAIN_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(200);
+
+struct PendingTurnCommandApproval {
+    turn_id: String,
+    request_id: codex_app_server_protocol::RequestId,
+    outcome_fut: Pin<Box<dyn Future<Output = Result<RequestPermissionOutcome, Error>>>>,
+}
 
 fn should_abort_reconnect_stall(
     warning_count: u32,
@@ -132,6 +141,7 @@ impl Thread {
     async fn drive_active_turn_ext(&self, turn_id: String) -> Result<StopReason, Error> {
         let mut interrupted = false;
         let mut cancel_rx = self.cancel_tx.subscribe();
+        let mut pending_command_approval: Option<PendingTurnCommandApproval> = None;
 
         loop {
             let watchdog = tokio::time::sleep(TURN_MESSAGE_POLL_INTERVAL);
@@ -139,6 +149,17 @@ impl Thread {
             tokio::select! {
                 result = cancel_rx.changed() => {
                     if result.is_ok() && !interrupted {
+                        if let Some(pending) = pending_command_approval.take() {
+                            let mut inner = self.inner.lock().await;
+                            inner.app.send_command_approval_response(
+                                pending.request_id,
+                                codex_app_server_protocol::CommandExecutionRequestApprovalResponse {
+                                    decision: crate::thread::features::approvals::command::command_approval_decision_from_outcome(
+                                        RequestPermissionOutcome::Cancelled
+                                    ),
+                                },
+                            ).await?;
+                        }
                         let mut inner = self.inner.lock().await;
                         if let Some(active_turn_id) = inner.active_turn_id.clone() {
                             let thread_id = inner.thread_id.clone();
@@ -151,6 +172,9 @@ impl Thread {
                     }
                 }
                 _ = &mut watchdog => {
+                    if pending_command_approval.is_some() {
+                        continue;
+                    }
                     let stop_reason = {
                         let mut inner = self.inner.lock().await;
                         maybe_abort_reconnect_stall(&mut inner).await
@@ -161,15 +185,53 @@ impl Thread {
                         return Ok(stop_reason);
                     }
                 }
+                approval_result = async {
+                    let pending = pending_command_approval
+                        .as_mut()
+                        .expect("pending command approval should exist");
+                    let outcome = pending.outcome_fut.as_mut().await;
+                    (pending.request_id.clone(), pending.turn_id.clone(), outcome)
+                }, if pending_command_approval.is_some() => {
+                    let (request_id, approval_turn_id, outcome) = approval_result;
+                    pending_command_approval = None;
+                    let active_turn_matches = {
+                        let inner = self.inner.lock().await;
+                        inner.active_turn_id.as_deref() == Some(approval_turn_id.as_str())
+                    };
+                    let decision = if active_turn_matches {
+                        crate::thread::features::approvals::command::command_approval_decision_from_outcome(
+                            outcome?,
+                        )
+                    } else {
+                        codex_app_server_protocol::CommandExecutionApprovalDecision::Cancel
+                    };
+                    let mut inner = self.inner.lock().await;
+                    inner.app.send_command_approval_response(
+                        request_id,
+                        codex_app_server_protocol::CommandExecutionRequestApprovalResponse {
+                            decision,
+                        },
+                    ).await?;
+                }
                 message = async {
                     let mut inner = self.inner.lock().await;
                     inner.app.next_message().await
-                } => {
+                }, if pending_command_approval.is_none() => {
                     let message = message?;
-                    if let Some(stop_reason) = self.handle_active_turn_message(message, &turn_id).await? {
+                    match self.handle_active_turn_message(message, &turn_id).await? {
+                        ActiveTurnMessageOutcome::Continue => {}
+                        ActiveTurnMessageOutcome::PendingCommandApproval(pending) => {
+                            pending_command_approval = Some(pending);
+                            continue;
+                        }
+                        ActiveTurnMessageOutcome::Stop(stop_reason) => {
                         let mut inner = self.inner.lock().await;
                         finalize_turn_and_drain(&mut inner, &turn_id).await?;
                         return Ok(stop_reason);
+                        }
+                    }
+                    if pending_command_approval.is_some() {
+                        continue;
                     }
                     let stop_reason = {
                         let mut inner = self.inner.lock().await;
@@ -189,19 +251,55 @@ impl Thread {
         &self,
         message: JSONRPCMessage,
         turn_id: &str,
-    ) -> Result<Option<StopReason>, Error> {
+    ) -> Result<ActiveTurnMessageOutcome, Error> {
+        if let JSONRPCMessage::Request(request) = &message
+            && let Ok(ServerRequest::CommandExecutionRequestApproval { request_id, params }) =
+                ServerRequest::try_from(request.clone())
+        {
+            let pending = {
+                let inner = self.inner.lock().await;
+                let pending = crate::thread::features::approvals::command::prepare_command_approval(
+                    &inner, request_id, params,
+                );
+                let request_id = pending.request_id.clone();
+                let turn_id = turn_id.to_string();
+                let client = pending.client;
+                let tool_call = pending.tool_call;
+                let options = pending.options;
+                PendingTurnCommandApproval {
+                    turn_id,
+                    request_id,
+                    outcome_fut: Box::pin(async move {
+                        client.request_permission(tool_call, options).await
+                    }),
+                }
+            };
+            return Ok(ActiveTurnMessageOutcome::PendingCommandApproval(pending));
+        }
+
         if let JSONRPCMessage::Request(request) = &message
             && let Ok(ServerRequest::FileChangeRequestApproval { request_id, params }) =
                 ServerRequest::try_from(request.clone())
         {
             self.handle_file_change_approval_request_ext(request_id, params)
                 .await?;
-            return Ok(None);
+            return Ok(ActiveTurnMessageOutcome::Continue);
         }
 
         let mut inner = self.inner.lock().await;
-        notification_dispatch::handle_message(&mut inner, message, turn_id).await
+        Ok(
+            match notification_dispatch::handle_message(&mut inner, message, turn_id).await? {
+                Some(stop_reason) => ActiveTurnMessageOutcome::Stop(stop_reason),
+                None => ActiveTurnMessageOutcome::Continue,
+            },
+        )
     }
+}
+
+enum ActiveTurnMessageOutcome {
+    Continue,
+    PendingCommandApproval(PendingTurnCommandApproval),
+    Stop(StopReason),
 }
 
 pub(super) async fn prompt_plan_implementation(inner: &mut ThreadInner) -> Result<bool, Error> {

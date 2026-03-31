@@ -13,7 +13,14 @@ use codex_app_server_protocol::{
 use crate::thread::features::tool_call_ui::kind::{
     command_looks_like_verification, extract_inner_shell_command,
 };
-use crate::thread::{ALLOW_ONCE, CANCEL_TURN, REJECT_ONCE, ThreadInner};
+use crate::thread::{ALLOW_ONCE, CANCEL_TURN, REJECT_ONCE, SessionClient, ThreadInner};
+
+pub(in crate::thread) struct CommandApprovalPending {
+    pub(in crate::thread) client: SessionClient,
+    pub(in crate::thread) request_id: codex_app_server_protocol::RequestId,
+    pub(in crate::thread) tool_call: ToolCallUpdate,
+    pub(in crate::thread) options: Vec<PermissionOption>,
+}
 
 // Отправляем решения по подтверждению команд обратно в app-server и зеркалим результат в ACP UI.
 pub(in crate::thread) async fn handle_command_approval(
@@ -21,6 +28,27 @@ pub(in crate::thread) async fn handle_command_approval(
     request_id: codex_app_server_protocol::RequestId,
     params: CommandExecutionRequestApprovalParams,
 ) -> Result<(), Error> {
+    let pending = prepare_command_approval(inner, request_id, params);
+    let outcome = pending
+        .client
+        .request_permission(pending.tool_call, pending.options)
+        .await?;
+    let decision = command_approval_decision_from_outcome(outcome);
+
+    inner
+        .app
+        .send_command_approval_response(
+            pending.request_id,
+            CommandExecutionRequestApprovalResponse { decision },
+        )
+        .await
+}
+
+pub(in crate::thread) fn prepare_command_approval(
+    inner: &ThreadInner,
+    request_id: codex_app_server_protocol::RequestId,
+    params: CommandExecutionRequestApprovalParams,
+) -> Box<CommandApprovalPending> {
     let tool_call_id = ToolCallId::new(params.item_id.clone());
 
     let mut fields = ToolCallUpdateFields::new()
@@ -33,19 +61,22 @@ pub(in crate::thread) async fn handle_command_approval(
     }
     fields = fields.raw_input(serde_json::to_value(&params).ok());
 
-    let outcome = inner
-        .client
-        .request_permission(
-            ToolCallUpdate::new(tool_call_id.clone(), fields),
-            vec![
-                PermissionOption::new(ALLOW_ONCE, "Allow once", PermissionOptionKind::AllowOnce),
-                PermissionOption::new(REJECT_ONCE, "Reject", PermissionOptionKind::RejectOnce),
-                PermissionOption::new(CANCEL_TURN, "Cancel turn", PermissionOptionKind::RejectOnce),
-            ],
-        )
-        .await?;
+    Box::new(CommandApprovalPending {
+        client: inner.client.clone(),
+        request_id,
+        tool_call: ToolCallUpdate::new(tool_call_id, fields),
+        options: vec![
+            PermissionOption::new(ALLOW_ONCE, "Allow once", PermissionOptionKind::AllowOnce),
+            PermissionOption::new(REJECT_ONCE, "Reject", PermissionOptionKind::RejectOnce),
+            PermissionOption::new(CANCEL_TURN, "Cancel turn", PermissionOptionKind::RejectOnce),
+        ],
+    })
+}
 
-    let decision = match outcome {
+pub(in crate::thread) fn command_approval_decision_from_outcome(
+    outcome: RequestPermissionOutcome,
+) -> CommandExecutionApprovalDecision {
+    match outcome {
         RequestPermissionOutcome::Cancelled => CommandExecutionApprovalDecision::Cancel,
         RequestPermissionOutcome::Selected(SelectedPermissionOutcome { option_id, .. }) => {
             match option_id.0.as_ref() {
@@ -55,15 +86,7 @@ pub(in crate::thread) async fn handle_command_approval(
             }
         }
         _ => CommandExecutionApprovalDecision::Decline,
-    };
-
-    inner
-        .app
-        .send_command_approval_response(
-            request_id,
-            CommandExecutionRequestApprovalResponse { decision },
-        )
-        .await
+    }
 }
 
 fn command_approval_content(

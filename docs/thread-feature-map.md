@@ -248,10 +248,12 @@ flowchart LR
 
 ### Approval wait paths
 - `src/thread/features/approvals/file_change.rs`
+- `src/thread/features/approvals/command.rs`
 - `src/thread/core/server_requests.rs`
 - `src/thread/turn/execution.rs`
 
 Риск: держать `ThreadInner` mutex через весь `request_permission(...)` think-time пользователя. Для file-change approval текущая безопасная граница теперь такая: snapshot prompt payload под lock, сам ACP permission prompt вне lock, потом короткий relock только на ответ в `app-server`.
+Для command approval есть дополнительная инварианта: это live gate на выполнение shell-команды, поэтому `request_permission(...)` нельзя просто await-ить внутри message branch. Текущая безопасная схема в `turn/execution.rs`: parked pending approval state внутри active-turn loop, чтобы `cancel` и reconnect watchdog не умирали, пока пользователь думает.
 
 ### Collab/Subagents
 - `src/thread/features/collab/*`
