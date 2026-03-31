@@ -156,6 +156,7 @@ flowchart LR
 3. Изменение file-change lifecycle:
 - `src/thread/features/file/events.rs`
 - `src/thread/features/file/changes.rs`
+- `src/thread/features/approvals/file_change.rs`
 - `src/thread/turn/diff.rs`
 
 4. Изменение approval-flow:
@@ -235,6 +236,14 @@ flowchart LR
 Отдельный риск: transport-хвост старого треда может мешать следующему `/resume`, если не синхронизировать `apply.rs`, `app_server.rs` и pre-command routing в `prompt/flow.rs`. Опасный вариант здесь — blind drop request-ов; текущая версия этого уже не делает.
 Ещё один риск: вынести `replay::replay_turns(...)` из-под общего mutex без replay fence. Если менять `session/settings.rs`, `session/view.rs`, `codex_agent.rs` или pre-command gating в `prompt/flow.rs` несогласованно, легко снова получить overlapping replay и новый prompt в одной ACP-сессии.
 Для `/resume --history` к этому добавляется порядок pre-command routing: gate по `history_replay_in_progress` должен стоять раньше background drain, иначе новый prompt может проскочить в окно между unlock и началом replay.
+
+### File-change lifecycle
+- `src/thread/features/file/events.rs`
+- `src/thread/features/file/changes.rs`
+- `src/thread/features/approvals/file_change.rs`
+- `src/thread/turn/diff.rs`
+
+Риск: repeated disk I/O и ACP snapshot/writeback churn на одном и том же path. Даже до большого refactor здесь важно не читать, prime-ить и writeback-ить один и тот же файл по нескольку раз в рамках одного `FileChange` item, иначе multi-hunk edits начинают выглядеть как локальный фриз.
 
 ### Collab/Subagents
 - `src/thread/features/collab/*`

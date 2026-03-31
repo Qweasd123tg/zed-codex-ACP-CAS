@@ -1,7 +1,7 @@
 //! Live/replay рендер file-change tool-call веток.
 //! Держит полную lifecycle-логику карточек правок отдельно от item-маршрутизации.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use agent_client_protocol::{
@@ -28,27 +28,32 @@ pub(in crate::thread) async fn emit_file_change_started(
         .iter()
         .map(|change| super::changes::file_change_tool_location(&inner.workspace_cwd, change))
         .collect();
-    let target_paths = changes
-        .iter()
-        .map(|change| super::changes::file_change_target_path(&inner.workspace_cwd, change))
-        .collect::<Vec<_>>();
+    let mut target_paths = Vec::new();
+    let mut seen_target_paths = HashSet::new();
+    for change in &changes {
+        let path = super::changes::file_change_target_path(&inner.workspace_cwd, change);
+        if seen_target_paths.insert(path.clone()) {
+            target_paths.push(path);
+        }
+    }
     inner
         .file_change_paths_this_turn
         .extend(target_paths.iter().cloned());
     inner.file_change_locations.insert(id.clone(), target_paths);
-    let before_contents = changes
-        .iter()
-        .map(|change| {
-            let path = super::changes::resolve_workspace_path(
-                &inner.workspace_cwd,
-                Path::new(&change.path),
-            );
-            let content = super::changes::read_file_text(&path);
-            (path, content)
-        })
-        .collect::<HashMap<_, _>>();
+    let mut before_contents = HashMap::new();
+    for change in &changes {
+        if matches!(change.kind, PatchChangeKind::Add) {
+            continue;
+        }
+        let path =
+            super::changes::resolve_workspace_path(&inner.workspace_cwd, Path::new(&change.path));
+        before_contents
+            .entry(path.clone())
+            .or_insert_with(|| super::changes::read_file_text(&path));
+    }
 
     if inner.client.supports_read_text_file() {
+        let mut primed_paths = HashSet::new();
         for change in &changes {
             // Подготавливаем snapshot общего буфера Zed до подтверждения/применения патча.
             // Это помогает последующему write_text_file формировать реальные построчные правки для маркеров.
@@ -56,7 +61,9 @@ pub(in crate::thread) async fn emit_file_change_started(
                 &inner.workspace_cwd,
                 Path::new(&change.path),
             );
-            if let Err(err) = inner.client.prime_file_snapshot(source_path.clone()).await {
+            if primed_paths.insert(source_path.clone())
+                && let Err(err) = inner.client.prime_file_snapshot(source_path.clone()).await
+            {
                 warn!(
                     "Failed to prime ACP snapshot for {}: {err:?}",
                     source_path.display()
@@ -70,6 +77,7 @@ pub(in crate::thread) async fn emit_file_change_started(
                 let target_path =
                     super::changes::resolve_workspace_path(&inner.workspace_cwd, move_path);
                 if target_path != source_path
+                    && primed_paths.insert(target_path.clone())
                     && let Err(err) = inner.client.prime_file_snapshot(target_path.clone()).await
                 {
                     warn!(
@@ -127,11 +135,15 @@ pub(in crate::thread) async fn emit_file_change_completed(
 ) {
     let mut writeback_targets = Vec::new();
     if matches!(status, PatchApplyStatus::Completed) && inner.client.supports_write_text_file() {
+        let mut seen_writeback_paths = HashSet::new();
         for change in &changes {
             if matches!(change.kind, PatchChangeKind::Delete) {
                 continue;
             }
             let path = super::changes::file_change_target_path(&inner.workspace_cwd, change);
+            if !seen_writeback_paths.insert(path.clone()) {
+                continue;
+            }
             if let Some(content) = super::changes::read_file_text(&path) {
                 writeback_targets.push((path, content));
             }
