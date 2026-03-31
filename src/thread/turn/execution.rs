@@ -20,8 +20,10 @@ use tracing::{info, warn};
 const TURN_MESSAGE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 const RECONNECT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(12);
 const RECONNECT_SILENT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(20);
+const TURN_SILENT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(45);
 const RECONNECT_STALL_WARNING_THRESHOLD: u32 = 5;
 const RECONNECT_STALL_MESSAGE: &str = "\n[error] Turn appears stuck after repeated reconnect failures. Ending this turn so the UI does not spin forever. Check network/auth and retry.";
+const TURN_SILENT_STALL_MESSAGE: &str = "\n[error] Turn produced no progress for 45s. Ending this turn so the UI does not spin forever. Check network/auth and retry.";
 const POST_TURN_NOTIFICATION_DRAIN_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(200);
 
@@ -31,27 +33,44 @@ struct PendingTurnCommandApproval {
     outcome_fut: Pin<Box<dyn Future<Output = Result<RequestPermissionOutcome, Error>>>>,
 }
 
-fn should_abort_reconnect_stall(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StallAbortKind {
+    Reconnect,
+    Silent,
+}
+
+fn classify_turn_stall_abort(
     warning_count: u32,
     retry_limit_hit: bool,
     since_last_progress: std::time::Duration,
-) -> bool {
-    (retry_limit_hit
+) -> Option<StallAbortKind> {
+    if (retry_limit_hit
         && warning_count >= RECONNECT_STALL_WARNING_THRESHOLD
         && since_last_progress >= RECONNECT_STALL_GRACE_PERIOD)
         || (warning_count >= 1 && since_last_progress >= RECONNECT_SILENT_STALL_GRACE_PERIOD)
+    {
+        return Some(StallAbortKind::Reconnect);
+    }
+
+    if warning_count == 0 && since_last_progress >= TURN_SILENT_STALL_GRACE_PERIOD {
+        return Some(StallAbortKind::Silent);
+    }
+
+    None
 }
 
-async fn maybe_abort_reconnect_stall(inner: &mut ThreadInner) -> Option<StopReason> {
-    if !should_abort_reconnect_stall(
+async fn maybe_abort_turn_stall(inner: &mut ThreadInner) -> Option<StopReason> {
+    let abort_kind = classify_turn_stall_abort(
         inner.turn_reconnect_warning_count,
         inner.turn_reconnect_retry_limit_hit,
         inner.turn_last_progress_at.elapsed(),
-    ) {
-        return None;
-    }
+    )?;
 
-    inner.client.send_agent_text(RECONNECT_STALL_MESSAGE).await;
+    let message = match abort_kind {
+        StallAbortKind::Reconnect => RECONNECT_STALL_MESSAGE,
+        StallAbortKind::Silent => TURN_SILENT_STALL_MESSAGE,
+    };
+    inner.client.send_agent_text(message).await;
     Some(StopReason::EndTurn)
 }
 
@@ -187,7 +206,7 @@ impl Thread {
                     }
                     let stop_reason = {
                         let mut inner = self.inner.lock().await;
-                        maybe_abort_reconnect_stall(&mut inner).await
+                        maybe_abort_turn_stall(&mut inner).await
                     };
                     if let Some(stop_reason) = stop_reason {
                         let mut inner = self.inner.lock().await;
@@ -245,7 +264,7 @@ impl Thread {
                     }
                     let stop_reason = {
                         let mut inner = self.inner.lock().await;
-                        maybe_abort_reconnect_stall(&mut inner).await
+                        maybe_abort_turn_stall(&mut inner).await
                     };
                     if let Some(stop_reason) = stop_reason {
                         let mut inner = self.inner.lock().await;
@@ -437,32 +456,45 @@ pub(super) async fn prompt_plan_implementation(inner: &mut ThreadInner) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::should_abort_reconnect_stall;
+    use super::{StallAbortKind, classify_turn_stall_abort};
 
     #[test]
     fn aborts_after_reconnect_retry_limit_with_long_stall() {
-        assert!(should_abort_reconnect_stall(
-            5,
-            true,
-            std::time::Duration::from_secs(12)
-        ));
+        assert_eq!(
+            classify_turn_stall_abort(5, true, std::time::Duration::from_secs(12)),
+            Some(StallAbortKind::Reconnect)
+        );
     }
 
     #[test]
     fn keeps_waiting_before_retry_limit_is_hit() {
-        assert!(!should_abort_reconnect_stall(
-            4,
-            false,
-            std::time::Duration::from_secs(19)
-        ));
+        assert_eq!(
+            classify_turn_stall_abort(4, false, std::time::Duration::from_secs(19)),
+            None
+        );
     }
 
     #[test]
     fn aborts_after_single_reconnect_warning_with_long_silence() {
-        assert!(should_abort_reconnect_stall(
-            1,
-            false,
-            std::time::Duration::from_secs(20)
-        ));
+        assert_eq!(
+            classify_turn_stall_abort(1, false, std::time::Duration::from_secs(20)),
+            Some(StallAbortKind::Reconnect)
+        );
+    }
+
+    #[test]
+    fn aborts_after_silent_stall_without_any_reconnect_warning() {
+        assert_eq!(
+            classify_turn_stall_abort(0, false, std::time::Duration::from_secs(45)),
+            Some(StallAbortKind::Silent)
+        );
+    }
+
+    #[test]
+    fn keeps_waiting_before_silent_stall_without_warnings() {
+        assert_eq!(
+            classify_turn_stall_abort(0, false, std::time::Duration::from_secs(44)),
+            None
+        );
     }
 }

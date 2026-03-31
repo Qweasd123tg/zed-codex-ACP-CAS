@@ -3,6 +3,8 @@
 
 #[path = "deltas.rs"]
 pub(in crate::thread) mod deltas;
+#[path = "reconnect.rs"]
+pub(in crate::thread) mod reconnect;
 #[path = "turn.rs"]
 pub(in crate::thread) mod turn;
 #[path = "usage.rs"]

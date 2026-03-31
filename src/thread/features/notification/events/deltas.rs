@@ -3,19 +3,13 @@
 use agent_client_protocol::{ToolCallId, ToolCallUpdate, ToolCallUpdateFields};
 use codex_protocol::config_types::ModeKind;
 
+use crate::thread::features::notification::events::reconnect::{
+    format_reconnect_status, parse_reconnect_progress,
+};
 use crate::thread::{
     FallbackPlanPhase, ThreadInner, fallback_plan_can_enter_summarizing,
     maybe_advance_fallback_plan,
 };
-
-fn parse_reconnect_warning(delta: &str) -> Option<(u32, u32)> {
-    let trimmed = delta.trim();
-    let progress = trimmed.strip_prefix("[error] Reconnecting... ")?;
-    let (current, total) = progress.split_once('/')?;
-    let current = current.trim().parse().ok()?;
-    let total = total.trim().parse().ok()?;
-    Some((current, total))
-}
 
 // Обрабатываем агентский text-delta: при первом осмысленном тексте переключаем fallback-plan в summarizing.
 pub(in crate::thread) async fn emit_agent_message_delta(
@@ -28,9 +22,14 @@ pub(in crate::thread) async fn emit_agent_message_delta(
         return;
     }
 
-    if let Some((current, total)) = parse_reconnect_warning(&delta) {
-        inner.note_reconnect_warning(current >= total);
-        inner.client.send_agent_text(delta).await;
+    if let Some(progress) = parse_reconnect_progress(&delta) {
+        let warning_count = inner.note_reconnect_warning(progress.current >= progress.total);
+        if warning_count == 1 {
+            inner
+                .client
+                .send_agent_text(format_reconnect_status(progress))
+                .await;
+        }
         return;
     }
 
@@ -132,18 +131,23 @@ pub(in crate::thread) async fn emit_mcp_tool_call_progress(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_reconnect_warning;
+    use crate::thread::features::notification::events::reconnect::{
+        ReconnectProgress, parse_reconnect_progress,
+    };
 
     #[test]
     fn parses_reconnect_warning_with_error_prefix() {
         assert_eq!(
-            parse_reconnect_warning("\n[error] Reconnecting... 4/5"),
-            Some((4, 5))
+            parse_reconnect_progress("\n[error] Reconnecting... 4/5"),
+            Some(ReconnectProgress {
+                current: 4,
+                total: 5,
+            })
         );
     }
 
     #[test]
     fn ignores_regular_agent_text_for_reconnect_warning() {
-        assert_eq!(parse_reconnect_warning("Привет"), None);
+        assert_eq!(parse_reconnect_progress("Привет"), None);
     }
 }

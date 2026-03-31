@@ -65,11 +65,12 @@ impl ThreadInner {
         self.turn_reconnect_retry_limit_hit = false;
     }
 
-    pub(super) fn note_reconnect_warning(&mut self, reached_retry_limit: bool) {
+    pub(super) fn note_reconnect_warning(&mut self, reached_retry_limit: bool) -> u32 {
         self.turn_reconnect_warning_count = self.turn_reconnect_warning_count.saturating_add(1);
         if reached_retry_limit {
             self.turn_reconnect_retry_limit_hit = true;
         }
+        self.turn_reconnect_warning_count
     }
 
     pub(super) fn apply_mode_preset(

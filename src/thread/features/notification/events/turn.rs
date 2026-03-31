@@ -4,19 +4,14 @@ use agent_client_protocol::{Plan, SessionUpdate, StopReason};
 use codex_app_server_protocol::{Turn as AppTurn, TurnPlanStep, TurnStatus};
 use codex_protocol::config_types::ModeKind;
 
+use crate::thread::features::notification::events::reconnect::{
+    format_reconnect_status, parse_reconnect_progress,
+};
 use crate::thread::{
     FallbackPlanPhase, FallbackPlanState, ThreadInner, fallback_plan_entries_for_steps,
     finalize_turn_diff, limit_plan_entries, maybe_advance_fallback_plan, plan_entries_all_pending,
     turn_plan_step_to_entry, turn_state, warn,
 };
-
-fn parse_reconnect_turn_error(message: &str) -> Option<(u32, u32)> {
-    let progress = message.trim().strip_prefix("Reconnecting... ")?;
-    let (current, total) = progress.split_once('/')?;
-    let current = current.trim().parse().ok()?;
-    let total = total.trim().parse().ok()?;
-    Some((current, total))
-}
 
 // Обрабатываем полное обновление плана turn и синхронизируем fallback-plan state.
 pub(in crate::thread) async fn emit_turn_plan_updated(
@@ -149,32 +144,43 @@ pub(in crate::thread) async fn emit_turn_error(
     message: String,
 ) {
     if turn_id == expected_turn_id {
-        if let Some((current, total)) = parse_reconnect_turn_error(&message) {
-            inner.note_reconnect_warning(current >= total);
+        if let Some(progress) = parse_reconnect_progress(&message) {
+            let warning_count = inner.note_reconnect_warning(progress.current >= progress.total);
+            if warning_count == 1 {
+                inner
+                    .client
+                    .send_agent_text(format_reconnect_status(progress))
+                    .await;
+            }
         } else if !message.trim().is_empty() {
             inner.mark_turn_progress();
+            inner
+                .client
+                .send_agent_text(format!("\n[error] {message}"))
+                .await;
         }
-        inner
-            .client
-            .send_agent_text(format!("\n[error] {message}"))
-            .await;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_reconnect_turn_error;
+    use crate::thread::features::notification::events::reconnect::{
+        ReconnectProgress, parse_reconnect_progress,
+    };
 
     #[test]
     fn parses_reconnect_turn_error_progress() {
         assert_eq!(
-            parse_reconnect_turn_error("Reconnecting... 5/5"),
-            Some((5, 5))
+            parse_reconnect_progress("Reconnecting... 5/5"),
+            Some(ReconnectProgress {
+                current: 5,
+                total: 5,
+            })
         );
     }
 
     #[test]
     fn ignores_regular_turn_error_messages() {
-        assert_eq!(parse_reconnect_turn_error("network unavailable"), None);
+        assert_eq!(parse_reconnect_progress("network unavailable"), None);
     }
 }
