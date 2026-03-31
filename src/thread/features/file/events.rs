@@ -23,6 +23,16 @@ pub(in crate::thread) struct FileChangeStartedSnapshot {
     pub(in crate::thread) prime_paths: Vec<PathBuf>,
 }
 
+pub(in crate::thread) struct FileChangeCompletedSnapshot {
+    pub(in crate::thread) client: SessionClient,
+    pub(in crate::thread) id: String,
+    pub(in crate::thread) status: PatchApplyStatus,
+    pub(in crate::thread) workspace_cwd: PathBuf,
+    pub(in crate::thread) changes: Vec<FileUpdateChange>,
+    pub(in crate::thread) before_contents: HashMap<PathBuf, Option<String>>,
+    pub(in crate::thread) writeback_paths: Vec<PathBuf>,
+}
+
 pub(in crate::thread) fn prepare_file_change_started_snapshot(
     inner: &mut ThreadInner,
     id: String,
@@ -161,6 +171,98 @@ pub(in crate::thread) async fn emit_file_change_started(
     emit_file_change_started_snapshot(snapshot).await;
 }
 
+fn collect_file_change_writeback_paths(
+    workspace_cwd: &Path,
+    changes: &[FileUpdateChange],
+) -> Vec<PathBuf> {
+    let mut writeback_paths = Vec::new();
+    let mut seen_writeback_paths = HashSet::new();
+    for change in changes {
+        if matches!(change.kind, PatchChangeKind::Delete) {
+            continue;
+        }
+        let path = super::changes::file_change_target_path(workspace_cwd, change);
+        if seen_writeback_paths.insert(path.clone()) {
+            writeback_paths.push(path);
+        }
+    }
+    writeback_paths
+}
+
+pub(in crate::thread) fn prepare_file_change_completed_snapshot(
+    inner: &mut ThreadInner,
+    id: String,
+    changes: Vec<FileUpdateChange>,
+    status: PatchApplyStatus,
+) -> FileChangeCompletedSnapshot {
+    let workspace_cwd = inner.workspace_cwd.clone();
+    let writeback_paths = if matches!(status, PatchApplyStatus::Completed)
+        && inner.client.supports_write_text_file()
+    {
+        collect_file_change_writeback_paths(&workspace_cwd, &changes)
+    } else {
+        Vec::new()
+    };
+    let before_contents = inner
+        .file_change_before_contents
+        .remove(&id)
+        .unwrap_or_default();
+
+    inner.started_tool_calls.remove(&id);
+    inner.file_change_locations.remove(&id);
+    inner.file_change_started_changes.remove(&id);
+
+    FileChangeCompletedSnapshot {
+        client: inner.client.clone(),
+        id,
+        status,
+        workspace_cwd,
+        changes,
+        before_contents,
+        writeback_paths,
+    }
+}
+
+pub(in crate::thread) fn build_file_change_completed_update(
+    snapshot: &FileChangeCompletedSnapshot,
+) -> ToolCallUpdate {
+    let content = snapshot
+        .changes
+        .iter()
+        .cloned()
+        .filter_map(|change| {
+            super::changes::file_change_to_tool_diff(
+                &snapshot.workspace_cwd,
+                &snapshot.before_contents,
+                change,
+            )
+        })
+        .map(ToolCallContent::Diff)
+        .collect::<Vec<_>>();
+
+    ToolCallUpdate::new(
+        ToolCallId::new(snapshot.id.clone()),
+        ToolCallUpdateFields::new()
+            .status(status_mapping::map_patch_status(
+                snapshot.status.clone(),
+                false,
+            ))
+            .content(content),
+    )
+}
+
+pub(in crate::thread) fn collect_file_change_writeback_targets(
+    snapshot: &FileChangeCompletedSnapshot,
+) -> Vec<(PathBuf, String)> {
+    snapshot
+        .writeback_paths
+        .iter()
+        .filter_map(|path| {
+            super::changes::read_file_text(path).map(|content| (path.clone(), content))
+        })
+        .collect()
+}
+
 // Публикуем завершение file-change: финальный diff и writeback в ACP text-buffer.
 pub(in crate::thread) async fn emit_file_change_completed(
     inner: &mut ThreadInner,
@@ -168,47 +270,17 @@ pub(in crate::thread) async fn emit_file_change_completed(
     changes: Vec<FileUpdateChange>,
     status: PatchApplyStatus,
 ) {
-    let mut writeback_targets = Vec::new();
-    if matches!(status, PatchApplyStatus::Completed) && inner.client.supports_write_text_file() {
-        let mut seen_writeback_paths = HashSet::new();
-        for change in &changes {
-            if matches!(change.kind, PatchChangeKind::Delete) {
-                continue;
-            }
-            let path = super::changes::file_change_target_path(&inner.workspace_cwd, change);
-            if !seen_writeback_paths.insert(path.clone()) {
-                continue;
-            }
-            if let Some(content) = super::changes::read_file_text(&path) {
-                writeback_targets.push((path, content));
-            }
-        }
-    }
+    let snapshot = prepare_file_change_completed_snapshot(inner, id, changes, status);
+    let tool_call_update = build_file_change_completed_update(&snapshot);
+    let writeback_targets = collect_file_change_writeback_targets(&snapshot);
 
-    let before_contents = inner
-        .file_change_before_contents
-        .remove(&id)
-        .unwrap_or_default();
-    let content = changes
-        .into_iter()
-        .filter_map(|change| {
-            super::changes::file_change_to_tool_diff(&inner.workspace_cwd, &before_contents, change)
-        })
-        .map(ToolCallContent::Diff)
-        .collect::<Vec<_>>();
-
-    inner
+    snapshot
         .client
-        .send_tool_call_update(ToolCallUpdate::new(
-            ToolCallId::new(id.clone()),
-            ToolCallUpdateFields::new()
-                .status(status_mapping::map_patch_status(status, false))
-                .content(content),
-        ))
+        .send_tool_call_update(tool_call_update)
         .await;
 
     for (path, content) in writeback_targets {
-        match inner.client.write_text_file(path.clone(), content).await {
+        match snapshot.client.write_text_file(path.clone(), content).await {
             Ok(()) => {
                 inner.synced_paths_this_turn.insert(path);
             }
@@ -220,11 +292,6 @@ pub(in crate::thread) async fn emit_file_change_completed(
             }
         }
     }
-
-    inner.started_tool_calls.remove(&id);
-    inner.file_change_locations.remove(&id);
-    inner.file_change_started_changes.remove(&id);
-    inner.file_change_before_contents.remove(&id);
 }
 
 // Replay-рендер file-change карточки с восстановленным unified-diff.

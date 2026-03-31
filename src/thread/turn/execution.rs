@@ -15,7 +15,7 @@ use codex_app_server_protocol::{
     ServerRequest, ThreadItem,
 };
 
-use tracing::info;
+use tracing::{info, warn};
 
 const TURN_MESSAGE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 const RECONNECT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(12);
@@ -277,6 +277,66 @@ impl Thread {
             };
             crate::thread::features::file::events::emit_file_change_started_snapshot(snapshot)
                 .await;
+            return Ok(ActiveTurnMessageOutcome::Continue);
+        }
+
+        if let JSONRPCMessage::Notification(notification) = &message
+            && let Ok(ServerNotification::ItemCompleted(payload)) =
+                ServerNotification::try_from(notification.clone())
+            && payload.turn_id == turn_id
+            && let ThreadItem::FileChange {
+                id,
+                changes,
+                status,
+            } = payload.item
+        {
+            let snapshot = {
+                let mut inner = self.inner.lock().await;
+                crate::thread::features::file::events::prepare_file_change_completed_snapshot(
+                    &mut inner, id, changes, status,
+                )
+            };
+            let tool_call_update =
+                crate::thread::features::file::events::build_file_change_completed_update(
+                    &snapshot,
+                );
+            let writeback_targets =
+                crate::thread::features::file::events::collect_file_change_writeback_targets(
+                    &snapshot,
+                );
+
+            snapshot
+                .client
+                .send_tool_call_update(tool_call_update)
+                .await;
+
+            for (path, content) in writeback_targets {
+                let still_same_turn = {
+                    let inner = self.inner.lock().await;
+                    inner.active_turn_id.as_deref() == Some(turn_id)
+                };
+                if !still_same_turn {
+                    break;
+                }
+
+                match snapshot.client.write_text_file(path.clone(), content).await {
+                    Ok(()) => {
+                        let mut inner = self.inner.lock().await;
+                        if inner.active_turn_id.as_deref() == Some(turn_id) {
+                            inner.synced_paths_this_turn.insert(path);
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Failed to sync file change into ACP buffer for {}: {err:?}",
+                            path.display()
+                        );
+                    }
+                }
+            }
+
             return Ok(ActiveTurnMessageOutcome::Continue);
         }
 

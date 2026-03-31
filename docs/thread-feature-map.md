@@ -245,7 +245,8 @@ flowchart LR
 - `src/thread/turn/diff.rs`
 
 Риск: repeated disk I/O и ACP snapshot/writeback churn на одном и том же path. Даже до большого refactor здесь важно не читать, prime-ить и writeback-ить один и тот же файл по нескольку раз в рамках одного `FileChange` item, иначе multi-hunk edits начинают выглядеть как локальный фриз.
-Текущая безопасная граница для `started`-фазы такая: `started_changes`, `locations`, `file_change_paths_this_turn` и `before_contents` публикуются атомарно под lock, а `send_tool_call(...)` и `prime_file_snapshot(...)` идут уже после unlock по immutable snapshot. `completed`-фаза с `write_text_file(...)` пока ещё остаётся более рискованной и требует отдельного turn fence.
+Текущая безопасная граница для `started`-фазы такая: `started_changes`, `locations`, `file_change_paths_this_turn` и `before_contents` публикуются атомарно под lock, а `send_tool_call(...)` и `prime_file_snapshot(...)` идут уже после unlock по immutable snapshot.
+Для `completed`-фазы теперь используется тот же split: `before_contents` и per-item cleanup снимаются под lock, а финальный diff/update и `write_text_file(...)` идут уже после unlock через fast-path в `src/thread/turn/execution.rs`. Отдельная инварианта здесь: `file_change_paths_this_turn` остаётся turn-reservation до `reset_turn_transient_state()`, а поздний writeback не должен помечать `synced_paths_this_turn` уже в следующем turn, поэтому post-writeback relock обязан перепроверять `active_turn_id`.
 
 ### Approval wait paths
 - `src/thread/features/approvals/file_change.rs`
