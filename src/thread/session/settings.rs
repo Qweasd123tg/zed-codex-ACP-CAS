@@ -201,34 +201,53 @@ impl Thread {
             return Err(Error::invalid_params().data("num_turns must be >= 1"));
         }
 
-        let mut inner = self.inner.lock().await;
-        let thread_id = inner.thread_id.clone();
-        let response = inner
-            .app
-            .thread_rollback(ThreadRollbackParams {
-                thread_id,
-                num_turns,
-            })
-            .await?;
-        let remaining_turns = response.thread.turns.len();
+        let (remaining_turns, replay_data) = {
+            let mut inner = self.inner.lock().await;
+            if replay_history && inner.history_replay_in_progress {
+                return Err(Error::invalid_params().data(
+                    "history replay is still running; wait for it to finish before rolling back again",
+                ));
+            }
+            let thread_id = inner.thread_id.clone();
+            let response = inner
+                .app
+                .thread_rollback(ThreadRollbackParams {
+                    thread_id,
+                    num_turns,
+                })
+                .await?;
+            let remaining_turns = response.thread.turns.len();
 
-        if replay_history {
-            let workspace_cwd = inner.workspace_cwd.clone();
-            remember_agent_label(
-                &mut inner.agent_labels,
-                response.thread.id.clone(),
-                response.thread.agent_nickname.clone(),
-                response.thread.agent_role.clone(),
-            );
-            warm_agent_labels_for_turns(&mut inner, &response.thread.turns).await;
-            let agent_labels = inner.agent_labels.clone();
-            replay::replay_turns(
-                &inner.client,
-                &workspace_cwd,
-                &agent_labels,
-                response.thread.turns,
+            if replay_history {
+                remember_agent_label(
+                    &mut inner.agent_labels,
+                    response.thread.id.clone(),
+                    response.thread.agent_nickname.clone(),
+                    response.thread.agent_role.clone(),
+                );
+                warm_agent_labels_for_turns(&mut inner, &response.thread.turns).await;
+                if !response.thread.turns.is_empty() {
+                    inner.history_replay_in_progress = true;
+                }
+            }
+
+            (
+                remaining_turns,
+                replay_history.then(|| {
+                    (
+                        inner.client.clone(),
+                        inner.workspace_cwd.clone(),
+                        inner.agent_labels.clone(),
+                        response.thread.turns,
+                    )
+                }),
             )
-            .await;
+        };
+
+        if let Some((client, workspace_cwd, agent_labels, turns)) = replay_data {
+            replay::replay_turns(&client, &workspace_cwd, &agent_labels, turns).await;
+            let mut inner = self.inner.lock().await;
+            inner.history_replay_in_progress = false;
         }
 
         Ok(remaining_turns)

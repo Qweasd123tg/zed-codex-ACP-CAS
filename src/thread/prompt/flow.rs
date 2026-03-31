@@ -13,11 +13,36 @@ impl Thread {
         request: agent_client_protocol::PromptRequest,
     ) -> Result<StopReason, Error> {
         let command = prompt_commands::parse_session_command(&request.prompt);
+        let undo_turns = match &command {
+            Some(SessionCommand::Undo { num_turns }) => Some(*num_turns),
+            _ => None,
+        };
         let mut plan_prompt: Option<String> = None;
         let mut review_target: Option<ReviewTarget> = None;
         let mut inner = self.inner.lock().await;
         if should_drain_background_notifications(command.as_ref()) {
             notification_dispatch::drain_background_notifications(&mut inner).await?;
+        }
+        if inner.history_replay_in_progress {
+            inner
+                .client
+                .send_agent_text(
+                    "History replay is still running. Wait for it to finish before sending the next prompt or session command.",
+                )
+                .await;
+            return Ok(StopReason::EndTurn);
+        }
+        if let Some(num_turns) = undo_turns {
+            drop(inner);
+            self.rollback_turns_ext(num_turns, true).await?;
+            let client = {
+                let inner = self.inner.lock().await;
+                inner.client.clone()
+            };
+            client
+                .send_agent_text(format!("Rolled back last {num_turns} turn(s)."))
+                .await;
+            return Ok(StopReason::EndTurn);
         }
         if let Some(command) = command {
             match prompt_commands::dispatch_session_command(&mut inner, command).await? {

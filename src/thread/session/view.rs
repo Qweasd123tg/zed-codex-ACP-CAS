@@ -9,6 +9,13 @@ use super::{
 use crate::thread::{features::collab, prompt_commands, replay};
 
 impl Thread {
+    pub async fn mark_history_replay_pending(&self) {
+        let mut inner = self.inner.lock().await;
+        if !inner.replay_turns.is_empty() {
+            inner.history_replay_in_progress = true;
+        }
+    }
+
     // Не делаем лишний blocking model/list на bootstrap, если модели уже пришли из start/resume.
     pub async fn load(&self) -> Result<LoadSessionResponse, Error> {
         let mut inner = self.inner.lock().await;
@@ -87,17 +94,29 @@ impl Thread {
     }
 
     pub async fn replay_loaded_history(&self) {
-        let (client, workspace_cwd, turns, agent_labels) = {
+        let replay = {
             let mut inner = self.inner.lock().await;
             let turns = std::mem::take(&mut inner.replay_turns);
+            if turns.is_empty() {
+                inner.history_replay_in_progress = false;
+                return;
+            }
+            inner.history_replay_in_progress = true;
             collab::warm_agent_labels_for_turns(&mut inner, &turns).await;
-            (
+            Some((
                 inner.client.clone(),
                 inner.workspace_cwd.clone(),
                 turns,
                 inner.agent_labels.clone(),
-            )
+            ))
+        };
+
+        let Some((client, workspace_cwd, turns, agent_labels)) = replay else {
+            return;
         };
         replay::replay_turns(&client, &workspace_cwd, &agent_labels, turns).await;
+
+        let mut inner = self.inner.lock().await;
+        inner.history_replay_in_progress = false;
     }
 }

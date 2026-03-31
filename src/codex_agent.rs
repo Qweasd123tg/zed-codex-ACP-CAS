@@ -324,6 +324,7 @@ impl Agent for CodexAgent {
             notify_thread.notify_available_commands().await;
         });
         if self.auto_restore_enabled {
+            thread.mark_history_replay_pending().await;
             let replay_thread = thread.clone();
             tokio::task::spawn_local(async move {
                 tokio::task::yield_now().await;

@@ -164,6 +164,7 @@ struct ThreadInner {
     last_plan_steps: Vec<String>,
     carryover_plan_steps: Option<Vec<String>>,
     replay_turns: Vec<AppTurn>,
+    history_replay_in_progress: bool,
     turn_last_progress_at: std::time::Instant,
     turn_reconnect_warning_count: u32,
     turn_reconnect_retry_limit_hit: bool,

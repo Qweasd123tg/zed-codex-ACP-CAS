@@ -100,6 +100,8 @@ flowchart LR
 Смысл этой санитизации: stale notifications старого треда глушатся, stale server requests явно отклоняются ответом, а не теряются молча.
 Picker и `/threads` при этом предпочитают `thread.name`, если тред был явно переименован через `/rename`, и только потом показывают `preview`.
 После успешного `/resume` текущая ACP-сессия теперь сразу получает `SessionInfoUpdate.title`, чтобы клиентский заголовок не застревал на последнем slash-prompt.
+Для `load_session` и `/undo` history replay теперь дополнительно fenced через `history_replay_in_progress`: pending-состояние выставляется заранее в `src/codex_agent.rs` / `src/thread/session/view.rs`, а `src/thread/prompt/flow.rs` не пускает новый prompt или session command, пока `src/thread/core/replay.rs` ещё восстанавливает историю.
+Это же позволяет не держать `ThreadInner` mutex во время тяжёлого `/undo` replay: `thread_rollback`, label-cache warmup и snapshot нужных полей остаются под lock, а сам `replay::replay_turns(...)` идёт уже после выхода из критической секции.
 Важно: старые сообщения, уже показанные ACP-клиентом, при этом не очищаются — это ограничение UI/API клиента, а не replay-пайплайна адаптера.
 
 ## 5) Collab/Subagents ветка
@@ -230,6 +232,7 @@ flowchart LR
 
 Риск: после `/resume` не сброшено turn-transient состояние.
 Отдельный риск: transport-хвост старого треда может мешать следующему `/resume`, если не синхронизировать `apply.rs`, `app_server.rs` и pre-command routing в `prompt/flow.rs`. Опасный вариант здесь — blind drop request-ов; текущая версия этого уже не делает.
+Ещё один риск: вынести `replay::replay_turns(...)` из-под общего mutex без replay fence. Если менять `session/settings.rs`, `session/view.rs`, `codex_agent.rs` или pre-command gating в `prompt/flow.rs` несогласованно, легко снова получить overlapping replay и новый prompt в одной ACP-сессии.
 
 ### Collab/Subagents
 - `src/thread/features/collab/*`
@@ -248,7 +251,7 @@ flowchart LR
 | `src/thread/features/notification/*` | Доменные обработчики notification-событий, включая usage/reconnect/warning forwarding |
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
 | `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread, transport scrub при переключении |
-| `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, archive/unarchive picker UI, session replay события, title update и runtime handling нижних session selectors |
+| `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, archive/unarchive picker UI, session replay события, title update, history replay fencing и runtime handling нижних session selectors |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
 | `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw payload |
 | `src/thread/features/status_mapping.rs` | app-server status -> ACP status |

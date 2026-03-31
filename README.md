@@ -87,6 +87,7 @@ Sub-agent and collaboration tool-call rendering:
 - Practical plan mode support
 - Better startup and reconnect diagnostics
 - Safer turn-start timeout and stale turn-tail cleanup around reconnects
+- Safer history replay fencing for `/undo` and auto-restored session history
 
 ## Why Use This Fork
 
@@ -106,6 +107,7 @@ Current strengths of this fork:
 
 - More robust startup behavior and clearer logging
 - Better session lifecycle handling in ACP clients
+- Less UI freeze risk during `/undo` history rebuilds
 - Better thread titles in lists and resumed sessions
 - Inline review flows backed by native `review/start`
 - Practical in-place thread switching with `/new`, `/fork`, `/resume`, and archive-triggered replacement
@@ -127,6 +129,7 @@ Current gaps:
 - MCP `sse` passthrough is not supported yet
 - `item/tool/call` / `DynamicToolCall` requests are rejected as unsupported
 - `/undo` itself works, but the visual rewind/edit button in current `Zed` still depends on a client-side ACP fix for rollback wiring; in practice that means patching or rebuilding `Zed` if you want the native button UX
+- While history replay is restoring after `load_session` or replaying `/undo`, new prompts and session commands are intentionally fenced until replay finishes; this avoids overlapping turn/replay state in one ACP session
 - Linux is the most tested platform right now
 - Multi-platform release artifacts can exist before all platforms are equally tested in real use
 
