@@ -94,6 +94,7 @@ Sub-agent and collaboration tool-call rendering:
 - Less chat stall while command approval prompts are pending
 - Faster file-change start cards with ACP snapshot priming moved out of the main session mutex
 - Less mutex hold time while final file-change diff and ACP writeback are published
+- Safer transport drain: stale server requests are rejected during post-turn and pre-prompt cleanup instead of triggering late approvals
 
 ## Why Use This Fork
 
@@ -120,6 +121,7 @@ Current strengths of this fork:
 - Less chat stall while waiting for shell command approval
 - Less lock contention while file-change start cards are published
 - Less lock contention while file-change completion diff/writeback is published
+- Less risk of ghost approvals from stale app-server requests during drain/flush cleanup
 - Better thread titles in lists and resumed sessions
 - Inline review flows backed by native `review/start`
 - Practical in-place thread switching with `/new`, `/fork`, `/resume`, and archive-triggered replacement

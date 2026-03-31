@@ -14,6 +14,7 @@ const THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES: usize = 64;
 pub(in crate::thread) async fn flush_thread_switch_transport_state(
     inner: &mut ThreadInner,
 ) -> Result<(), Error> {
+    let mut processed = 0;
     for _ in 0..THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES {
         let message = match tokio::time::timeout(
             Duration::from_millis(THREAD_SWITCH_TRANSPORT_FLUSH_TIMEOUT_MS),
@@ -24,7 +25,15 @@ pub(in crate::thread) async fn flush_thread_switch_transport_state(
             Ok(message) => message?,
             Err(_) => break,
         };
+        processed += 1;
         handle_stale_thread_switch_message(inner, message).await?;
+    }
+    if processed >= THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES {
+        warn!(
+            processed_messages = processed,
+            timeout_ms = THREAD_SWITCH_TRANSPORT_FLUSH_TIMEOUT_MS,
+            "thread-switch transport flush hit the message cap; stale tail may remain"
+        );
     }
     Ok(())
 }

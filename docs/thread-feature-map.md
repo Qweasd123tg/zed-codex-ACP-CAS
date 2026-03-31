@@ -214,6 +214,7 @@ flowchart LR
 Риск: пропущенная ветка маршрутизации или двойная обработка одного события.
 Отдельно сюда же относятся advisory notifications (`configWarning`, deprecation notice, Windows sandbox warnings): их легко забыть в `_ => Ok(None)` и снова сделать UX немым.
 `ItemStarted`/`ItemCompleted` здесь тоже должны оставаться turn-bound по `expected_turn_id`, иначе stale tail старого turn может создать ложные tool-card старты/апдейты уже в новом контексте.
+Дополнительная инварианта для drain path: `post-turn` и `background` cleanup не должны прокидывать late `JSONRPCRequest` обратно в live approval handlers. Во время drain такие request-ы нужно явно отклонять как stale transport tail; иначе после завершённого turn или прямо перед новым prompt можно случайно получить призрачный approval prompt от старого хвоста.
 
 ### Reconnect / stalled turn guard
 - `src/thread/turn/execution.rs`
@@ -237,6 +238,7 @@ flowchart LR
 Отдельный риск: transport-хвост старого треда может мешать следующему `/resume`, если не синхронизировать `apply.rs`, `app_server.rs` и pre-command routing в `prompt/flow.rs`. Опасный вариант здесь — blind drop request-ов; текущая версия этого уже не делает.
 Ещё один риск: вынести `replay::replay_turns(...)` из-под общего mutex без replay fence. Если менять `session/settings.rs`, `session/view.rs`, `codex_agent.rs` или pre-command gating в `prompt/flow.rs` несогласованно, легко снова получить overlapping replay и новый prompt в одной ACP-сессии.
 Для `/resume --history` к этому добавляется порядок pre-command routing: gate по `history_replay_in_progress` должен стоять раньше background drain, иначе новый prompt может проскочить в окно между unlock и началом replay.
+Фоновый drain перед новым prompt тоже должен считаться transport-scrub, а не обычной live dispatch-веткой: если cleanup упёрся в timeout/message cap, это лучше явно логировать, иначе хвост выглядит как случайный UI-глюк.
 
 ### File-change lifecycle
 - `src/thread/features/file/events.rs`

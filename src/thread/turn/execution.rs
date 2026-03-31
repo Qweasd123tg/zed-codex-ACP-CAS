@@ -57,12 +57,21 @@ async fn maybe_abort_reconnect_stall(inner: &mut ThreadInner) -> Option<StopReas
 
 async fn finalize_turn_and_drain(inner: &mut ThreadInner, turn_id: &str) -> Result<(), Error> {
     inner.finalize_active_turn(turn_id);
-    notification_dispatch::drain_post_turn_notifications(
+    let drain_outcome = notification_dispatch::drain_post_turn_notifications(
         inner,
         turn_id,
         POST_TURN_NOTIFICATION_DRAIN_TIMEOUT,
     )
-    .await
+    .await?;
+    if drain_outcome.was_truncated() {
+        warn!(
+            turn_id,
+            processed_messages = drain_outcome.processed(),
+            outcome = ?drain_outcome,
+            "post-turn transport drain stopped before the queue went quiet"
+        );
+    }
+    Ok(())
 }
 
 async fn prepare_started_turn(

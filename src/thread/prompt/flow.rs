@@ -37,7 +37,15 @@ impl Thread {
             return Ok(StopReason::EndTurn);
         }
         if should_drain_background_notifications(command.as_ref()) {
-            notification_dispatch::drain_background_notifications(&mut inner).await?;
+            let drain_outcome =
+                notification_dispatch::drain_background_notifications(&mut inner).await?;
+            if drain_outcome.was_truncated() {
+                tracing::warn!(
+                    processed_messages = drain_outcome.processed(),
+                    outcome = ?drain_outcome,
+                    "background transport drain stopped before the queue went quiet"
+                );
+            }
         }
         if let Some((thread_id, include_history)) = resume_request {
             drop(inner);
