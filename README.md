@@ -96,6 +96,7 @@ Sub-agent and collaboration tool-call rendering:
 - Less mutex hold time while final file-change diff and ACP writeback are published
 - Safer transport drain: stale server requests are rejected during post-turn and pre-prompt cleanup instead of triggering late approvals
 - Less reconnect spam: reconnect warnings now collapse into one normalized status line, and full silent stalls without any reconnect warning no longer spin forever
+- Less brittle transport cleanup: background drain and thread-switch flush now wait for the queue to go quiet instead of assuming `64` messages or one tiny timeout is enough
 
 ## Why Use This Fork
 
@@ -124,6 +125,7 @@ Current strengths of this fork:
 - Less lock contention while file-change completion diff/writeback is published
 - Less risk of ghost approvals from stale app-server requests during drain/flush cleanup
 - Clearer reconnect UX with one normalized retry status, plus a separate silent-stall abort when the backend goes fully quiet
+- More reliable pre-prompt and thread-switch cleanup under bursty app-server tails
 - Better thread titles in lists and resumed sessions
 - Inline review flows backed by native `review/start`
 - Practical in-place thread switching with `/new`, `/fork`, `/resume`, and archive-triggered replacement

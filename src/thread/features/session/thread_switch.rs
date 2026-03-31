@@ -6,33 +6,62 @@ use agent_client_protocol::Error;
 use codex_app_server_protocol::JSONRPCMessage;
 use tracing::warn;
 
-use crate::thread::ThreadInner;
+use crate::thread::{ThreadInner, notification_dispatch::DrainOutcome};
 
+const THREAD_SWITCH_TRANSPORT_FLUSH_TOTAL_TIMEOUT_MS: u64 = 300;
 const THREAD_SWITCH_TRANSPORT_FLUSH_TIMEOUT_MS: u64 = 20;
-const THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES: usize = 64;
+const THREAD_SWITCH_TRANSPORT_FLUSH_IDLE_POLLS: usize = 2;
+const THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES: usize = 256;
 
 pub(in crate::thread) async fn flush_thread_switch_transport_state(
     inner: &mut ThreadInner,
 ) -> Result<(), Error> {
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_millis(THREAD_SWITCH_TRANSPORT_FLUSH_TOTAL_TIMEOUT_MS);
     let mut processed = 0;
-    for _ in 0..THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES {
-        let message = match tokio::time::timeout(
-            Duration::from_millis(THREAD_SWITCH_TRANSPORT_FLUSH_TIMEOUT_MS),
-            inner.app.next_message(),
-        )
-        .await
-        {
-            Ok(message) => message?,
-            Err(_) => break,
+    let mut quiet_polls = 0;
+
+    let outcome = loop {
+        if processed >= THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES {
+            break DrainOutcome::HitLimit { processed };
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            break DrainOutcome::TimedOut { processed };
+        }
+
+        let remaining = deadline - now;
+        let wait_for = remaining.min(Duration::from_millis(
+            THREAD_SWITCH_TRANSPORT_FLUSH_TIMEOUT_MS,
+        ));
+        let message = match tokio::time::timeout(wait_for, inner.app.next_message()).await {
+            Ok(message) => {
+                quiet_polls = 0;
+                message?
+            }
+            Err(_) => {
+                quiet_polls += 1;
+                if quiet_polls >= THREAD_SWITCH_TRANSPORT_FLUSH_IDLE_POLLS {
+                    break DrainOutcome::Drained { processed };
+                }
+                continue;
+            }
         };
         processed += 1;
         handle_stale_thread_switch_message(inner, message).await?;
-    }
-    if processed >= THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES {
+    };
+
+    if matches!(
+        outcome,
+        DrainOutcome::TimedOut { .. } | DrainOutcome::HitLimit { .. }
+    ) {
         warn!(
             processed_messages = processed,
             timeout_ms = THREAD_SWITCH_TRANSPORT_FLUSH_TIMEOUT_MS,
-            "thread-switch transport flush hit the message cap; stale tail may remain"
+            total_timeout_ms = THREAD_SWITCH_TRANSPORT_FLUSH_TOTAL_TIMEOUT_MS,
+            outcome = ?outcome,
+            "thread-switch transport flush stopped before the queue went quiet"
         );
     }
     Ok(())

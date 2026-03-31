@@ -1,13 +1,23 @@
 //! Верхнеуровневый диспетчер, который маршрутизирует JSON-RPC-уведомления в типизированные обработчики thread.
 
+use std::time::Duration;
+
 use tracing::warn;
 
 use crate::thread::{
     Error, StopReason, ThreadInner, features::notification, server_requests::handle_server_request,
 };
 
+const POST_TURN_DRAIN_POLL_TIMEOUT: Duration = Duration::from_millis(20);
+const POST_TURN_DRAIN_IDLE_POLLS: usize = 2;
+const POST_TURN_DRAIN_MAX_MESSAGES: usize = 256;
+const BACKGROUND_DRAIN_TOTAL_TIMEOUT: Duration = Duration::from_millis(250);
+const BACKGROUND_DRAIN_POLL_TIMEOUT: Duration = Duration::from_millis(10);
+const BACKGROUND_DRAIN_IDLE_POLLS: usize = 2;
+const BACKGROUND_DRAIN_MAX_MESSAGES: usize = 256;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DrainOutcome {
+pub(in crate::thread) enum DrainOutcome {
     Drained { processed: usize },
     TimedOut { processed: usize },
     HitLimit { processed: usize },
@@ -104,26 +114,64 @@ async fn handle_drain_message(
     Ok(())
 }
 
+async fn drain_transport_until_quiet(
+    inner: &mut ThreadInner,
+    expected_turn_id: &str,
+    drain_context: &str,
+    total_timeout: Duration,
+    poll_timeout: Duration,
+    idle_polls_to_drain: usize,
+    max_messages: usize,
+) -> Result<DrainOutcome, Error> {
+    let deadline = tokio::time::Instant::now() + total_timeout;
+    let mut processed = 0;
+    let mut quiet_polls = 0;
+
+    loop {
+        if processed >= max_messages {
+            return Ok(DrainOutcome::HitLimit { processed });
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Ok(DrainOutcome::TimedOut { processed });
+        }
+
+        let remaining = deadline - now;
+        let wait_for = remaining.min(poll_timeout);
+        let message = match tokio::time::timeout(wait_for, inner.app.next_message()).await {
+            Ok(message) => {
+                quiet_polls = 0;
+                message?
+            }
+            Err(_) => {
+                quiet_polls += 1;
+                if quiet_polls >= idle_polls_to_drain {
+                    return Ok(DrainOutcome::Drained { processed });
+                }
+                continue;
+            }
+        };
+        processed += 1;
+        handle_drain_message(inner, message, expected_turn_id, drain_context).await?;
+    }
+}
+
 pub(super) async fn drain_post_turn_notifications(
     inner: &mut ThreadInner,
     expected_turn_id: &str,
     timeout: std::time::Duration,
 ) -> Result<DrainOutcome, Error> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    let mut processed = 0;
-    loop {
-        let now = tokio::time::Instant::now();
-        if now >= deadline {
-            return Ok(DrainOutcome::TimedOut { processed });
-        }
-        let remaining = deadline - now;
-        let message = match tokio::time::timeout(remaining, inner.app.next_message()).await {
-            Ok(message) => message?,
-            Err(_) => return Ok(DrainOutcome::Drained { processed }),
-        };
-        processed += 1;
-        handle_drain_message(inner, message, expected_turn_id, "post-turn drain").await?;
-    }
+    drain_transport_until_quiet(
+        inner,
+        expected_turn_id,
+        "post-turn drain",
+        timeout,
+        POST_TURN_DRAIN_POLL_TIMEOUT,
+        POST_TURN_DRAIN_IDLE_POLLS,
+        POST_TURN_DRAIN_MAX_MESSAGES,
+    )
+    .await
 }
 
 pub(super) async fn drain_background_notifications(
@@ -131,19 +179,14 @@ pub(super) async fn drain_background_notifications(
 ) -> Result<DrainOutcome, Error> {
     // Выгружаем уже буферизованные уведомления app-server перед стартом нового turn.
     // Это синхронизирует состояние compaction и индикаторы usage между промптами.
-    let mut processed = 0;
-    for _ in 0..64 {
-        let message = match tokio::time::timeout(
-            std::time::Duration::from_millis(5),
-            inner.app.next_message(),
-        )
-        .await
-        {
-            Ok(message) => message?,
-            Err(_) => return Ok(DrainOutcome::Drained { processed }),
-        };
-        processed += 1;
-        handle_drain_message(inner, message, "", "background drain").await?;
-    }
-    Ok(DrainOutcome::HitLimit { processed })
+    drain_transport_until_quiet(
+        inner,
+        "",
+        "background drain",
+        BACKGROUND_DRAIN_TOTAL_TIMEOUT,
+        BACKGROUND_DRAIN_POLL_TIMEOUT,
+        BACKGROUND_DRAIN_IDLE_POLLS,
+        BACKGROUND_DRAIN_MAX_MESSAGES,
+    )
+    .await
 }

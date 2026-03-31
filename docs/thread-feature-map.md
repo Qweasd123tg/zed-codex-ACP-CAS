@@ -239,7 +239,7 @@ flowchart LR
 Отдельный риск: transport-хвост старого треда может мешать следующему `/resume`, если не синхронизировать `apply.rs`, `app_server.rs` и pre-command routing в `prompt/flow.rs`. Опасный вариант здесь — blind drop request-ов; текущая версия этого уже не делает.
 Ещё один риск: вынести `replay::replay_turns(...)` из-под общего mutex без replay fence. Если менять `session/settings.rs`, `session/view.rs`, `codex_agent.rs` или pre-command gating в `prompt/flow.rs` несогласованно, легко снова получить overlapping replay и новый prompt в одной ACP-сессии.
 Для `/resume --history` к этому добавляется порядок pre-command routing: gate по `history_replay_in_progress` должен стоять раньше background drain, иначе новый prompt может проскочить в окно между unlock и началом replay.
-Фоновый drain перед новым prompt тоже должен считаться transport-scrub, а не обычной live dispatch-веткой: если cleanup упёрся в timeout/message cap, это лучше явно логировать, иначе хвост выглядит как случайный UI-глюк.
+Фоновый drain перед новым prompt тоже должен считаться transport-scrub, а не обычной live dispatch-веткой: если cleanup упёрся в timeout/message cap, это лучше явно логировать, иначе хвост выглядит как случайный UI-глюк. Текущая безопасная политика здесь — `drain until quiet` с short quiet streak, общим deadline и большим safety ceiling, а не blind stop после `64` сообщений или первого микротаймаута.
 
 ### File-change lifecycle
 - `src/thread/features/file/events.rs`
