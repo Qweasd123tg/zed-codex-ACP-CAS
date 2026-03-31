@@ -7,8 +7,15 @@ use super::{
 use crate::thread::features::{collab, file, plan, session, tool_events};
 
 // Помечаем turn-локальное состояние сразу при старте item, чтобы последующие дельты корректно маппились.
-pub(super) async fn handle_item_started(inner: &mut ThreadInner, payload: ItemStartedNotification) {
+pub(super) async fn handle_item_started(
+    inner: &mut ThreadInner,
+    payload: ItemStartedNotification,
+    expected_turn_id: &str,
+) {
     let turn_id = payload.turn_id.clone();
+    if !should_handle_turn_item(expected_turn_id, &turn_id) {
+        return;
+    }
     maybe_advance_fallback_for_started_item(inner, &turn_id, &payload.item).await;
 
     let Some(item) = session::handle_item_started(inner, payload.item).await else {
@@ -29,6 +36,9 @@ pub(super) async fn handle_item_completed(
     expected_turn_id: &str,
 ) {
     let turn_id = payload.turn_id.clone();
+    if !should_handle_turn_item(expected_turn_id, &turn_id) {
+        return;
+    }
     let Some(item) = session::handle_item_completed(inner, payload.item).await else {
         return;
     };
@@ -45,6 +55,10 @@ pub(super) async fn handle_item_completed(
     if let ThreadItem::Plan { text, .. } = item {
         plan::events::emit_plan_item_completed(inner, turn_id, expected_turn_id, text).await;
     }
+}
+
+fn should_handle_turn_item(expected_turn_id: &str, turn_id: &str) -> bool {
+    turn_id == expected_turn_id
 }
 
 async fn maybe_advance_fallback_for_started_item(
@@ -67,5 +81,17 @@ async fn maybe_advance_fallback_for_started_item(
             maybe_advance_fallback_plan(inner, turn_id, FallbackPlanPhase::Implementing).await;
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_handle_turn_item;
+
+    #[test]
+    fn handles_only_matching_turn_items() {
+        assert!(should_handle_turn_item("turn-1", "turn-1"));
+        assert!(!should_handle_turn_item("turn-1", "turn-2"));
+        assert!(!should_handle_turn_item("", "turn-1"));
     }
 }

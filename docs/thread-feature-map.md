@@ -208,6 +208,7 @@ flowchart LR
 
 Риск: пропущенная ветка маршрутизации или двойная обработка одного события.
 Отдельно сюда же относятся advisory notifications (`configWarning`, deprecation notice, Windows sandbox warnings): их легко забыть в `_ => Ok(None)` и снова сделать UX немым.
+`ItemStarted`/`ItemCompleted` здесь тоже должны оставаться turn-bound по `expected_turn_id`, иначе stale tail старого turn может создать ложные tool-card старты/апдейты уже в новом контексте.
 
 ### Reconnect / stalled turn guard
 - `src/thread/turn/execution.rs`
@@ -217,6 +218,7 @@ flowchart LR
 - `src/thread/features/notification/events/turn.rs`
 
 Риск: если не синхронизировать эти файлы вместе, можно либо снова получить вечную загрузку ACP UI, либо преждевременно завершать живой turn.
+Отдельная инварианта: watchdog-abort stalled turn должен проходить через тот же `finalize + drain post-turn notifications`, что и обычное завершение; иначе transport-хвост протечёт в следующий prompt.
 
 ### Replay/Resume
 - `src/thread/features/resume/*`

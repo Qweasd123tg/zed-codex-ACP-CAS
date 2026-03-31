@@ -86,6 +86,7 @@ Sub-agent and collaboration tool-call rendering:
 - Tool call cards for command, MCP, web, image, file, and collab branches
 - Practical plan mode support
 - Better startup and reconnect diagnostics
+- Safer turn-start timeout and stale turn-tail cleanup around reconnects
 
 ## Why Use This Fork
 
@@ -237,6 +238,8 @@ Useful environment variables:
 - `CODEX_ACP_STARTUP_TIMEOUT_MS=<milliseconds>`
 - `CODEX_ACP_STARTUP_METADATA_TIMEOUT_MS=<milliseconds>`
 
+`CODEX_ACP_STARTUP_TIMEOUT_MS` now also bounds the `turn/start` handshake, so an app-server that stops responding before it returns a `turn_id` does not leave the ACP UI spinning forever.
+
 ## Troubleshooting
 
 If Zed seems to hang or the adapter looks like it crashed, run Zed from a terminal:
@@ -253,12 +256,19 @@ Important log lines:
 - `Queued app-server request while waiting for a response`
 - `Timed out waiting for app-server startup response`
 - `codex app-server closed stdout`
+- `Turn appears stuck after repeated reconnect failures`
 
 What they usually mean:
 
-- Timeout during `initialize` or `thread/start`: startup path is stuck
+- Timeout during `initialize`, `thread/start`, or `turn/start`: app-server is stuck before the adapter can safely continue
 - `failed to start 'codex' app-server`: `codex` is missing or not available in `PATH`
+- `Turn appears stuck after repeated reconnect failures`: the adapter aborted a stalled turn and drained queued tail notifications so the next prompt starts from a clean state
 - Panic backtrace: the adapter or child process crashed directly
+
+Recent hardening in this fork:
+
+- `ItemStarted` and `ItemCompleted` from the wrong `turn_id` are ignored instead of creating stale tool cards after reconnect or thread switch
+- reconnect-stall watchdog abort now runs the same post-turn drain path as normal turn completion
 
 ## More Docs
 

@@ -54,7 +54,7 @@ fn configured_timeout(env_name: &str, fallback: Duration) -> Duration {
 
 fn request_timeout(method_name: &str) -> Option<Duration> {
     match method_name {
-        "initialize" | "thread/start" | "thread/resume" | "thread/list" => Some(
+        "initialize" | "thread/start" | "thread/resume" | "thread/list" | "turn/start" => Some(
             configured_timeout(STARTUP_REQUEST_TIMEOUT_ENV, STARTUP_REQUEST_TIMEOUT),
         ),
         "model/list" | "account/rateLimits/read" | "account/read" | "thread/read" => {
@@ -630,6 +630,7 @@ mod tests {
             request_timeout("thread/list"),
             Some(STARTUP_REQUEST_TIMEOUT)
         );
+        assert_eq!(request_timeout("turn/start"), Some(STARTUP_REQUEST_TIMEOUT));
     }
 
     #[test]
@@ -650,7 +651,6 @@ mod tests {
 
     #[test]
     fn leaves_runtime_stream_requests_unbounded() {
-        assert_eq!(request_timeout("turn/start"), None);
         assert_eq!(request_timeout("turn/interrupt"), None);
     }
 

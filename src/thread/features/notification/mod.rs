@@ -118,7 +118,7 @@ pub(in crate::thread) async fn handle_notification(
             Ok(None)
         }
         ServerNotification::ItemStarted(payload) => {
-            handle_item_started(inner, payload).await;
+            handle_item_started(inner, payload, expected_turn_id).await;
             Ok(None)
         }
         ServerNotification::ItemCompleted(payload) => {

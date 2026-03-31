@@ -16,6 +16,8 @@ const RECONNECT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::f
 const RECONNECT_SILENT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(20);
 const RECONNECT_STALL_WARNING_THRESHOLD: u32 = 5;
 const RECONNECT_STALL_MESSAGE: &str = "\n[error] Turn appears stuck after repeated reconnect failures. Ending this turn so the UI does not spin forever. Check network/auth and retry.";
+const POST_TURN_NOTIFICATION_DRAIN_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(200);
 
 fn should_abort_reconnect_stall(
     warning_count: u32,
@@ -28,7 +30,7 @@ fn should_abort_reconnect_stall(
         || (warning_count >= 1 && since_last_progress >= RECONNECT_SILENT_STALL_GRACE_PERIOD)
 }
 
-async fn maybe_abort_reconnect_stall(inner: &mut ThreadInner, turn_id: &str) -> Option<StopReason> {
+async fn maybe_abort_reconnect_stall(inner: &mut ThreadInner) -> Option<StopReason> {
     if !should_abort_reconnect_stall(
         inner.turn_reconnect_warning_count,
         inner.turn_reconnect_retry_limit_hit,
@@ -38,8 +40,17 @@ async fn maybe_abort_reconnect_stall(inner: &mut ThreadInner, turn_id: &str) -> 
     }
 
     inner.client.send_agent_text(RECONNECT_STALL_MESSAGE).await;
-    inner.finalize_active_turn(turn_id);
     Some(StopReason::EndTurn)
+}
+
+async fn finalize_turn_and_drain(inner: &mut ThreadInner, turn_id: &str) -> Result<(), Error> {
+    inner.finalize_active_turn(turn_id);
+    notification_dispatch::drain_post_turn_notifications(
+        inner,
+        turn_id,
+        POST_TURN_NOTIFICATION_DRAIN_TIMEOUT,
+    )
+    .await
 }
 
 async fn prepare_started_turn(
@@ -77,23 +88,19 @@ async fn drive_active_turn(
                 }
             }
             _ = &mut watchdog => {
-                if let Some(stop_reason) = maybe_abort_reconnect_stall(inner, &turn_id).await {
+                if let Some(stop_reason) = maybe_abort_reconnect_stall(inner).await {
+                    finalize_turn_and_drain(inner, &turn_id).await?;
                     return Ok(stop_reason);
                 }
             }
             message = inner.app.next_message() => {
                 let message = message?;
                 if let Some(stop_reason) = notification_dispatch::handle_message(inner, message, &turn_id).await? {
-                    inner.finalize_active_turn(&turn_id);
-                    notification_dispatch::drain_post_turn_notifications(
-                        inner,
-                        &turn_id,
-                        std::time::Duration::from_millis(200),
-                    )
-                    .await?;
+                    finalize_turn_and_drain(inner, &turn_id).await?;
                     return Ok(stop_reason);
                 }
-                if let Some(stop_reason) = maybe_abort_reconnect_stall(inner, &turn_id).await {
+                if let Some(stop_reason) = maybe_abort_reconnect_stall(inner).await {
+                    finalize_turn_and_drain(inner, &turn_id).await?;
                     return Ok(stop_reason);
                 }
             }
