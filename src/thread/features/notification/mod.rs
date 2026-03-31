@@ -57,14 +57,8 @@ pub(in crate::thread) async fn handle_notification(
             token_usage,
             ..
         }) => {
-            events::usage::emit_thread_token_usage_updated(
-                inner,
-                thread_id,
-                turn_id,
-                token_usage.last.total_tokens,
-                token_usage.model_context_window,
-            )
-            .await;
+            events::usage::emit_thread_token_usage_updated(inner, thread_id, turn_id, token_usage)
+                .await;
             Ok(None)
         }
         ServerNotification::AccountRateLimitsUpdated(AccountRateLimitsUpdatedNotification {

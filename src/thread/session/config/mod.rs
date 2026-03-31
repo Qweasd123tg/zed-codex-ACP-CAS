@@ -23,6 +23,7 @@ pub(super) use modes::{
 #[derive(Clone, Copy, Debug)]
 // Входные параметры для сборки списка session config options.
 pub(in crate::thread) struct ConfigOptionsInput<'a> {
+    pub(in crate::thread) workspace_cwd: &'a std::path::Path,
     pub(in crate::thread) models: &'a [AppModel],
     pub(in crate::thread) current_model: &'a str,
     pub(in crate::thread) current_reasoning_effort: ReasoningEffort,
@@ -37,10 +38,16 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) sandbox: AppSandboxMode,
     pub(in crate::thread) edit_approval_mode: EditApprovalMode,
     pub(in crate::thread) collaboration_mode_kind: ModeKind,
+    pub(in crate::thread) account_status: &'a context::AccountStatus,
+    pub(in crate::thread) total_token_usage:
+        Option<&'a codex_app_server_protocol::TokenUsageBreakdown>,
+    pub(in crate::thread) session_mcp_summary: &'a context::ContextSelectorSummary,
+    pub(in crate::thread) session_skills_summary: &'a context::ContextSelectorSummary,
 }
 
 pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOptionsInput<'_> {
     ConfigOptionsInput {
+        workspace_cwd: &inner.workspace_cwd,
         models: &inner.models,
         current_model: &inner.current_model,
         current_reasoning_effort: inner.reasoning_effort,
@@ -54,11 +61,16 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         sandbox: inner.sandbox_mode,
         edit_approval_mode: inner.edit_approval_mode,
         collaboration_mode_kind: inner.collaboration_mode_kind,
+        account_status: &inner.account_status,
+        total_token_usage: inner.total_token_usage.as_ref(),
+        session_mcp_summary: &inner.session_mcp_summary,
+        session_skills_summary: &inner.session_skills_summary,
     }
 }
 
 pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfigOption> {
     let ConfigOptionsInput {
+        workspace_cwd,
         models,
         current_model,
         current_reasoning_effort,
@@ -72,6 +84,10 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         sandbox,
         edit_approval_mode,
         collaboration_mode_kind,
+        account_status,
+        total_token_usage,
+        session_mcp_summary,
+        session_skills_summary,
     } = input;
 
     let mode_state = mode_state(collaboration_mode_kind);
@@ -181,22 +197,32 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             "Context",
             context::CONTEXT_STATUS_VALUE,
             context::context_control_options(
+                workspace_cwd,
+                account_status,
+                total_token_usage,
                 current_used_tokens,
                 current_context_window_size,
                 current_usage_percent,
                 current_context_usage_source,
                 current_account_rate_limits,
                 compaction_in_progress,
+                session_mcp_summary,
+                session_skills_summary,
             ),
         )
-        .description("Inspect context usage, limits, or start compaction"),
+        .description(
+            "Inspect session status, context usage, MCP, skills, limits, or start compaction",
+        ),
     );
 
     options
 }
 
 pub(super) use context::{
-    CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, context_usage_message,
+    AccountStatus, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
+    ContextSelectorSummary, MCP_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
+    build_account_status, build_mcp_summary, build_skills_summary, context_usage_message,
+    session_status_message,
 };
 pub(super) use limits::combined_limits_reset_message;
 pub(super) use reasoning::{

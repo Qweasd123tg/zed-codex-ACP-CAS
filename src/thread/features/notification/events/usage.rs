@@ -1,6 +1,6 @@
 //! Usage notification-ветки (token usage / context window updates).
 
-use codex_app_server_protocol::RateLimitSnapshot;
+use codex_app_server_protocol::{RateLimitSnapshot, ThreadTokenUsage};
 
 use crate::thread::{
     ContextUsageSource, ThreadInner, session_config::i64_to_u64_saturating,
@@ -12,8 +12,7 @@ pub(in crate::thread) async fn emit_thread_token_usage_updated(
     inner: &mut ThreadInner,
     thread_id: String,
     turn_id: String,
-    last_total_tokens: i64,
-    model_context_window: Option<i64>,
+    token_usage: ThreadTokenUsage,
 ) {
     if thread_id != inner.thread_id {
         return;
@@ -21,10 +20,12 @@ pub(in crate::thread) async fn emit_thread_token_usage_updated(
 
     // `total` накапливается между turn. Для заполненности контекста нужен
     // in-window total последнего turn.
-    let mut used = i64_to_u64_saturating(last_total_tokens);
+    inner.total_token_usage = Some(token_usage.total.clone());
+    let mut used = i64_to_u64_saturating(token_usage.last.total_tokens);
     inner.last_used_tokens = Some(used);
     inner.context_usage_source = Some(ContextUsageSource::Live);
-    let size = model_context_window
+    let size = token_usage
+        .model_context_window
         .map(i64_to_u64_saturating)
         .filter(|size| *size > 0);
     if let Some(size) = size {

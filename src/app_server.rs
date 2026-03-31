@@ -11,12 +11,12 @@ use agent_client_protocol::Error;
 use anyhow::Context;
 use codex_app_server_protocol::{
     ClientInfo, ClientNotification, ClientRequest, FileChangeRequestApprovalResponse,
-    GetAccountRateLimitsResponse, InitializeCapabilities, InitializeParams, InitializeResponse,
-    JSONRPCError, JSONRPCErrorError, JSONRPCMessage, JSONRPCResponse, ModelListParams,
-    ModelListResponse, PermissionsRequestApprovalResponse, RequestId, ReviewStartParams,
-    ReviewStartResponse, ThreadArchiveParams, ThreadArchiveResponse, ThreadCompactStartParams,
-    ThreadCompactStartResponse, ThreadForkParams, ThreadForkResponse, ThreadListParams,
-    ThreadListResponse, ThreadReadParams, ThreadReadResponse, ThreadResumeParams,
+    GetAccountParams, GetAccountRateLimitsResponse, GetAccountResponse, InitializeCapabilities,
+    InitializeParams, InitializeResponse, JSONRPCError, JSONRPCErrorError, JSONRPCMessage,
+    JSONRPCResponse, ModelListParams, ModelListResponse, PermissionsRequestApprovalResponse,
+    RequestId, ReviewStartParams, ReviewStartResponse, ThreadArchiveParams, ThreadArchiveResponse,
+    ThreadCompactStartParams, ThreadCompactStartResponse, ThreadForkParams, ThreadForkResponse,
+    ThreadListParams, ThreadListResponse, ThreadReadParams, ThreadReadResponse, ThreadResumeParams,
     ThreadResumeResponse, ThreadRollbackParams, ThreadRollbackResponse, ThreadSetNameParams,
     ThreadSetNameResponse, ThreadStartParams, ThreadStartResponse, ThreadUnarchiveParams,
     ThreadUnarchiveResponse, ToolRequestUserInputResponse, TurnInterruptParams,
@@ -57,10 +57,12 @@ fn request_timeout(method_name: &str) -> Option<Duration> {
         "initialize" | "thread/start" | "thread/resume" | "thread/list" => Some(
             configured_timeout(STARTUP_REQUEST_TIMEOUT_ENV, STARTUP_REQUEST_TIMEOUT),
         ),
-        "model/list" | "account/rateLimits/read" | "thread/read" => Some(configured_timeout(
-            STARTUP_METADATA_REQUEST_TIMEOUT_ENV,
-            STARTUP_METADATA_REQUEST_TIMEOUT,
-        )),
+        "model/list" | "account/rateLimits/read" | "account/read" | "thread/read" => {
+            Some(configured_timeout(
+                STARTUP_METADATA_REQUEST_TIMEOUT_ENV,
+                STARTUP_METADATA_REQUEST_TIMEOUT,
+            ))
+        }
         _ => None,
     }
 }
@@ -171,6 +173,17 @@ impl AppServerProcess {
         };
         self.request(request, request_id, "account/rateLimits/read")
             .await
+    }
+
+    pub async fn get_account(&mut self) -> Result<GetAccountResponse, Error> {
+        let request_id = self.next_request_id();
+        let request = ClientRequest::GetAccount {
+            request_id: request_id.clone(),
+            params: GetAccountParams {
+                refresh_token: false,
+            },
+        };
+        self.request(request, request_id, "account/read").await
     }
 
     pub async fn thread_start(

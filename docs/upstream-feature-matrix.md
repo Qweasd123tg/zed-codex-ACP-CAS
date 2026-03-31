@@ -34,7 +34,7 @@
 | `list_sessions` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У upstream список идет из rollout storage, у нас из `thread/list` app-server в `src/thread/session/lifecycle.rs`. |
 | `close_session` | `codex-acp-upstream` | `2026-03-13`, `be20828` | `[x]` | `[ ]` | В нашем `src/codex_agent.rs` capability `close` и handler `close_session` не реализованы. |
 | Usage update / контекстное окно | `codex-acp-upstream`, `codex` | `2026-02-27`, `34dc10c`; протокол виден в `codex` на `2026-03-03`, `8da7e4bda` | `[x]` | `[x]` | У нас есть `ThreadTokenUsageUpdated` в `src/thread/features/notification/mod.rs` и `send_usage_update` в `src/thread/session/client.rs`. |
-| Session config: `mode`, `permissions`, `model`, `reasoning_effort`, `context_control` | `codex-acp-upstream` + форк | `<= 2026-02-18`, `c0b82cc`; `permissions` и `context_control` локально | `[x]` | `[x]` | У нас это разнесено по `src/thread/session/config/*` и `src/thread/session/settings.rs`; `mode` и `permissions` теперь отдельные selectors, а `context_control` показывает usage status, account limits (`5h`/`wk`) и умеет запускать compaction. |
+| Session config: `mode`, `permissions`, `model`, `reasoning_effort`, `context_control` | `codex-acp-upstream` + форк | `<= 2026-02-18`, `c0b82cc`; `permissions` и `context_control` локально, selector enrich `2026-03-31` | `[x]` | `[x]` | У нас это разнесено по `src/thread/session/config/*` и `src/thread/session/settings.rs`; `mode` и `permissions` теперь отдельные selectors, а `context_control` показывает `status`, `ctx %`, `MCP`, `skills`, account limits (`5h`/`wk`) и умеет запускать compaction. `status` в short label держит суммарный `used`, а detail/report — workspace, account и `used / in / out`. |
 | `/compact` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У нас команда реализована в `src/thread/features/session/controls.rs`. |
 | `/undo` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У нас `undo` тоже вынесен в `src/thread/features/session/controls.rs`. Сам rollback-flow работает, но visual edit/rewind button в текущем `Zed` по-прежнему зависит от client-side ACP fix; для нативной кнопки нужен патч/пересборка `Zed`. |
 | `/review` | `codex-acp-upstream` + `codex` (`review/start`) | `<= 2026-02-18`, `c0b82cc`; локально `2026-03-31` | `[x]` | `[x]` | У форка теперь есть user-facing inline review-flow через один основной entrypoint `/review`. Bare команда открывает ACP picker для uncommitted/base-branch/commit/custom сценариев, а кастомные инструкции задаются через `/review <text>`. |
@@ -78,12 +78,12 @@
 
 На текущем этапе для форка под `Zed` разумно держать такой shortlist:
 
-1. `status` в selector или как легкую slash-команду с коротким текстовым дампом: модель, approvals, sandbox/mode, usage, thread/session identity.
-2. `/ps`, но только если удастся показать это не уродливо: либо как аккуратный ACP-card/listing flow, либо как понятный status-pane сценарий, а не как сырой шумный dump.
+1. `/ps`, но только если удастся показать это не уродливо: либо как аккуратный ACP-card/listing flow, либо как понятный status-pane сценарий, а не как сырой шумный dump.
 
 Отдельное UX-направление, которое стоит держать рядом с этим shortlist:
 
-- Чуть богаче selector UX. Помимо текущих `mode` / `permissions` / `context_control`, имеет смысл подумать, что из `status`, `MCP`, `skills`, `plugins` реально стоит surfaced в selector'ах, а что лучше оставить slash-командам или отдельным flows.
+- Чуть богаче selector UX уже partially shipped: нижний `context_control` selector теперь surfacing `status`, `ctx %`, `MCP` и `skills` как read-only summary entries с короткой строкой в списке и расширенным `description`. `Status` intentionally держит на кнопке только суммарный `used`; detail/report раскрывает workspace, account и `used / in / out`. Отдельный hover-only канал здесь по-прежнему упирается в текущий ACP / `Zed` client contract.
+- Следующий вопрос не “добавлять ли `status` / `MCP` / `skills` вообще”, а какие ещё данные реально стоит поднимать в selector'ы, а что лучше оставить slash-командам или отдельным flows. Кандидат из этой зоны сейчас в первую очередь `plugins`.
 - Для `soft /new` и `/fork` UX уже реализован, но ограничение нужно считать постоянной оговоркой: пока сам `Zed` не научится reset'ить ACP session view, старые сообщения в sidebar останутся видимыми даже после in-place thread switch.
 
 ## 4.1 Текущие Ограничения Zed UI

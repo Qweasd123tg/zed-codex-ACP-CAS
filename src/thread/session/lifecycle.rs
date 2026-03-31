@@ -9,10 +9,14 @@ use agent_client_protocol::{
     EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
 };
 use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
+use codex_core::plugins::PluginsManager;
+use codex_core::skills::SkillsManager;
 use serde_json::Value as JsonValue;
 
 use super::session_config::{
-    policy_to_mode, resolve_reasoning_effort, to_app_approval, to_app_sandbox_mode,
+    AccountStatus, ContextSelectorSummary, build_account_status, build_mcp_summary,
+    build_skills_summary, policy_to_mode, resolve_reasoning_effort, to_app_approval,
+    to_app_sandbox_mode,
 };
 use super::{
     AppServerProcess, ClientCapabilities, Config, ContextUsageSource, EditApprovalMode, Error,
@@ -28,19 +32,20 @@ use tracing::{info, warn};
 const RESUME_STARTUP_RETRY_ATTEMPTS: usize = 6;
 const RESUME_STARTUP_RETRY_DELAY_MS: u64 = 300;
 
+pub(crate) struct SessionMcpSetup {
+    pub(crate) config_overrides: Option<HashMap<String, JsonValue>>,
+    pub(crate) summary: ContextSelectorSummary,
+}
+
 fn startup_error(stage: &str, error: Error) -> Error {
     Error::internal_error().data(format!("{stage}: {error}"))
 }
 
-pub(crate) fn build_session_mcp_config_overrides(
+pub(crate) fn build_session_mcp_setup(
     base_mcp_servers: &HashMap<String, McpServerConfig>,
     cwd: &Path,
     mcp_servers: Vec<McpServer>,
-) -> Result<Option<HashMap<String, JsonValue>>, Error> {
-    if mcp_servers.is_empty() {
-        return Ok(None);
-    }
-
+) -> Result<SessionMcpSetup, Error> {
     let mut merged_mcp_servers = base_mcp_servers.clone();
     let mut saw_supported_server = false;
 
@@ -66,17 +71,33 @@ pub(crate) fn build_session_mcp_config_overrides(
         }
     }
 
-    if !saw_supported_server {
-        return Ok(None);
-    }
+    let summary = build_mcp_summary(&merged_mcp_servers);
 
-    let mut overrides = HashMap::new();
-    overrides.insert(
-        "mcp_servers".to_string(),
-        serde_json::to_value(merged_mcp_servers)
-            .map_err(|err| Error::internal_error().data(err.to_string()))?,
-    );
-    Ok(Some(overrides))
+    let config_overrides = if saw_supported_server {
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "mcp_servers".to_string(),
+            serde_json::to_value(merged_mcp_servers)
+                .map_err(|err| Error::internal_error().data(err.to_string()))?,
+        );
+        Some(overrides)
+    } else {
+        None
+    };
+
+    Ok(SessionMcpSetup {
+        config_overrides,
+        summary,
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn build_session_mcp_config_overrides(
+    base_mcp_servers: &HashMap<String, McpServerConfig>,
+    cwd: &Path,
+    mcp_servers: Vec<McpServer>,
+) -> Result<Option<HashMap<String, JsonValue>>, Error> {
+    Ok(build_session_mcp_setup(base_mcp_servers, cwd, mcp_servers)?.config_overrides)
 }
 
 fn insert_http_mcp_server(target: &mut HashMap<String, McpServerConfig>, server: McpServerHttp) {
@@ -149,6 +170,36 @@ fn normalize_mcp_server_name(name: &str) -> String {
     }
 }
 
+pub(in crate::thread) async fn load_session_skills_summary_for_cwd(
+    codex_home: &Path,
+    bundled_skills_enabled: bool,
+    cwd: &Path,
+) -> ContextSelectorSummary {
+    let plugins_manager = Arc::new(PluginsManager::new(codex_home.to_path_buf()));
+    let skills_manager = SkillsManager::new(
+        codex_home.to_path_buf(),
+        plugins_manager,
+        bundled_skills_enabled,
+    );
+    let outcome = skills_manager.skills_for_cwd(cwd, false).await;
+    build_skills_summary(&outcome)
+}
+
+async fn load_session_skills_summary(config: &Config, cwd: &Path) -> ContextSelectorSummary {
+    load_session_skills_summary_for_cwd(&config.codex_home, config.bundled_skills_enabled(), cwd)
+        .await
+}
+
+async fn load_account_status(app: &mut AppServerProcess) -> AccountStatus {
+    match app.get_account().await {
+        Ok(response) => build_account_status(response.account),
+        Err(error) => {
+            warn!(error = %error, "Failed to read account status during session startup");
+            AccountStatus::default()
+        }
+    }
+}
+
 fn headers_to_map(headers: Vec<HttpHeader>) -> Option<HashMap<String, String>> {
     if headers.is_empty() {
         None
@@ -209,12 +260,17 @@ pub(in crate::thread) async fn thread_resume_with_startup_retry(
 }
 
 impl Thread {
+    #[allow(clippy::too_many_arguments)]
     async fn build_started_thread(
         session_id: SessionId,
         codex_home: PathBuf,
+        bundled_skills_enabled: bool,
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
+        session_mcp_summary: ContextSelectorSummary,
+        session_skills_summary: ContextSelectorSummary,
+        account_status: AccountStatus,
         mut app: AppServerProcess,
         start: ThreadStartResponse,
     ) -> Self {
@@ -248,9 +304,14 @@ impl Thread {
             inner: tokio::sync::Mutex::new(ThreadInner {
                 session_id: session_id.clone(),
                 app,
+                codex_home: codex_home.clone(),
+                bundled_skills_enabled,
                 thread_id: start.thread.id,
                 context_usage_cache_path: context_usage_cache_path(&codex_home),
                 session_mcp_config_overrides,
+                session_mcp_summary,
+                session_skills_summary,
+                account_status,
                 workspace_cwd: cwd,
                 client: SessionClient::new(session_id, client_capabilities),
                 approval_policy: start.approval_policy,
@@ -264,6 +325,7 @@ impl Thread {
                 agent_labels,
                 compaction_in_progress: false,
                 last_used_tokens: None,
+                total_token_usage: None,
                 context_window_size: None,
                 context_usage_source: None,
                 account_rate_limits,
@@ -299,6 +361,7 @@ impl Thread {
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
+        session_mcp_summary: ContextSelectorSummary,
     ) -> Result<Self, Error> {
         info!(
             session_id = %session_id,
@@ -326,13 +389,19 @@ impl Thread {
             })
             .await
             .map_err(|error| startup_error("failed to start backend thread", error))?;
+        let session_skills_summary = load_session_skills_summary(config, &cwd).await;
+        let account_status = load_account_status(&mut app).await;
 
         Ok(Self::build_started_thread(
             session_id,
             config.codex_home.clone(),
+            config.bundled_skills_enabled(),
             cwd,
             client_capabilities,
             session_mcp_config_overrides,
+            session_mcp_summary,
+            session_skills_summary,
+            account_status,
             app,
             start,
         )
@@ -345,6 +414,7 @@ impl Thread {
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
+        session_mcp_summary: ContextSelectorSummary,
     ) -> Result<(SessionId, Self), Error> {
         info!(cwd = %cwd.display(), "Bootstrapping new ACP session");
         let mut app = AppServerProcess::spawn("codex")
@@ -370,12 +440,18 @@ impl Thread {
             .map_err(|error| startup_error("failed to start backend thread", error))?;
 
         let session_id = SessionId::new(start.thread.id.clone());
+        let session_skills_summary = load_session_skills_summary(config, &cwd).await;
+        let account_status = load_account_status(&mut app).await;
         let thread = Self::build_started_thread(
             session_id.clone(),
             config.codex_home.clone(),
+            config.bundled_skills_enabled(),
             cwd,
             client_capabilities,
             session_mcp_config_overrides,
+            session_mcp_summary,
+            session_skills_summary,
+            account_status,
             app,
             start,
         )
@@ -390,6 +466,7 @@ impl Thread {
         cwd: PathBuf,
         client_capabilities: Arc<Mutex<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
+        session_mcp_summary: ContextSelectorSummary,
     ) -> Result<Self, Error> {
         info!(
             session_id = %session_id,
@@ -428,6 +505,7 @@ impl Thread {
                     cwd,
                     client_capabilities,
                     session_mcp_config_overrides,
+                    session_mcp_summary,
                 )
                 .await;
             }
@@ -464,6 +542,10 @@ impl Thread {
             &resume.thread.id,
             &resume.thread.turns,
         );
+        let resumed_workspace_cwd = resume.thread.cwd.clone();
+        let session_skills_summary =
+            load_session_skills_summary(config, &resumed_workspace_cwd).await;
+        let account_status = load_account_status(&mut app).await;
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
         let mut agent_labels = HashMap::new();
         remember_agent_label(
@@ -477,10 +559,15 @@ impl Thread {
             inner: tokio::sync::Mutex::new(ThreadInner {
                 session_id: session_id.clone(),
                 app,
+                codex_home: config.codex_home.clone(),
+                bundled_skills_enabled: config.bundled_skills_enabled(),
                 thread_id: resume.thread.id,
                 context_usage_cache_path,
                 session_mcp_config_overrides,
-                workspace_cwd: cwd,
+                session_mcp_summary,
+                session_skills_summary,
+                account_status,
+                workspace_cwd: resumed_workspace_cwd,
                 client: SessionClient::new(session_id, client_capabilities),
                 approval_policy: resume.approval_policy,
                 sandbox_policy: resume.sandbox.clone(),
@@ -493,6 +580,7 @@ impl Thread {
                 agent_labels,
                 compaction_in_progress: false,
                 last_used_tokens: cached_context_usage.map(|(used, _)| used),
+                total_token_usage: None,
                 context_window_size: cached_context_usage.map(|(_, size)| size),
                 context_usage_source: cached_context_usage.map(|_| ContextUsageSource::Cached),
                 account_rate_limits,

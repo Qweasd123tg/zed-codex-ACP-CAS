@@ -1,9 +1,10 @@
 //! Обновления runtime-настроек сессии (mode/model/reasoning/context), доступные ACP-клиентам.
 
 use super::session_config::{
-    CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
-    combined_limits_reset_message, context_usage_message, find_model_for_current,
-    normalize_reasoning_effort_for_model, parse_reasoning_effort, reasoning_effort_value,
+    CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
+    SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, combined_limits_reset_message,
+    context_usage_message, find_model_for_current, normalize_reasoning_effort_for_model,
+    parse_reasoning_effort, reasoning_effort_value, session_status_message,
 };
 use super::{
     APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID,
@@ -107,7 +108,22 @@ impl Thread {
     ) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
         match value.0.as_ref() {
+            SESSION_STATUS_VALUE => {
+                inner
+                    .client
+                    .send_agent_text(session_status_message(
+                        &inner.workspace_cwd,
+                        &inner.account_status,
+                        inner.total_token_usage.as_ref(),
+                        inner.account_rate_limits.as_ref(),
+                    ))
+                    .await;
+                Ok(())
+            }
             CONTEXT_STATUS_VALUE => {
+                if inner.last_used_tokens.is_none() && inner.context_window_size.is_none() {
+                    return Ok(());
+                }
                 inner
                     .client
                     .send_agent_text(context_usage_message(
@@ -115,6 +131,20 @@ impl Thread {
                         inner.context_window_size,
                         inner.context_usage_source,
                     ))
+                    .await;
+                Ok(())
+            }
+            MCP_STATUS_VALUE => {
+                inner
+                    .client
+                    .send_agent_text(inner.session_mcp_summary.report.clone())
+                    .await;
+                Ok(())
+            }
+            SKILLS_STATUS_VALUE => {
+                inner
+                    .client
+                    .send_agent_text(inner.session_skills_summary.report.clone())
                     .await;
                 Ok(())
             }

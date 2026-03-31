@@ -28,7 +28,7 @@ use std::{
 };
 use tracing::{debug, info};
 
-use crate::thread::{Thread, build_session_mcp_config_overrides};
+use crate::thread::{Thread, build_session_mcp_setup};
 
 const EXT_THREAD_ROLLBACK_METHODS: [&str; 4] = [
     "zed.dev/codex/thread/rollback",
@@ -230,9 +230,9 @@ impl Agent for CodexAgent {
             cwd, mcp_servers, ..
         } = request;
 
-        let session_mcp_config_overrides =
-            build_session_mcp_config_overrides(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
-        if let Some(config) = &session_mcp_config_overrides {
+        let session_mcp_setup =
+            build_session_mcp_setup(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
+        if let Some(config) = &session_mcp_setup.config_overrides {
             info!(
                 mcp_server_count = config
                     .get("mcp_servers")
@@ -247,7 +247,8 @@ impl Agent for CodexAgent {
             &self.config,
             cwd,
             self.client_capabilities.clone(),
-            session_mcp_config_overrides,
+            session_mcp_setup.config_overrides,
+            session_mcp_setup.summary,
         )
         .await?;
         let thread = Rc::new(thread);
@@ -284,8 +285,8 @@ impl Agent for CodexAgent {
             ..
         } = request;
 
-        let session_mcp_config_overrides =
-            build_session_mcp_config_overrides(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
+        let session_mcp_setup =
+            build_session_mcp_setup(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
 
         let thread = if self.auto_restore_enabled {
             Rc::new(
@@ -294,7 +295,8 @@ impl Agent for CodexAgent {
                     &self.config,
                     cwd,
                     self.client_capabilities.clone(),
-                    session_mcp_config_overrides.clone(),
+                    session_mcp_setup.config_overrides.clone(),
+                    session_mcp_setup.summary.clone(),
                 )
                 .await?,
             )
@@ -305,7 +307,8 @@ impl Agent for CodexAgent {
                     &self.config,
                     cwd,
                     self.client_capabilities.clone(),
-                    session_mcp_config_overrides.clone(),
+                    session_mcp_setup.config_overrides.clone(),
+                    session_mcp_setup.summary.clone(),
                 )
                 .await?,
             )
@@ -346,8 +349,8 @@ impl Agent for CodexAgent {
             ..
         } = request;
 
-        let session_mcp_config_overrides =
-            build_session_mcp_config_overrides(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
+        let session_mcp_setup =
+            build_session_mcp_setup(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
 
         let thread = if self.auto_restore_enabled {
             Rc::new(
@@ -356,7 +359,8 @@ impl Agent for CodexAgent {
                     &self.config,
                     cwd,
                     self.client_capabilities.clone(),
-                    session_mcp_config_overrides.clone(),
+                    session_mcp_setup.config_overrides.clone(),
+                    session_mcp_setup.summary.clone(),
                 )
                 .await?,
             )
@@ -367,7 +371,8 @@ impl Agent for CodexAgent {
                     &self.config,
                     cwd,
                     self.client_capabilities.clone(),
-                    session_mcp_config_overrides.clone(),
+                    session_mcp_setup.config_overrides.clone(),
+                    session_mcp_setup.summary.clone(),
                 )
                 .await?,
             )

@@ -6,7 +6,9 @@ use codex_app_server_protocol::ThreadResumeParams;
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::features::session::thread_switch::flush_thread_switch_transport_state;
-use crate::thread::session_lifecycle::thread_resume_with_startup_retry;
+use crate::thread::session_lifecycle::{
+    load_session_skills_summary_for_cwd, thread_resume_with_startup_retry,
+};
 use crate::thread::session_usage_cache::restore_cached_context_usage;
 use crate::thread::{ContextUsageSource, ThreadInner, replay, session_config, turn_notify};
 
@@ -43,6 +45,7 @@ pub(in crate::thread) async fn handle_resume_command(
     inner.current_model = resume.model;
     inner.current_model_provider = resume.model_provider;
     inner.compaction_in_progress = false;
+    inner.total_token_usage = None;
     let cached_context_usage = restore_cached_context_usage(
         &inner.context_usage_cache_path,
         &resume.thread.id,
@@ -78,6 +81,12 @@ pub(in crate::thread) async fn handle_resume_command(
         &inner.current_model,
         resume.reasoning_effort,
     );
+    inner.session_skills_summary = load_session_skills_summary_for_cwd(
+        &inner.codex_home,
+        inner.bundled_skills_enabled,
+        &inner.workspace_cwd,
+    )
+    .await;
     inner
         .client
         .send_notification(SessionUpdate::SessionInfoUpdate(

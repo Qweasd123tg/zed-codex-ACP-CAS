@@ -354,6 +354,7 @@ async fn apply_thread_switch(
     inner.current_model_provider = state.model_provider;
     inner.compaction_in_progress = false;
     inner.last_used_tokens = None;
+    inner.total_token_usage = None;
     inner.context_window_size = None;
     inner.context_usage_source = None;
     inner.agent_labels = HashMap::new();
