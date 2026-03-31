@@ -61,7 +61,6 @@ async fn maybe_advance_fallback_for_started_item(
         }
         ThreadItem::FileChange { .. }
         | ThreadItem::McpToolCall { .. }
-        | ThreadItem::DynamicToolCall { .. }
         | ThreadItem::CollabAgentToolCall { .. }
         | ThreadItem::WebSearch { .. }
         | ThreadItem::ImageView { .. } => {

@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-03-30`.
+Обновлено: `2026-03-31`.
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -13,7 +13,7 @@
 
 1. `src/thread.rs` хранит оркестрацию, состояния и общие константы.
 2. `src/thread/core/*` — роутеры и glue (`item_handlers`, `replay`, `server_requests`, `inner_state`, `terminal_updates`).
-3. `src/thread/features/*` — доменные срезы (`plan`, `file`, `tool_events`, `tool_call_ui`, `collab`, `dynamic_tool_call`, `session`, `resume`, `notification`, `approvals`).
+3. `src/thread/features/*` — доменные срезы (`plan`, `file`, `tool_events`, `tool_call_ui`, `collab`, `session`, `resume`, `notification`, `approvals`).
 4. `src/thread/{prompt,notification,session,turn}/*` — вертикальные runtime-потоки.
 5. Текущий стиль зависимости: прямые импорты из конкретных подмодулей вместо зонтичных прокладок.
 
@@ -40,7 +40,6 @@ flowchart TD
     ServerRequests --> ApprovalsFile[src/thread/features/approvals/file_change.rs]
     ServerRequests --> ApprovalsUserInput[src/thread/features/approvals/user_input.rs]
     ServerRequests --> ApprovalsPermissions[src/thread/features/approvals/permissions.rs]
-    ServerRequests --> DynamicToolCallFlow[src/thread/features/dynamic_tool_call.rs]
 
     NotificationFeature --> NotificationDeltas[src/thread/features/notification/events/deltas.rs]
     NotificationFeature --> NotificationTurn[src/thread/features/notification/events/turn.rs]
@@ -52,7 +51,6 @@ flowchart TD
 
     ItemHandlers --> FileEvents[src/thread/features/file/events.rs]
     ItemHandlers --> ToolEventsCommand[src/thread/features/tool_events/command.rs]
-    ItemHandlers --> ToolEventsDynamic[src/thread/features/tool_events/dynamic.rs]
     ItemHandlers --> ToolEventsMcp[src/thread/features/tool_events/mcp.rs]
     ItemHandlers --> ToolEventsWebImage[src/thread/features/tool_events/web_image.rs]
     ItemHandlers --> PlanEvents[src/thread/features/plan/events.rs]
@@ -91,7 +89,6 @@ flowchart LR
     Replay --> SessionReplay[src/thread/features/session/events.rs]
     Replay --> FileReplay[src/thread/features/file/events.rs]
     Replay --> CommandReplay[src/thread/features/tool_events/command.rs]
-    Replay --> DynamicReplay[src/thread/features/tool_events/dynamic.rs]
     Replay --> McpReplay[src/thread/features/tool_events/mcp.rs]
     Replay --> WebImageReplay[src/thread/features/tool_events/web_image.rs]
     Replay --> CollabReplay[src/thread/features/collab/render.rs]
@@ -164,7 +161,6 @@ flowchart LR
 - `src/thread/features/approvals/file_change.rs`
 - `src/thread/features/approvals/user_input.rs`
 - `src/thread/features/approvals/permissions.rs`
-- `src/thread/features/dynamic_tool_call.rs`
 
 5. Изменение session/config, archive и thread title:
 - `src/thread/session/config/mod.rs`

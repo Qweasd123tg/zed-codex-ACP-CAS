@@ -1,6 +1,6 @@
 # Матрица Фич И Сравнение С Upstream
 
-Актуально на `2026-03-30` после прогона `bash script/update_references.sh`, синхронизации локального кода по `RequestPermissions`, UX-обновлений session config и warning forwarding.
+Актуально на `2026-03-31` после прогона `bash script/update_references.sh`, синхронизации локального кода по `RequestPermissions`, UX-обновлений session config и warning forwarding.
 
 ## Снимок References
 
@@ -22,8 +22,8 @@
 
 ## Короткий Вывод
 
-- По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `8/15` полных совпадений, `1/15` частичное совпадение и `6/15` явных пробелов.
-- Основные пробелы относительно официального адаптера: `close_session`, review/init/logout-команды и полноценное client-side выполнение `DynamicToolCall`.
+- По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `8/15` полных совпадений, `00/15` частичныхчастичных совпаденийсовпадений и `77/15` явных пробелов.
+- Основные пробелы относительно официального адаптера: `close_session`, review/init/logout-команды и отдельные client-native UX-ветки, которые в текущем Zed ACP пока не дают достаточной отдачи.
 - Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/plan`, app-server-ориентированный flow восстановления тредов, нижний `Context` control и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
 
 ## 1. Parity С Официальным `zed codex acp`
@@ -42,7 +42,7 @@
 | `/logout` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[ ]` | У нас есть только `authenticate`, но нет slash/logout handler. |
 | ACP approvals для command / file change / tool user input | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У форка это идет через `src/thread/core/server_requests.rs` и `src/thread/features/approvals/*`. |
 | `RequestPermissions` tool | `codex`, sync в `codex-acp-upstream` | `2026-03-08`, `e6b93841c`; в official adapter попало через `2026-03-13`, `be20828` | `[x]` | `[x]` | У нас есть отдельная typed-ветка `ServerRequest::PermissionsRequestApproval` и ACP popup в `src/thread/features/approvals/permissions.rs`. |
-| `DynamicToolCall` (`item/tool/call`) | `codex`, sync в `codex-acp-upstream` | `2026-02-25`, `a0fd94bde`; в official adapter попало через `2026-03-13`, `be20828` | `[x]` | `[~]` | У форка теперь есть typed request/response plumbing, ACP popup и live/replay render для `ThreadItem::DynamicToolCall` (`src/thread/features/dynamic_tool_call.rs`, `src/thread/features/tool_events/dynamic.rs`). До полной parity не хватает реального client-side execution и structured elicitation: current ACP path возвращает только typed text fallback, а `thread/start.dynamicTools` мы пока не рекламируем. |
+| `DynamicToolCall` (`item/tool/call`) | `codex`, sync в `codex-acp-upstream` | `2026-02-25`, `a0fd94bde`; в official adapter попало через `2026-03-13`, `be20828` | `[x]` | `[ ]` | В форке была только частичная экспериментальная ветка, но для текущего Zed она не дала достаточной практической отдачи. В runtime-пайплайне поддержку вырезали, а возвращаться к ней имеет смысл только если появится конкретный Zed-side client-native use case. Бэкап-конспект оставлен в `docs/drafts/dynamic-tool-call-backup.md`. |
 | Forwarding warning-сообщений в клиент | `codex-acp-upstream` | `2026-03-05`, `a278432` | `[x]` | `[x]` | В `src/thread/features/notification/mod.rs` теперь поднимаются `ConfigWarning`, `DeprecationNotice` и `WindowsWorldWritableWarning`; текст уходит в ACP-чат через `src/thread/features/notification/events/warnings.rs`. |
 | ACP MCP passthrough + sanitize имен серверов | `codex-acp-upstream` | `2026-03-05`, `678a99e` | `[x]` | `[~]` | В форке `mcp_servers` из ACP теперь маппятся в session-scoped `thread/start` / `thread/resume` `config` overrides и переживают replacement-thread внутри одной ACP-сессии. Поддержаны `stdio` и `http`; ACP `sse` пока явно игнорируется. |
 
@@ -77,6 +77,12 @@
 Приоритетно выглядит такой порядок:
 
 1. `close_session`, потому что это чистый parity-gap с официальным адаптером и понятный ACP-level контракт.
-2. Довести `DynamicToolCall` от typed fallback до реального client-side execution/structured response flow.
-3. Довести MCP passthrough до полной parity-ветки, если потребуется поддержка ACP `sse` или отдельный UX для MCP auth/status.
-4. Документирование reconnect stall-guard и связанной turn-логики в архитектурной карте, чтобы docs не отставали от кода.
+2. Довести MCP passthrough до полной parity-ветки, если потребуется поддержка ACP `sse` или отдельный UX для MCP auth/status.
+3. Документирование reconnect stall-guard и связанной turn-логики в архитектурной карте, чтобы docs не отставали от кода.
+4. Добавить adapter-level конфиг для отключения slash-команд: выключать и `AvailableCommandsUpdate`, и ранний slash-парсинг в prompt-flow. Разумный первый этап: локальный startup-флаг адаптера; расширение общего `codex-core` config имеет смысл только если эта настройка действительно нужна шире форка.
+
+## 5. Что Пока Не Приоритетно
+
+- `DynamicToolCall`: потенциал есть как у моста к client-side/native UX, но для текущего Zed нет достаточно сильной surfaced-поверхности, чтобы держать даже partial runtime-support в основном коде.
+- Возвращаться к `DynamicToolCall` имеет смысл только если появится конкретный Zed-side use case: например client-native picker, structured editor context или другой интерактивный UI, который нельзя нормально закрыть текущими ACP primitives.
+- Для такого возврата сохранен backup-конспект в `docs/drafts/dynamic-tool-call-backup.md`.

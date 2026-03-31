@@ -78,7 +78,7 @@ Sub-agent and collaboration tool-call rendering:
   - `/undo`
   - `/plan`
 - Better thread title handling for resume/archive/rename flows
-- Tool call cards for command, MCP, web, image, file, collab, and dynamic tool branches
+- Tool call cards for command, MCP, web, image, file, and collab branches
 - Practical plan mode support
 - Better startup and reconnect diagnostics
 
@@ -107,7 +107,8 @@ Current strengths of this fork:
 Current gaps:
 
 - No full structured elicitation parity yet
-- `DynamicToolCall` support is still partial
+- Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
+- `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
 - Some upstream-style flows are still missing or incomplete, including `close_session`, `/init`, `/logout`, and review-oriented flows
 - Some behavior still depends on Zed-side ACP support
 
@@ -115,7 +116,7 @@ Current gaps:
 
 - MCP passthrough supports `stdio` and `http` today
 - MCP `sse` passthrough is not supported yet
-- `DynamicToolCall` is only partially supported
+- `item/tool/call` / `DynamicToolCall` requests are rejected as unsupported
 - Zed rewind/edit support still depends on a client-side ACP fix for rollback wiring
 - Linux is the most tested platform right now
 - Multi-platform release artifacts can exist before all platforms are equally tested in real use

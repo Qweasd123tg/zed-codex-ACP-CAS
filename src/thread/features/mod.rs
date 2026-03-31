@@ -3,7 +3,6 @@
 
 pub(super) mod approvals;
 pub(super) mod collab;
-pub(super) mod dynamic_tool_call;
 pub(super) mod file;
 pub(super) mod notification;
 pub(super) mod plan;
