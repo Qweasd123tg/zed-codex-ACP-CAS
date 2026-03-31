@@ -70,9 +70,23 @@ pub(in crate::thread) async fn replay_entered_review_mode(client: &SessionClient
         .await;
 }
 
+pub(in crate::thread) async fn emit_entered_review_mode(inner: &mut ThreadInner, review: String) {
+    inner
+        .client
+        .send_agent_thought(format!("Entered review mode: {review}"))
+        .await;
+}
+
 // Replay-ветка для выхода из review mode.
 pub(in crate::thread) async fn replay_exited_review_mode(client: &SessionClient, review: String) {
     client
+        .send_agent_thought(format!("Exited review mode: {review}"))
+        .await;
+}
+
+pub(in crate::thread) async fn emit_exited_review_mode(inner: &mut ThreadInner, review: String) {
+    inner
+        .client
         .send_agent_thought(format!("Exited review mode: {review}"))
         .await;
 }

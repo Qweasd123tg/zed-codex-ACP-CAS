@@ -69,6 +69,7 @@ Sub-agent and collaboration tool-call rendering:
 - Session-scoped MCP passthrough for `stdio` and `http`
 - History replay after `load_session` and `resume_session`
 - Session commands:
+  - `/review`
   - `/threads`
   - `/resume`
   - `/new`
@@ -80,6 +81,7 @@ Sub-agent and collaboration tool-call rendering:
   - `/undo`
   - `/plan`
 - Better thread title handling for resume/archive/rename/fork flows
+- Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
 - `soft /new` and in-place `/fork` support for switching backend threads inside one ACP session
 - Tool call cards for command, MCP, web, image, file, and collab branches
 - Practical plan mode support
@@ -104,6 +106,7 @@ Current strengths of this fork:
 - More robust startup behavior and clearer logging
 - Better session lifecycle handling in ACP clients
 - Better thread titles in lists and resumed sessions
+- Inline review flows backed by native `review/start`
 - Practical in-place thread switching with `/new`, `/fork`, `/resume`, and archive-triggered replacement
 - Practical plan mode support
 - More complete collab and sub-agent UI mapping
@@ -113,7 +116,7 @@ Current gaps:
 - No full structured elicitation parity yet
 - Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
-- Some upstream-style flows are still missing or incomplete, including `close_session`, `/init`, `/logout`, and review-oriented flows
+- Some upstream-style flows are still missing or incomplete, including `close_session`, `/init`, and `/logout`
 - `soft /new` and `/fork` switch only the backend thread; current Zed-side ACP behavior still does not clear sidebar chat history for in-place thread switches
 - Some behavior still depends on Zed-side ACP support
 
@@ -122,7 +125,7 @@ Current gaps:
 - MCP passthrough supports `stdio` and `http` today
 - MCP `sse` passthrough is not supported yet
 - `item/tool/call` / `DynamicToolCall` requests are rejected as unsupported
-- Zed rewind/edit support still depends on a client-side ACP fix for rollback wiring
+- `/undo` itself works, but the visual rewind/edit button in current `Zed` still depends on a client-side ACP fix for rollback wiring; in practice that means patching or rebuilding `Zed` if you want the native button UX
 - Linux is the most tested platform right now
 - Multi-platform release artifacts can exist before all platforms are equally tested in real use
 
@@ -269,7 +272,6 @@ User-facing documentation stays in this README. Deeper project notes are kept se
 
 Near-term work:
 
-- Add real review-oriented flows instead of replay-only review residue
 - Surface a clearer `status` view, likely in a selector or lightweight slash command
 - Improve command approval UX so the user can see the actual shell command or a clear preview before approving
 - Keep expanding selector UX carefully where it helps daily use, especially around `status`, `MCP`, `skills`, and `plugins`

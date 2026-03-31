@@ -13,13 +13,14 @@ use codex_app_server_protocol::{
     ClientInfo, ClientNotification, ClientRequest, FileChangeRequestApprovalResponse,
     GetAccountRateLimitsResponse, InitializeCapabilities, InitializeParams, InitializeResponse,
     JSONRPCError, JSONRPCErrorError, JSONRPCMessage, JSONRPCResponse, ModelListParams,
-    ModelListResponse, PermissionsRequestApprovalResponse, RequestId, ThreadArchiveParams,
-    ThreadArchiveResponse, ThreadCompactStartParams, ThreadCompactStartResponse, ThreadForkParams,
-    ThreadForkResponse, ThreadListParams, ThreadListResponse, ThreadReadParams, ThreadReadResponse,
-    ThreadResumeParams, ThreadResumeResponse, ThreadRollbackParams, ThreadRollbackResponse,
-    ThreadSetNameParams, ThreadSetNameResponse, ThreadStartParams, ThreadStartResponse,
-    ThreadUnarchiveParams, ThreadUnarchiveResponse, ToolRequestUserInputResponse,
-    TurnInterruptParams, TurnInterruptResponse, TurnStartParams, TurnStartResponse,
+    ModelListResponse, PermissionsRequestApprovalResponse, RequestId, ReviewStartParams,
+    ReviewStartResponse, ThreadArchiveParams, ThreadArchiveResponse, ThreadCompactStartParams,
+    ThreadCompactStartResponse, ThreadForkParams, ThreadForkResponse, ThreadListParams,
+    ThreadListResponse, ThreadReadParams, ThreadReadResponse, ThreadResumeParams,
+    ThreadResumeResponse, ThreadRollbackParams, ThreadRollbackResponse, ThreadSetNameParams,
+    ThreadSetNameResponse, ThreadStartParams, ThreadStartResponse, ThreadUnarchiveParams,
+    ThreadUnarchiveResponse, ToolRequestUserInputResponse, TurnInterruptParams,
+    TurnInterruptResponse, TurnStartParams, TurnStartResponse,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -206,6 +207,18 @@ impl AppServerProcess {
             params,
         };
         self.request(request, request_id, "thread/fork").await
+    }
+
+    pub async fn review_start(
+        &mut self,
+        params: ReviewStartParams,
+    ) -> Result<ReviewStartResponse, Error> {
+        let request_id = self.next_request_id();
+        let request = ClientRequest::ReviewStart {
+            request_id: request_id.clone(),
+            params,
+        };
+        self.request(request, request_id, "review/start").await
     }
 
     pub async fn thread_list(

@@ -24,6 +24,14 @@ use codex_protocol::openai_models::ReasoningEffort;
 use serde_json::json;
 use tracing::warn;
 
+struct ThreadSwitchState {
+    approval_policy: AppAskForApproval,
+    sandbox_policy: AppSandboxPolicy,
+    model: String,
+    model_provider: String,
+    reasoning_effort: Option<ReasoningEffort>,
+}
+
 pub(in crate::thread) async fn handle_compact_command(
     inner: &mut ThreadInner,
 ) -> Result<StopReason, Error> {
@@ -244,11 +252,13 @@ pub(in crate::thread) async fn handle_fork_command(
     apply_thread_switch(
         inner,
         fork.thread,
-        fork.approval_policy,
-        fork.sandbox,
-        fork.model,
-        fork.model_provider,
-        fork.reasoning_effort,
+        ThreadSwitchState {
+            approval_policy: fork.approval_policy,
+            sandbox_policy: fork.sandbox,
+            model: fork.model,
+            model_provider: fork.model_provider,
+            reasoning_effort: fork.reasoning_effort,
+        },
         "handle_fork_command",
     )
     .await?;
@@ -314,11 +324,13 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
     apply_thread_switch(
         inner,
         start.thread,
-        start.approval_policy,
-        start.sandbox,
-        start.model,
-        start.model_provider,
-        start.reasoning_effort,
+        ThreadSwitchState {
+            approval_policy: start.approval_policy,
+            sandbox_policy: start.sandbox,
+            model: start.model,
+            model_provider: start.model_provider,
+            reasoning_effort: start.reasoning_effort,
+        },
         "start_replacement_thread",
     )
     .await
@@ -327,23 +339,19 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
 async fn apply_thread_switch(
     inner: &mut ThreadInner,
     thread: Thread,
-    approval_policy: AppAskForApproval,
-    sandbox_policy: AppSandboxPolicy,
-    model: String,
-    model_provider: String,
-    reasoning_effort: Option<ReasoningEffort>,
+    state: ThreadSwitchState,
     sync_reason: &'static str,
 ) -> Result<(), Error> {
     flush_thread_switch_transport_state(inner).await?;
 
     inner.thread_id = thread.id.clone();
     inner.workspace_cwd = thread.cwd.clone();
-    inner.approval_policy = approval_policy;
-    inner.sandbox_policy = sandbox_policy.clone();
-    inner.sandbox_mode = crate::thread::session_config::policy_to_mode(&sandbox_policy);
+    inner.approval_policy = state.approval_policy;
+    inner.sandbox_policy = state.sandbox_policy.clone();
+    inner.sandbox_mode = crate::thread::session_config::policy_to_mode(&state.sandbox_policy);
     inner.sync_sandbox_mode_from_policy(sync_reason);
-    inner.current_model = model;
-    inner.current_model_provider = model_provider;
+    inner.current_model = state.model;
+    inner.current_model_provider = state.model_provider;
     inner.compaction_in_progress = false;
     inner.last_used_tokens = None;
     inner.context_window_size = None;
@@ -360,7 +368,7 @@ async fn apply_thread_switch(
     inner.reasoning_effort = crate::thread::session_config::resolve_reasoning_effort(
         &inner.models,
         &inner.current_model,
-        reasoning_effort,
+        state.reasoning_effort,
     );
     if let Ok(response) = inner.app.get_account_rate_limits().await {
         inner.account_rate_limits = Some(response.rate_limits);

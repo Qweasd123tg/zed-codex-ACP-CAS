@@ -7,6 +7,7 @@ use super::{
     ThreadInner, ToolCallId, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     TurnInterruptParams, TurnStartParams, UserInput, features::plan, notification_dispatch,
 };
+use codex_app_server_protocol::{ReviewDelivery, ReviewStartParams, ReviewTarget};
 
 use tracing::info;
 
@@ -41,40 +42,21 @@ async fn maybe_abort_reconnect_stall(inner: &mut ThreadInner, turn_id: &str) -> 
     Some(StopReason::EndTurn)
 }
 
-// Отправляем turn-start один раз, затем стримим item-уведомления до прихода финального статуса.
-pub(super) async fn run_single_turn(
+async fn prepare_started_turn(
+    inner: &mut ThreadInner,
+    turn_id: &str,
+    collaboration_mode_kind: ModeKind,
+) {
+    info!("Started turn {turn_id} for session {}", inner.session_id);
+    inner.prepare_for_new_turn(turn_id, collaboration_mode_kind);
+    plan::initialize_fallback_plan_for_turn(inner, turn_id, collaboration_mode_kind).await;
+}
+
+async fn drive_active_turn(
     inner: &mut ThreadInner,
     cancel_tx: &tokio::sync::watch::Sender<u64>,
-    input: Vec<UserInput>,
-    collaboration_mode_kind: ModeKind,
+    turn_id: String,
 ) -> Result<StopReason, Error> {
-    inner.sync_sandbox_mode_from_policy("run_single_turn");
-    let thread_id = inner.thread_id.clone();
-    let model = inner.current_model.clone();
-    let effort = inner.reasoning_effort;
-    let approval_policy = inner.approval_policy;
-    let sandbox_policy = inner.sandbox_policy.clone();
-    let collaboration_mode =
-        plan::collaboration_mode_for_turn(collaboration_mode_kind, &model, effort);
-    let turn_response = inner
-        .app
-        .turn_start(TurnStartParams {
-            thread_id,
-            input,
-            model: Some(model),
-            effort: Some(effort),
-            approval_policy: Some(approval_policy),
-            sandbox_policy: Some(sandbox_policy),
-            collaboration_mode,
-            ..Default::default()
-        })
-        .await?;
-
-    let turn_id = turn_response.turn.id;
-    info!("Started turn {turn_id} for session {}", inner.session_id);
-    inner.prepare_for_new_turn(&turn_id, collaboration_mode_kind);
-    plan::initialize_fallback_plan_for_turn(inner, &turn_id, collaboration_mode_kind).await;
-
     let mut interrupted = false;
     let mut cancel_rx = cancel_tx.subscribe();
 
@@ -117,6 +99,61 @@ pub(super) async fn run_single_turn(
             }
         }
     }
+}
+
+// Отправляем turn-start один раз, затем стримим item-уведомления до прихода финального статуса.
+pub(super) async fn run_single_turn(
+    inner: &mut ThreadInner,
+    cancel_tx: &tokio::sync::watch::Sender<u64>,
+    input: Vec<UserInput>,
+    collaboration_mode_kind: ModeKind,
+) -> Result<StopReason, Error> {
+    inner.sync_sandbox_mode_from_policy("run_single_turn");
+    let thread_id = inner.thread_id.clone();
+    let model = inner.current_model.clone();
+    let effort = inner.reasoning_effort;
+    let approval_policy = inner.approval_policy;
+    let sandbox_policy = inner.sandbox_policy.clone();
+    let collaboration_mode =
+        plan::collaboration_mode_for_turn(collaboration_mode_kind, &model, effort);
+    let turn_response = inner
+        .app
+        .turn_start(TurnStartParams {
+            thread_id,
+            input,
+            model: Some(model),
+            effort: Some(effort),
+            approval_policy: Some(approval_policy),
+            sandbox_policy: Some(sandbox_policy),
+            collaboration_mode,
+            ..Default::default()
+        })
+        .await?;
+
+    let turn_id = turn_response.turn.id;
+    prepare_started_turn(inner, &turn_id, collaboration_mode_kind).await;
+    drive_active_turn(inner, cancel_tx, turn_id).await
+}
+
+pub(super) async fn run_review_turn(
+    inner: &mut ThreadInner,
+    cancel_tx: &tokio::sync::watch::Sender<u64>,
+    target: ReviewTarget,
+) -> Result<StopReason, Error> {
+    inner.sync_sandbox_mode_from_policy("run_review_turn");
+    let collaboration_mode_kind = inner.collaboration_mode_kind;
+    let review_response = inner
+        .app
+        .review_start(ReviewStartParams {
+            thread_id: inner.thread_id.clone(),
+            target,
+            delivery: Some(ReviewDelivery::Inline),
+        })
+        .await?;
+
+    let turn_id = review_response.turn.id;
+    prepare_started_turn(inner, &turn_id, collaboration_mode_kind).await;
+    drive_active_turn(inner, cancel_tx, turn_id).await
 }
 
 pub(super) async fn prompt_plan_implementation(inner: &mut ThreadInner) -> Result<bool, Error> {

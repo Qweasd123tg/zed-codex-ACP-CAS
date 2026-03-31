@@ -22,8 +22,8 @@
 
 ## Короткий Вывод
 
-- По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `8/15` полных совпадений, `0/15` частичных совпадений и `7/15` явных пробелов.
-- Основные пробелы относительно официального адаптера: `close_session`, review/init/logout-команды и отдельные client-native UX-ветки, которые в текущем Zed ACP пока не дают достаточной отдачи.
+- По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `9/15` полных совпадений, `0/15` частичных совпадений и `6/15` явных пробелов.
+- Основные пробелы относительно официального адаптера: `close_session`, `init`/`logout` и отдельные client-native UX-ветки, которые в текущем Zed ACP пока не дают достаточной отдачи.
 - Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/plan`, app-server-ориентированный flow восстановления тредов, нижний `Context` control и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
 
 ## 1. Parity С Официальным `zed codex acp`
@@ -36,8 +36,8 @@
 | Usage update / контекстное окно | `codex-acp-upstream`, `codex` | `2026-02-27`, `34dc10c`; протокол виден в `codex` на `2026-03-03`, `8da7e4bda` | `[x]` | `[x]` | У нас есть `ThreadTokenUsageUpdated` в `src/thread/features/notification/mod.rs` и `send_usage_update` в `src/thread/session/client.rs`. |
 | Session config: `mode`, `permissions`, `model`, `reasoning_effort`, `context_control` | `codex-acp-upstream` + форк | `<= 2026-02-18`, `c0b82cc`; `permissions` и `context_control` локально | `[x]` | `[x]` | У нас это разнесено по `src/thread/session/config/*` и `src/thread/session/settings.rs`; `mode` и `permissions` теперь отдельные selectors, а `context_control` показывает usage status, account limits (`5h`/`wk`) и умеет запускать compaction. |
 | `/compact` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У нас команда реализована в `src/thread/features/session/controls.rs`. |
-| `/undo` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У нас `undo` тоже вынесен в `src/thread/features/session/controls.rs`. |
-| `/review`, `/review-branch`, `/review-commit` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[ ]` | У форка нет user-facing review-команд; есть только replay review-состояния в `src/thread/features/session/*`, если такие item уже пришли из истории. |
+| `/undo` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У нас `undo` тоже вынесен в `src/thread/features/session/controls.rs`. Сам rollback-flow работает, но visual edit/rewind button в текущем `Zed` по-прежнему зависит от client-side ACP fix; для нативной кнопки нужен патч/пересборка `Zed`. |
+| `/review` | `codex-acp-upstream` + `codex` (`review/start`) | `<= 2026-02-18`, `c0b82cc`; локально `2026-03-31` | `[x]` | `[x]` | У форка теперь есть user-facing inline review-flow через один основной entrypoint `/review`. Bare команда открывает ACP picker для uncommitted/base-branch/commit/custom сценариев, а кастомные инструкции задаются через `/review <text>`. |
 | `/init` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[ ]` | Отдельной `/init`-ветки в `src/thread/prompt/commands.rs` нет. |
 | `/logout` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[ ]` | У нас есть только `authenticate`, но нет slash/logout handler. |
 | ACP approvals для command / file change / tool user input | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У форка это идет через `src/thread/core/server_requests.rs` и `src/thread/features/approvals/*`. |
@@ -78,9 +78,8 @@
 
 На текущем этапе для форка под `Zed` разумно держать такой shortlist:
 
-1. `review` / `review-branch` / `review-commit` как отдельный режим работы, а не только replay already-existing review state.
-2. `status` в selector или как легкую slash-команду с коротким текстовым дампом: модель, approvals, sandbox/mode, usage, thread/session identity.
-3. `/ps`, но только если удастся показать это не уродливо: либо как аккуратный ACP-card/listing flow, либо как понятный status-pane сценарий, а не как сырой шумный dump.
+1. `status` в selector или как легкую slash-команду с коротким текстовым дампом: модель, approvals, sandbox/mode, usage, thread/session identity.
+2. `/ps`, но только если удастся показать это не уродливо: либо как аккуратный ACP-card/listing flow, либо как понятный status-pane сценарий, а не как сырой шумный dump.
 
 Отдельное UX-направление, которое стоит держать рядом с этим shortlist:
 

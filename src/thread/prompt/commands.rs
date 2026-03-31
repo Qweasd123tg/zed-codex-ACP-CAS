@@ -8,7 +8,7 @@ use agent_client_protocol::{
     AvailableCommand, AvailableCommandInput, ContentBlock, EmbeddedResource,
     EmbeddedResourceResource, ResourceLink, TextResourceContents, UnstructuredCommandInput,
 };
-use codex_app_server_protocol::UserInput;
+use codex_app_server_protocol::{ReviewTarget, UserInput};
 
 // Преобразуем ACP-блоки контента в обычные user input перед парсингом команд.
 pub(super) fn build_prompt_items(prompt: Vec<ContentBlock>) -> Vec<UserInput> {
@@ -119,6 +119,12 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
+    if let Some(rest) = slash_command_rest(text, "/review") {
+        return Some(SessionCommand::Review {
+            instructions: (!rest.is_empty()).then(|| rest.to_string()),
+        });
+    }
+
     if let Some(rest) = text.strip_prefix("/archive") {
         let query = rest.trim();
         return Some(SessionCommand::Archive {
@@ -168,10 +174,11 @@ fn extract_command_text(prompt: &[ContentBlock]) -> Option<&str> {
     None
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub(super) enum CommandDispatchOutcome {
     Stop(StopReason),
     PlanPrompt(String),
+    ReviewStart(ReviewTarget),
 }
 
 // Применяем slash-команду к текущему session state и возвращаем действие для prompt-flow.
@@ -183,6 +190,16 @@ pub(super) async fn dispatch_session_command(
         SessionCommand::Threads => Ok(CommandDispatchOutcome::Stop(
             resume::listing::handle_threads_command(inner).await?,
         )),
+        SessionCommand::Review { instructions } => {
+            match session::review::handle_review_command(inner, instructions).await? {
+                session::review::ReviewDispatch::Start(target) => {
+                    Ok(CommandDispatchOutcome::ReviewStart(target))
+                }
+                session::review::ReviewDispatch::Stop(stop_reason) => {
+                    Ok(CommandDispatchOutcome::Stop(stop_reason))
+                }
+            }
+        }
         SessionCommand::Resume {
             thread_id,
             include_history,
@@ -236,6 +253,13 @@ pub(super) fn normalize_preview(preview: &str) -> String {
 
 pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
     vec![
+        AvailableCommand::new(
+            "review",
+            "Open a review preset picker, or use `/review <instructions>` for a custom review",
+        )
+        .input(AvailableCommandInput::Unstructured(
+            UnstructuredCommandInput::new("optional custom review instructions"),
+        )),
         AvailableCommand::new("threads", "List saved Codex threads for this account"),
         AvailableCommand::new(
             "resume",

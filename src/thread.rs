@@ -16,10 +16,10 @@ use agent_client_protocol::{
 };
 use codex_app_server_protocol::{
     AskForApproval as AppAskForApproval, ItemCompletedNotification, ItemStartedNotification,
-    Model as AppModel, RateLimitSnapshot as AppRateLimitSnapshot, SandboxMode as AppSandboxMode,
-    SandboxPolicy as AppSandboxPolicy, ServerRequest, ThreadItem, ThreadListParams,
-    ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams, Turn as AppTurn,
-    TurnDiffUpdatedNotification, TurnInterruptParams, TurnStartParams, UserInput,
+    Model as AppModel, RateLimitSnapshot as AppRateLimitSnapshot, ReviewTarget,
+    SandboxMode as AppSandboxMode, SandboxPolicy as AppSandboxPolicy, ServerRequest, ThreadItem,
+    ThreadListParams, ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
+    Turn as AppTurn, TurnDiffUpdatedNotification, TurnInterruptParams, TurnStartParams, UserInput,
 };
 use codex_core::config::Config;
 use codex_protocol::config_types::ModeKind;
@@ -196,6 +196,9 @@ struct FallbackPlanState {
 #[derive(Debug, PartialEq, Eq)]
 // Slash-команды, которые распознаются до обычного выполнения промпта.
 enum SessionCommand {
+    Review {
+        instructions: Option<String>,
+    },
     Threads,
     Resume {
         thread_id: Option<String>,

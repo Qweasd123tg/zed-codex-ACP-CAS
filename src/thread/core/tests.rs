@@ -259,6 +259,26 @@ fn parses_fork_command_with_args_for_usage_handling() {
 }
 
 #[test]
+fn parses_review_command_without_instructions() {
+    let prompt: Vec<ContentBlock> = vec!["/review".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Review { instructions: None })
+    );
+}
+
+#[test]
+fn parses_review_command_with_custom_instructions() {
+    let prompt: Vec<ContentBlock> = vec!["/review focus on migrations".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Review {
+            instructions: Some("focus on migrations".to_string()),
+        })
+    );
+}
+
+#[test]
 fn parses_archive_command_with_query() {
     let prompt: Vec<ContentBlock> = vec!["/archive 019d-test".into()];
     assert_eq!(
@@ -332,12 +352,13 @@ fn parses_plan_command_with_unknown_single_word_as_prompt() {
 }
 
 #[test]
-fn builtin_commands_include_new_and_fork() {
+fn builtin_commands_include_review_new_and_fork() {
     let names = builtin_commands()
         .into_iter()
         .map(|command| command.name)
         .collect::<Vec<_>>();
 
+    assert!(names.contains(&"review".to_string()));
     assert!(names.contains(&"new".to_string()));
     assert!(names.contains(&"fork".to_string()));
 }

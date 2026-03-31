@@ -115,6 +115,8 @@ bash script/build_local_release.sh
    - какой UX без этого недоступен;
    - стоит ли вообще держать partial support в основном коде.
 6. Если принято оставить только задел на будущее, prefer explicit unsupported/rejected path + backup/draft notes вместо частично работающей runtime-ветки.
+7. Для user-facing slash UX prefer один канонический surfaced entrypoint на workflow. Если picker или многошаговый flow уже закрывает сценарий, не плодить несколько почти одинаковых slash-команд без сильной причины.
+8. Если старые slash-команды все еще нужны как запасной путь, prefer hidden compatibility aliases вместо лишнего шума в `builtin_commands`, README и основном UX.
 
 ## Тестирование
 Предпочтительный формат: unit-тесты рядом с реализацией (`#[cfg(test)]`).

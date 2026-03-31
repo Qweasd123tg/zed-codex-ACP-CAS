@@ -1,7 +1,7 @@
 //! Основной конвейер выполнения промпта: парсинг команд, старт turn и маппинг завершения.
 
 use super::{
-    Error, ModeKind, PLAN_IMPLEMENTATION_PROMPT, SessionCommand, StopReason, Thread,
+    Error, ModeKind, PLAN_IMPLEMENTATION_PROMPT, ReviewTarget, SessionCommand, StopReason, Thread,
     notification_dispatch, prompt_commands, turn_execution, turn_notify,
 };
 use agent_client_protocol::ContentBlock;
@@ -14,6 +14,7 @@ impl Thread {
     ) -> Result<StopReason, Error> {
         let command = prompt_commands::parse_session_command(&request.prompt);
         let mut plan_prompt: Option<String> = None;
+        let mut review_target: Option<ReviewTarget> = None;
         let mut inner = self.inner.lock().await;
         if should_drain_background_notifications(command.as_ref()) {
             notification_dispatch::drain_background_notifications(&mut inner).await?;
@@ -26,6 +27,9 @@ impl Thread {
                 prompt_commands::CommandDispatchOutcome::PlanPrompt(prompt) => {
                     plan_prompt = Some(prompt);
                 }
+                prompt_commands::CommandDispatchOutcome::ReviewStart(target) => {
+                    review_target = Some(target);
+                }
             }
         }
 
@@ -37,6 +41,16 @@ impl Thread {
                 )
                 .await;
             return Ok(StopReason::EndTurn);
+        }
+
+        if let Some(target) = review_target {
+            inner
+                .client
+                .send_agent_text(crate::thread::features::session::review::review_user_hint(
+                    &target,
+                ))
+                .await;
+            return turn_execution::run_review_turn(&mut inner, &self.cancel_tx, target).await;
         }
 
         let input = if let Some(prompt) = plan_prompt.as_ref() {

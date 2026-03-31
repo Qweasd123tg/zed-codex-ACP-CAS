@@ -5,6 +5,7 @@ use crate::thread::{SessionClient, ThreadInner, ThreadItem};
 pub(in crate::thread) mod controls;
 pub(in crate::thread) mod events;
 pub(in crate::thread) mod modes;
+pub(in crate::thread) mod review;
 pub(in crate::thread) mod thread_switch;
 
 // Роутер started-item для session-level событий вне tool-card жизненного цикла.
@@ -15,6 +16,10 @@ pub(in crate::thread) async fn handle_item_started(
     match item {
         ThreadItem::ContextCompaction { .. } => {
             events::mark_context_compaction_started(inner);
+            None
+        }
+        ThreadItem::EnteredReviewMode { review, .. } => {
+            events::emit_entered_review_mode(inner, review).await;
             None
         }
         _ => Some(item),
@@ -29,6 +34,10 @@ pub(in crate::thread) async fn handle_item_completed(
     match item {
         ThreadItem::ContextCompaction { .. } => {
             events::emit_context_compaction_completed(inner).await;
+            None
+        }
+        ThreadItem::ExitedReviewMode { review, .. } => {
+            events::emit_exited_review_mode(inner, review).await;
             None
         }
         _ => Some(item),
