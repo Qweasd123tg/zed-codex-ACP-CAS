@@ -2,15 +2,17 @@
 
 use agent_client_protocol::{
     Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-    SelectedPermissionOutcome, ToolCallId, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, ToolKind,
+    SelectedPermissionOutcome, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use codex_app_server_protocol::{
-    CommandExecutionApprovalDecision, CommandExecutionRequestApprovalParams,
-    CommandExecutionRequestApprovalResponse,
+    AdditionalPermissionProfile, CommandExecutionApprovalDecision,
+    CommandExecutionRequestApprovalParams, CommandExecutionRequestApprovalResponse,
 };
 
-use crate::thread::features::tool_call_ui::title::command_tool_title;
+use crate::thread::features::tool_call_ui::kind::{
+    command_looks_like_verification, extract_inner_shell_command,
+};
 use crate::thread::{ALLOW_ONCE, CANCEL_TURN, REJECT_ONCE, ThreadInner};
 
 // Отправляем решения по подтверждению команд обратно в app-server и зеркалим результат в ACP UI.
@@ -19,18 +21,13 @@ pub(in crate::thread) async fn handle_command_approval(
     request_id: codex_app_server_protocol::RequestId,
     params: CommandExecutionRequestApprovalParams,
 ) -> Result<(), Error> {
-    let command_actions = params.command_actions.clone().unwrap_or_default();
-    let title = params
-        .command
-        .as_deref()
-        .map(|command| command_tool_title(command, &command_actions))
-        .unwrap_or_else(|| "Run command".to_string());
     let tool_call_id = ToolCallId::new(params.item_id.clone());
 
     let mut fields = ToolCallUpdateFields::new()
-        .title(title)
+        .title("Details")
         .kind(ToolKind::Execute)
-        .status(ToolCallStatus::Pending);
+        .status(ToolCallStatus::Pending)
+        .content(command_approval_content(&params));
     if let Some(cwd) = params.cwd.clone() {
         fields = fields.locations(vec![ToolCallLocation::new(cwd)]);
     }
@@ -67,4 +64,176 @@ pub(in crate::thread) async fn handle_command_approval(
             CommandExecutionRequestApprovalResponse { decision },
         )
         .await
+}
+
+fn command_approval_content(
+    params: &CommandExecutionRequestApprovalParams,
+) -> Vec<ToolCallContent> {
+    let body = command_approval_lines(params).join("\n");
+    vec![body.into()]
+}
+
+fn command_approval_lines(params: &CommandExecutionRequestApprovalParams) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    if let Some(reason) = params.reason.as_ref()
+        && !reason.trim().is_empty()
+    {
+        lines.push(indented(reason.trim()));
+    }
+
+    if let Some(command) = params.command.as_ref()
+        && !command.trim().is_empty()
+    {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        let inner_command = extract_inner_shell_command(command);
+        lines.push(indented("Command:"));
+        lines.push(format!("```sh\n{inner_command}\n```"));
+
+        if command_looks_like_verification(&inner_command) {
+            lines.push(indented("This looks like a verification or test command."));
+        }
+    }
+
+    if let Some(cwd) = params.cwd.as_ref() {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(indented(&format!("Working directory: `{}`", cwd.display())));
+    }
+
+    if let Some(network) = params.network_approval_context.as_ref() {
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(indented(&format!(
+            "Requested network access: {}://{}",
+            format!("{:?}", network.protocol).to_ascii_lowercase(),
+            network.host
+        )));
+    }
+
+    if let Some(additional_permissions) = params.additional_permissions.as_ref() {
+        lines.extend(additional_permission_lines(additional_permissions));
+    }
+
+    if let Some(skill_metadata) = params.skill_metadata.as_ref() {
+        lines.push(format!(
+            "Requested by skill: `{}`",
+            skill_metadata.path_to_skills_md.display()
+        ));
+    }
+
+    lines
+}
+
+fn additional_permission_lines(profile: &AdditionalPermissionProfile) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    if let Some(network) = profile.network.as_ref()
+        && let Some(enabled) = network.enabled
+    {
+        lines.push(indented(&format!(
+            "Additional network permission requested: {enabled}"
+        )));
+    }
+
+    if let Some(file_system) = profile.file_system.as_ref() {
+        if let Some(read) = file_system.read.as_ref()
+            && !read.is_empty()
+        {
+            lines.push(indented(&format!(
+                "Additional file system read: {}",
+                read.iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        if let Some(write) = file_system.write.as_ref()
+            && !write.is_empty()
+        {
+            lines.push(indented(&format!(
+                "Additional file system write: {}",
+                write
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+    }
+
+    lines
+}
+
+fn indented(text: &str) -> String {
+    format!("\u{2002}{text}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::command_approval_lines;
+    use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
+
+    #[test]
+    fn command_approval_lines_include_reason_command_and_cwd() {
+        let params: CommandExecutionRequestApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "threadId": "thread_1",
+                "turnId": "turn_1",
+                "itemId": "item_1",
+                "reason": "Need to inspect the workspace",
+                "command": "/bin/bash -lc 'pwd && ls -la'",
+                "cwd": "/tmp/workspace",
+                "commandActions": [
+                    {
+                        "type": "listFiles",
+                        "command": "ls -la",
+                        "path": null
+                    }
+                ]
+            }))
+            .expect("valid command approval params");
+
+        let lines = command_approval_lines(&params);
+        let joined = lines.join("\n");
+        assert!(joined.contains("Need to inspect the workspace"));
+        assert!(joined.contains("```sh"));
+        assert!(joined.contains("pwd && ls -la"));
+        assert!(!joined.contains("/bin/bash -lc"));
+        assert!(joined.contains("Working directory: `/tmp/workspace`"));
+    }
+
+    #[test]
+    fn command_approval_lines_include_network_and_additional_permissions() {
+        let params: CommandExecutionRequestApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "threadId": "thread_1",
+                "turnId": "turn_1",
+                "itemId": "item_1",
+                "command": "curl -I https://example.com",
+                "networkApprovalContext": {
+                    "host": "example.com",
+                    "protocol": "https"
+                },
+                "additionalPermissions": {
+                    "network": { "enabled": true },
+                    "fileSystem": {
+                        "read": ["/tmp/read"],
+                        "write": ["/tmp/write"]
+                    }
+                }
+            }))
+            .expect("valid command approval params");
+
+        let lines = command_approval_lines(&params);
+        let joined = lines.join("\n");
+        assert!(joined.contains("Requested network access: https://example.com"));
+        assert!(joined.contains("Additional network permission requested: true"));
+        assert!(joined.contains("Additional file system read: /tmp/read"));
+        assert!(joined.contains("Additional file system write: /tmp/write"));
+    }
 }

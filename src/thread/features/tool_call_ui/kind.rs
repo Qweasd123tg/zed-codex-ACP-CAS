@@ -66,7 +66,7 @@ pub(in crate::thread) fn command_looks_like_verification(command: &str) -> bool 
         .any(|marker| normalized.contains(marker))
 }
 
-pub(super) fn extract_inner_shell_command(command: &str) -> String {
+pub(in crate::thread) fn extract_inner_shell_command(command: &str) -> String {
     let trimmed = command.trim();
     let Some(parts) = shlex::split(trimmed) else {
         return trimmed.to_string();

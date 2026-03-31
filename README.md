@@ -268,12 +268,13 @@ User-facing documentation stays in this README. Deeper project notes are kept se
 - [docs/thread-feature-map.md](docs/thread-feature-map.md)
 - [AGENTS.md](AGENTS.md)
 
+Current Zed-specific UI caveats are tracked in [docs/upstream-feature-matrix.md](docs/upstream-feature-matrix.md), especially around approval-card layout and command/review/session UX that the adapter alone cannot fully control.
+
 ## Roadmap
 
 Near-term work:
 
 - Surface a clearer `status` view, likely in a selector or lightweight slash command
-- Improve command approval UX so the user can see the actual shell command or a clear preview before approving
 - Keep expanding selector UX carefully where it helps daily use, especially around `status`, `MCP`, `skills`, and `plugins`
 
 Later candidates:

@@ -40,7 +40,7 @@
 | `/review` | `codex-acp-upstream` + `codex` (`review/start`) | `<= 2026-02-18`, `c0b82cc`; локально `2026-03-31` | `[x]` | `[x]` | У форка теперь есть user-facing inline review-flow через один основной entrypoint `/review`. Bare команда открывает ACP picker для uncommitted/base-branch/commit/custom сценариев, а кастомные инструкции задаются через `/review <text>`. |
 | `/init` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[ ]` | Отдельной `/init`-ветки в `src/thread/prompt/commands.rs` нет. |
 | `/logout` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[ ]` | У нас есть только `authenticate`, но нет slash/logout handler. |
-| ACP approvals для command / file change / tool user input | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У форка это идет через `src/thread/core/server_requests.rs` и `src/thread/features/approvals/*`. |
+| ACP approvals для command / file change / tool user input | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У форка это идет через `src/thread/core/server_requests.rs` и `src/thread/features/approvals/*`; для command approval popup теперь surfaced reason, очищенная inner shell-команда, `cwd`, network context и additional permissions. |
 | `RequestPermissions` tool | `codex`, sync в `codex-acp-upstream` | `2026-03-08`, `e6b93841c`; в official adapter попало через `2026-03-13`, `be20828` | `[x]` | `[x]` | У нас есть отдельная typed-ветка `ServerRequest::PermissionsRequestApproval` и ACP popup в `src/thread/features/approvals/permissions.rs`. |
 | `DynamicToolCall` (`item/tool/call`) | `codex`, sync в `codex-acp-upstream` | `2026-02-25`, `a0fd94bde`; в official adapter попало через `2026-03-13`, `be20828` | `[x]` | `[ ]` | В форке была только частичная экспериментальная ветка, но для текущего Zed она не дала достаточной практической отдачи. В runtime-пайплайне поддержку вырезали, а возвращаться к ней имеет смысл только если появится конкретный Zed-side client-native use case. Бэкап-конспект оставлен в `docs/drafts/dynamic-tool-call-backup.md`. |
 | Forwarding warning-сообщений в клиент | `codex-acp-upstream` | `2026-03-05`, `a278432` | `[x]` | `[x]` | В `src/thread/features/notification/mod.rs` теперь поднимаются `ConfigWarning`, `DeprecationNotice` и `WindowsWorldWritableWarning`; текст уходит в ACP-чат через `src/thread/features/notification/events/warnings.rs`. |
@@ -83,9 +83,18 @@
 
 Отдельное UX-направление, которое стоит держать рядом с этим shortlist:
 
-- Более подробное approval-окно для команд. Сейчас для `Run shell command` не хватает surfaced-деталей о том, какая именно команда пойдет в выполнение. Если `Zed`/ACP это позволит, стоит поднимать в approval UI полную команду или хотя бы компактный preview/summary.
 - Чуть богаче selector UX. Помимо текущих `mode` / `permissions` / `context_control`, имеет смысл подумать, что из `status`, `MCP`, `skills`, `plugins` реально стоит surfaced в selector'ах, а что лучше оставить slash-командам или отдельным flows.
 - Для `soft /new` и `/fork` UX уже реализован, но ограничение нужно считать постоянной оговоркой: пока сам `Zed` не научится reset'ить ACP session view, старые сообщения в sidebar останутся видимыми даже после in-place thread switch.
+
+## 4.1 Текущие Ограничения Zed UI
+
+Ниже то, что уже проверено на практике и не стоит пытаться "чинить" только силами адаптера:
+
+- Для ACP tool call у command approval `title` обязателен. Полностью убрать вторую строку заголовка нельзя без client-side изменений в `Zed` или без сомнительных zero-width hacks.
+- `Zed` агрессивно обрезает длинный `title`, поэтому полный `reason` лучше держать в body, а не в заголовке карточки.
+- Внутренний padding и layout approval-card задает сам `Zed`; адаптер может только слегка подправлять текстовое содержимое, но не контролирует нативные отступы контейнера.
+- Если разбивать approval body на несколько ACP content-item'ов, `Zed` рисует между ними разделители. Для code block это выглядит плохо, поэтому command approval body у нас теперь отдается одним markdown-блоком.
+- Верхний label `Run Command` тоже рисует сам клиент по `ToolKind::Execute`; адаптер может менять только вторичный title и содержимое body.
 
 ## 5. Скорее Вторым Эшелоном
 
