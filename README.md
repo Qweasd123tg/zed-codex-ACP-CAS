@@ -88,6 +88,7 @@ Sub-agent and collaboration tool-call rendering:
 - Better startup and reconnect diagnostics
 - Safer turn-start timeout and stale turn-tail cleanup around reconnects
 - Safer history replay fencing for `/undo` and auto-restored session history
+- Less UI freeze risk during `/resume --history` by replaying restored history outside the main session mutex
 
 ## Why Use This Fork
 
@@ -108,6 +109,7 @@ Current strengths of this fork:
 - More robust startup behavior and clearer logging
 - Better session lifecycle handling in ACP clients
 - Less UI freeze risk during `/undo` history rebuilds
+- Less UI freeze risk during `/resume --history` thread switches
 - Better thread titles in lists and resumed sessions
 - Inline review flows backed by native `review/start`
 - Practical in-place thread switching with `/new`, `/fork`, `/resume`, and archive-triggered replacement

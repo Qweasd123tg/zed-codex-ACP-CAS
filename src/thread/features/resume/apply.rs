@@ -1,8 +1,12 @@
 //! Применение выбранного thread: `thread_resume`, sync конфигурации и UI-уведомление.
 
-use agent_client_protocol::{Error, SessionInfoUpdate, SessionUpdate, StopReason};
-use codex_app_server_protocol::ThreadResumeParams;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
+use agent_client_protocol::{Error, SessionInfoUpdate, SessionUpdate, StopReason};
+use codex_app_server_protocol::{ThreadResumeParams, Turn as AppTurn};
+
+use crate::thread::features::collab::CollabAgentLabel;
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::features::session::thread_switch::flush_thread_switch_transport_state;
@@ -10,13 +14,84 @@ use crate::thread::session_lifecycle::{
     load_session_skills_summary_for_cwd, thread_resume_with_startup_retry,
 };
 use crate::thread::session_usage_cache::restore_cached_context_usage;
-use crate::thread::{ContextUsageSource, ThreadInner, replay, session_config, turn_notify};
+use crate::thread::{
+    ContextUsageSource, SessionClient, Thread, ThreadInner, replay, session_config, turn_notify,
+};
+
+enum ResumeApplyOutcome {
+    NoReplay,
+    Replay(ResumeReplayData),
+}
+
+struct ResumeReplayData {
+    client: SessionClient,
+    workspace_cwd: PathBuf,
+    agent_labels: HashMap<String, CollabAgentLabel>,
+    turns: Vec<AppTurn>,
+}
+
+impl Thread {
+    pub(in crate::thread) async fn resume_thread_ext(
+        &self,
+        thread_id: &str,
+        include_history: bool,
+    ) -> Result<StopReason, Error> {
+        let outcome = {
+            let mut inner = self.inner.lock().await;
+            apply_resumed_thread(&mut inner, thread_id, include_history).await?
+        };
+
+        if let ResumeApplyOutcome::Replay(replay_data) = outcome {
+            replay::replay_turns(
+                &replay_data.client,
+                &replay_data.workspace_cwd,
+                &replay_data.agent_labels,
+                replay_data.turns,
+            )
+            .await;
+
+            let mut inner = self.inner.lock().await;
+            inner.history_replay_in_progress = false;
+            turn_notify::notify_config_update(&inner).await;
+        }
+
+        Ok(StopReason::EndTurn)
+    }
+}
 
 pub(in crate::thread) async fn handle_resume_command(
     inner: &mut ThreadInner,
     thread_id: &str,
     include_history: bool,
 ) -> Result<StopReason, Error> {
+    match apply_resumed_thread(inner, thread_id, include_history).await? {
+        ResumeApplyOutcome::NoReplay => {}
+        ResumeApplyOutcome::Replay(replay_data) => {
+            replay::replay_turns(
+                &replay_data.client,
+                &replay_data.workspace_cwd,
+                &replay_data.agent_labels,
+                replay_data.turns,
+            )
+            .await;
+            inner.history_replay_in_progress = false;
+            turn_notify::notify_config_update(inner).await;
+        }
+    }
+    Ok(StopReason::EndTurn)
+}
+
+async fn apply_resumed_thread(
+    inner: &mut ThreadInner,
+    thread_id: &str,
+    include_history: bool,
+) -> Result<ResumeApplyOutcome, Error> {
+    if include_history && inner.history_replay_in_progress {
+        return Err(Error::invalid_params().data(
+            "history replay is still running; wait for it to finish before resuming another thread",
+        ));
+    }
+
     flush_thread_switch_transport_state(inner).await?;
 
     let resume = thread_resume_with_startup_retry(
@@ -94,19 +169,18 @@ pub(in crate::thread) async fn handle_resume_command(
         ))
         .await;
     if include_history {
-        let workspace_cwd = inner.workspace_cwd.clone();
         warm_agent_labels_for_turns(inner, &resume.thread.turns).await;
-        let agent_labels = inner.agent_labels.clone();
-        replay::replay_turns(
-            &inner.client,
-            &workspace_cwd,
-            &agent_labels,
-            resume.thread.turns,
-        )
-        .await;
+        if !resume.thread.turns.is_empty() {
+            inner.history_replay_in_progress = true;
+            return Ok(ResumeApplyOutcome::Replay(ResumeReplayData {
+                client: inner.client.clone(),
+                workspace_cwd: inner.workspace_cwd.clone(),
+                agent_labels: inner.agent_labels.clone(),
+                turns: resume.thread.turns,
+            }));
+        }
     }
 
     turn_notify::notify_config_update(inner).await;
-
-    Ok(StopReason::EndTurn)
+    Ok(ResumeApplyOutcome::NoReplay)
 }

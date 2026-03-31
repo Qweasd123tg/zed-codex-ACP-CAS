@@ -8,18 +8,55 @@ use agent_client_protocol::{
     SelectedPermissionOutcome, StopReason, ToolCallId, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,
 };
-use codex_app_server_protocol::{Thread, ThreadSortKey};
+use codex_app_server_protocol::{Thread as AppThread, ThreadSortKey};
 use serde_json::json;
 use tracing::warn;
 
 use super::common::{format_relative_timestamp, list_all_threads, thread_display_title};
-use crate::thread::{RESUME_CANCEL_OPTION_ID, ThreadInner};
+use crate::thread::{RESUME_CANCEL_OPTION_ID, Thread, ThreadInner};
+
+enum ResumeSelection {
+    Stop(StopReason),
+    Thread(String),
+}
+
+impl Thread {
+    pub(in crate::thread) async fn handle_resume_selector_command_ext(
+        &self,
+        query: Option<&str>,
+        include_history: bool,
+    ) -> Result<StopReason, Error> {
+        let selection = {
+            let mut inner = self.inner.lock().await;
+            resolve_resume_selection(&mut inner, query).await?
+        };
+
+        match selection {
+            ResumeSelection::Stop(stop_reason) => Ok(stop_reason),
+            ResumeSelection::Thread(thread_id) => {
+                self.resume_thread_ext(&thread_id, include_history).await
+            }
+        }
+    }
+}
 
 pub(in crate::thread) async fn handle_resume_selector_command(
     inner: &mut ThreadInner,
     query: Option<&str>,
     include_history: bool,
 ) -> Result<StopReason, Error> {
+    match resolve_resume_selection(inner, query).await? {
+        ResumeSelection::Stop(stop_reason) => Ok(stop_reason),
+        ResumeSelection::Thread(thread_id) => {
+            super::apply::handle_resume_command(inner, &thread_id, include_history).await
+        }
+    }
+}
+
+async fn resolve_resume_selection(
+    inner: &mut ThreadInner,
+    query: Option<&str>,
+) -> Result<ResumeSelection, Error> {
     let all_threads = list_all_threads(inner, ThreadSortKey::UpdatedAt, None, None).await?;
 
     if all_threads.is_empty() {
@@ -27,7 +64,7 @@ pub(in crate::thread) async fn handle_resume_selector_command(
             .client
             .send_agent_text("No saved threads found. Create one prompt first.")
             .await;
-        return Ok(StopReason::EndTurn);
+        return Ok(ResumeSelection::Stop(StopReason::EndTurn));
     }
 
     let normalized_query = query
@@ -38,7 +75,7 @@ pub(in crate::thread) async fn handle_resume_selector_command(
     if let Some(query) = normalized_query.as_deref()
         && all_threads.iter().any(|thread| thread.id == query)
     {
-        return super::apply::handle_resume_command(inner, query, include_history).await;
+        return Ok(ResumeSelection::Thread(query.to_string()));
     }
 
     let candidates = if let Some(query) = normalized_query.as_deref() {
@@ -77,29 +114,21 @@ pub(in crate::thread) async fn handle_resume_selector_command(
             )
         };
         inner.client.send_agent_text(message).await;
-        return Ok(StopReason::EndTurn);
+        return Ok(ResumeSelection::Stop(StopReason::EndTurn));
     }
 
     if candidates.len() == 1 {
-        return super::apply::handle_resume_command(inner, &candidates[0].id, include_history)
-            .await;
+        return Ok(ResumeSelection::Thread(candidates[0].id.clone()));
     }
 
-    show_resume_picker(
-        inner,
-        candidates,
-        normalized_query.as_deref(),
-        include_history,
-    )
-    .await
+    show_resume_picker(inner, candidates, normalized_query.as_deref()).await
 }
 
 async fn show_resume_picker(
     inner: &mut ThreadInner,
-    candidates: Vec<Thread>,
+    candidates: Vec<AppThread>,
     query: Option<&str>,
-    include_history: bool,
-) -> Result<StopReason, Error> {
+) -> Result<ResumeSelection, Error> {
     let total = candidates.len();
 
     let title = match query {
@@ -148,20 +177,20 @@ async fn show_resume_picker(
     let selected_option_id = match outcome {
         RequestPermissionOutcome::Cancelled => {
             inner.client.send_agent_text("Resume cancelled.").await;
-            return Ok(StopReason::EndTurn);
+            return Ok(ResumeSelection::Stop(StopReason::EndTurn));
         }
         RequestPermissionOutcome::Selected(SelectedPermissionOutcome { option_id, .. }) => {
             option_id.0.to_string()
         }
         _ => {
             inner.client.send_agent_text("Resume cancelled.").await;
-            return Ok(StopReason::EndTurn);
+            return Ok(ResumeSelection::Stop(StopReason::EndTurn));
         }
     };
 
     if selected_option_id == RESUME_CANCEL_OPTION_ID {
         inner.client.send_agent_text("Resume cancelled.").await;
-        return Ok(StopReason::EndTurn);
+        return Ok(ResumeSelection::Stop(StopReason::EndTurn));
     }
 
     let Some(selected_thread_id) = id_by_option.get(&selected_option_id).cloned() else {
@@ -173,10 +202,10 @@ async fn show_resume_picker(
             .client
             .send_agent_text("Could not resolve selected thread. Run `/resume` again.")
             .await;
-        return Ok(StopReason::EndTurn);
+        return Ok(ResumeSelection::Stop(StopReason::EndTurn));
     };
 
-    super::apply::handle_resume_command(inner, &selected_thread_id, include_history).await
+    Ok(ResumeSelection::Thread(selected_thread_id))
 }
 
 fn next_resume_selector_tool_call_id() -> String {
@@ -187,7 +216,7 @@ fn next_resume_selector_tool_call_id() -> String {
     format!("resume-selector-{nanos}")
 }
 
-fn thread_matches_query(thread: &Thread, query: &str) -> bool {
+fn thread_matches_query(thread: &AppThread, query: &str) -> bool {
     if thread.id.contains(query) {
         return true;
     }
@@ -199,7 +228,7 @@ fn thread_matches_query(thread: &Thread, query: &str) -> bool {
             .is_some_and(|name| name.to_lowercase().contains(&needle))
 }
 
-fn format_resume_option_label(thread: &Thread) -> String {
+fn format_resume_option_label(thread: &AppThread) -> String {
     let branch = thread
         .git_info
         .as_ref()
@@ -216,7 +245,7 @@ fn format_resume_option_label(thread: &Thread) -> String {
     )
 }
 
-fn resume_picker_raw_input(candidates: &[Thread], query: Option<&str>) -> serde_json::Value {
+fn resume_picker_raw_input(candidates: &[AppThread], query: Option<&str>) -> serde_json::Value {
     json!({
         "query": query,
         "count": candidates.len(),
@@ -245,12 +274,12 @@ fn resume_picker_raw_input(candidates: &[Thread], query: Option<&str>) -> serde_
 #[cfg(test)]
 mod tests {
     use super::resume_picker_raw_input;
-    use codex_app_server_protocol::{GitInfo, SessionSource, Thread, ThreadStatus};
+    use codex_app_server_protocol::{GitInfo, SessionSource, Thread as AppThread, ThreadStatus};
     use std::path::PathBuf;
 
     #[test]
     fn raw_input_keeps_full_preview_text() {
-        let thread = Thread {
+        let thread = AppThread {
             id: "019-test".to_string(),
             preview: "line one\n\nline   two".to_string(),
             ephemeral: false,

@@ -13,6 +13,13 @@ impl Thread {
         request: agent_client_protocol::PromptRequest,
     ) -> Result<StopReason, Error> {
         let command = prompt_commands::parse_session_command(&request.prompt);
+        let resume_request = match &command {
+            Some(SessionCommand::Resume {
+                thread_id,
+                include_history,
+            }) => Some((thread_id.clone(), *include_history)),
+            _ => None,
+        };
         let undo_turns = match &command {
             Some(SessionCommand::Undo { num_turns }) => Some(*num_turns),
             _ => None,
@@ -20,9 +27,6 @@ impl Thread {
         let mut plan_prompt: Option<String> = None;
         let mut review_target: Option<ReviewTarget> = None;
         let mut inner = self.inner.lock().await;
-        if should_drain_background_notifications(command.as_ref()) {
-            notification_dispatch::drain_background_notifications(&mut inner).await?;
-        }
         if inner.history_replay_in_progress {
             inner
                 .client
@@ -31,6 +35,15 @@ impl Thread {
                 )
                 .await;
             return Ok(StopReason::EndTurn);
+        }
+        if should_drain_background_notifications(command.as_ref()) {
+            notification_dispatch::drain_background_notifications(&mut inner).await?;
+        }
+        if let Some((thread_id, include_history)) = resume_request {
+            drop(inner);
+            return self
+                .handle_resume_selector_command_ext(thread_id.as_deref(), include_history)
+                .await;
         }
         if let Some(num_turns) = undo_turns {
             drop(inner);
