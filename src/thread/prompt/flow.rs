@@ -88,7 +88,8 @@ impl Thread {
                     &target,
                 ))
                 .await;
-            return turn_execution::run_review_turn(&mut inner, &self.cancel_tx, target).await;
+            drop(inner);
+            return self.run_review_turn_ext(target).await;
         }
 
         let input = if let Some(prompt) = plan_prompt.as_ref() {
@@ -105,13 +106,11 @@ impl Thread {
         } else {
             inner.collaboration_mode_kind
         };
-        let stop_reason = turn_execution::run_single_turn(
-            &mut inner,
-            &self.cancel_tx,
-            input,
-            collaboration_mode_kind,
-        )
-        .await?;
+        drop(inner);
+        let stop_reason = self
+            .run_single_turn_ext(input, collaboration_mode_kind)
+            .await?;
+        let mut inner = self.inner.lock().await;
 
         if stop_reason == StopReason::EndTurn
             && collaboration_mode_kind == ModeKind::Plan
@@ -138,13 +137,10 @@ impl Thread {
                         .client
                         .send_agent_text("Switching to default mode and implementing the plan.")
                         .await;
-                    return turn_execution::run_single_turn(
-                        &mut inner,
-                        &self.cancel_tx,
-                        implementation_input,
-                        ModeKind::Default,
-                    )
-                    .await;
+                    drop(inner);
+                    return self
+                        .run_single_turn_ext(implementation_input, ModeKind::Default)
+                        .await;
                 }
             }
         }

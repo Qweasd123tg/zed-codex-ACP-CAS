@@ -3,11 +3,13 @@
 use super::{
     Error, ModeKind, PLAN_IMPLEMENTATION_NO_OPTION_ID, PLAN_IMPLEMENTATION_TITLE,
     PLAN_IMPLEMENTATION_TOOL_CALL_ID, PLAN_IMPLEMENTATION_YES_OPTION_ID, PermissionOption,
-    PermissionOptionKind, RequestPermissionOutcome, SelectedPermissionOutcome, StopReason,
+    PermissionOptionKind, RequestPermissionOutcome, SelectedPermissionOutcome, StopReason, Thread,
     ThreadInner, ToolCallId, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     TurnInterruptParams, TurnStartParams, UserInput, features::plan, notification_dispatch,
 };
-use codex_app_server_protocol::{ReviewDelivery, ReviewStartParams, ReviewTarget};
+use codex_app_server_protocol::{
+    JSONRPCMessage, ReviewDelivery, ReviewStartParams, ReviewTarget, ServerRequest,
+};
 
 use tracing::info;
 
@@ -63,104 +65,143 @@ async fn prepare_started_turn(
     plan::initialize_fallback_plan_for_turn(inner, turn_id, collaboration_mode_kind).await;
 }
 
-async fn drive_active_turn(
-    inner: &mut ThreadInner,
-    cancel_tx: &tokio::sync::watch::Sender<u64>,
-    turn_id: String,
-) -> Result<StopReason, Error> {
-    let mut interrupted = false;
-    let mut cancel_rx = cancel_tx.subscribe();
+impl Thread {
+    pub(super) async fn run_single_turn_ext(
+        &self,
+        input: Vec<UserInput>,
+        collaboration_mode_kind: ModeKind,
+    ) -> Result<StopReason, Error> {
+        let turn_id = {
+            let mut inner = self.inner.lock().await;
+            inner.sync_sandbox_mode_from_policy("run_single_turn");
+            let thread_id = inner.thread_id.clone();
+            let model = inner.current_model.clone();
+            let effort = inner.reasoning_effort;
+            let approval_policy = inner.approval_policy;
+            let sandbox_policy = inner.sandbox_policy.clone();
+            let collaboration_mode =
+                plan::collaboration_mode_for_turn(collaboration_mode_kind, &model, effort);
+            let turn_response = inner
+                .app
+                .turn_start(TurnStartParams {
+                    thread_id,
+                    input,
+                    model: Some(model),
+                    effort: Some(effort),
+                    approval_policy: Some(approval_policy),
+                    sandbox_policy: Some(sandbox_policy),
+                    collaboration_mode,
+                    ..Default::default()
+                })
+                .await?;
 
-    loop {
-        let watchdog = tokio::time::sleep(TURN_MESSAGE_POLL_INTERVAL);
-        tokio::pin!(watchdog);
-        tokio::select! {
-            result = cancel_rx.changed() => {
-                if result.is_ok() && !interrupted
-                    && let Some(active_turn_id) = inner.active_turn_id.clone()
-                {
-                    let thread_id = inner.thread_id.clone();
-                    drop(inner.app.turn_interrupt(TurnInterruptParams {
-                        thread_id,
-                        turn_id: active_turn_id,
-                    }).await);
-                    interrupted = true;
+            let turn_id = turn_response.turn.id;
+            prepare_started_turn(&mut inner, &turn_id, collaboration_mode_kind).await;
+            turn_id
+        };
+
+        self.drive_active_turn_ext(turn_id).await
+    }
+
+    pub(super) async fn run_review_turn_ext(
+        &self,
+        target: ReviewTarget,
+    ) -> Result<StopReason, Error> {
+        let turn_id = {
+            let mut inner = self.inner.lock().await;
+            inner.sync_sandbox_mode_from_policy("run_review_turn");
+            let collaboration_mode_kind = inner.collaboration_mode_kind;
+            let thread_id = inner.thread_id.clone();
+            let review_response = inner
+                .app
+                .review_start(ReviewStartParams {
+                    thread_id,
+                    target,
+                    delivery: Some(ReviewDelivery::Inline),
+                })
+                .await?;
+
+            let turn_id = review_response.turn.id;
+            prepare_started_turn(&mut inner, &turn_id, collaboration_mode_kind).await;
+            turn_id
+        };
+
+        self.drive_active_turn_ext(turn_id).await
+    }
+
+    async fn drive_active_turn_ext(&self, turn_id: String) -> Result<StopReason, Error> {
+        let mut interrupted = false;
+        let mut cancel_rx = self.cancel_tx.subscribe();
+
+        loop {
+            let watchdog = tokio::time::sleep(TURN_MESSAGE_POLL_INTERVAL);
+            tokio::pin!(watchdog);
+            tokio::select! {
+                result = cancel_rx.changed() => {
+                    if result.is_ok() && !interrupted {
+                        let mut inner = self.inner.lock().await;
+                        if let Some(active_turn_id) = inner.active_turn_id.clone() {
+                            let thread_id = inner.thread_id.clone();
+                            drop(inner.app.turn_interrupt(TurnInterruptParams {
+                                thread_id,
+                                turn_id: active_turn_id,
+                            }).await);
+                            interrupted = true;
+                        }
+                    }
                 }
-            }
-            _ = &mut watchdog => {
-                if let Some(stop_reason) = maybe_abort_reconnect_stall(inner).await {
-                    finalize_turn_and_drain(inner, &turn_id).await?;
-                    return Ok(stop_reason);
+                _ = &mut watchdog => {
+                    let stop_reason = {
+                        let mut inner = self.inner.lock().await;
+                        maybe_abort_reconnect_stall(&mut inner).await
+                    };
+                    if let Some(stop_reason) = stop_reason {
+                        let mut inner = self.inner.lock().await;
+                        finalize_turn_and_drain(&mut inner, &turn_id).await?;
+                        return Ok(stop_reason);
+                    }
                 }
-            }
-            message = inner.app.next_message() => {
-                let message = message?;
-                if let Some(stop_reason) = notification_dispatch::handle_message(inner, message, &turn_id).await? {
-                    finalize_turn_and_drain(inner, &turn_id).await?;
-                    return Ok(stop_reason);
-                }
-                if let Some(stop_reason) = maybe_abort_reconnect_stall(inner).await {
-                    finalize_turn_and_drain(inner, &turn_id).await?;
-                    return Ok(stop_reason);
+                message = async {
+                    let mut inner = self.inner.lock().await;
+                    inner.app.next_message().await
+                } => {
+                    let message = message?;
+                    if let Some(stop_reason) = self.handle_active_turn_message(message, &turn_id).await? {
+                        let mut inner = self.inner.lock().await;
+                        finalize_turn_and_drain(&mut inner, &turn_id).await?;
+                        return Ok(stop_reason);
+                    }
+                    let stop_reason = {
+                        let mut inner = self.inner.lock().await;
+                        maybe_abort_reconnect_stall(&mut inner).await
+                    };
+                    if let Some(stop_reason) = stop_reason {
+                        let mut inner = self.inner.lock().await;
+                        finalize_turn_and_drain(&mut inner, &turn_id).await?;
+                        return Ok(stop_reason);
+                    }
                 }
             }
         }
     }
-}
 
-// Отправляем turn-start один раз, затем стримим item-уведомления до прихода финального статуса.
-pub(super) async fn run_single_turn(
-    inner: &mut ThreadInner,
-    cancel_tx: &tokio::sync::watch::Sender<u64>,
-    input: Vec<UserInput>,
-    collaboration_mode_kind: ModeKind,
-) -> Result<StopReason, Error> {
-    inner.sync_sandbox_mode_from_policy("run_single_turn");
-    let thread_id = inner.thread_id.clone();
-    let model = inner.current_model.clone();
-    let effort = inner.reasoning_effort;
-    let approval_policy = inner.approval_policy;
-    let sandbox_policy = inner.sandbox_policy.clone();
-    let collaboration_mode =
-        plan::collaboration_mode_for_turn(collaboration_mode_kind, &model, effort);
-    let turn_response = inner
-        .app
-        .turn_start(TurnStartParams {
-            thread_id,
-            input,
-            model: Some(model),
-            effort: Some(effort),
-            approval_policy: Some(approval_policy),
-            sandbox_policy: Some(sandbox_policy),
-            collaboration_mode,
-            ..Default::default()
-        })
-        .await?;
+    async fn handle_active_turn_message(
+        &self,
+        message: JSONRPCMessage,
+        turn_id: &str,
+    ) -> Result<Option<StopReason>, Error> {
+        if let JSONRPCMessage::Request(request) = &message
+            && let Ok(ServerRequest::FileChangeRequestApproval { request_id, params }) =
+                ServerRequest::try_from(request.clone())
+        {
+            self.handle_file_change_approval_request_ext(request_id, params)
+                .await?;
+            return Ok(None);
+        }
 
-    let turn_id = turn_response.turn.id;
-    prepare_started_turn(inner, &turn_id, collaboration_mode_kind).await;
-    drive_active_turn(inner, cancel_tx, turn_id).await
-}
-
-pub(super) async fn run_review_turn(
-    inner: &mut ThreadInner,
-    cancel_tx: &tokio::sync::watch::Sender<u64>,
-    target: ReviewTarget,
-) -> Result<StopReason, Error> {
-    inner.sync_sandbox_mode_from_policy("run_review_turn");
-    let collaboration_mode_kind = inner.collaboration_mode_kind;
-    let review_response = inner
-        .app
-        .review_start(ReviewStartParams {
-            thread_id: inner.thread_id.clone(),
-            target,
-            delivery: Some(ReviewDelivery::Inline),
-        })
-        .await?;
-
-    let turn_id = review_response.turn.id;
-    prepare_started_turn(inner, &turn_id, collaboration_mode_kind).await;
-    drive_active_turn(inner, cancel_tx, turn_id).await
+        let mut inner = self.inner.lock().await;
+        notification_dispatch::handle_message(&mut inner, message, turn_id).await
+    }
 }
 
 pub(super) async fn prompt_plan_implementation(inner: &mut ThreadInner) -> Result<bool, Error> {

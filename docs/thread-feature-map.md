@@ -165,6 +165,7 @@ flowchart LR
 - `src/thread/features/approvals/file_change.rs`
 - `src/thread/features/approvals/user_input.rs`
 - `src/thread/features/approvals/permissions.rs`
+- `src/thread/turn/execution.rs`
 
 5. Изменение session/config, archive и thread title:
 - `src/thread/session/config/mod.rs`
@@ -244,6 +245,13 @@ flowchart LR
 - `src/thread/turn/diff.rs`
 
 Риск: repeated disk I/O и ACP snapshot/writeback churn на одном и том же path. Даже до большого refactor здесь важно не читать, prime-ить и writeback-ить один и тот же файл по нескольку раз в рамках одного `FileChange` item, иначе multi-hunk edits начинают выглядеть как локальный фриз.
+
+### Approval wait paths
+- `src/thread/features/approvals/file_change.rs`
+- `src/thread/core/server_requests.rs`
+- `src/thread/turn/execution.rs`
+
+Риск: держать `ThreadInner` mutex через весь `request_permission(...)` think-time пользователя. Для file-change approval текущая безопасная граница теперь такая: snapshot prompt payload под lock, сам ACP permission prompt вне lock, потом короткий relock только на ответ в `app-server`.
 
 ### Collab/Subagents
 - `src/thread/features/collab/*`

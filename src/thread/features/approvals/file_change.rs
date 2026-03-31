@@ -11,25 +11,106 @@ use codex_app_server_protocol::{
 
 use crate::thread::features::file::changes::should_prompt_file_change_approval;
 use crate::thread::{
-    ALLOW_ONCE, REJECT_ONCE, ThreadInner, file_change_to_preview_diff, file_change_tool_location,
+    ALLOW_ONCE, REJECT_ONCE, SessionClient, Thread, ThreadInner, file_change_to_preview_diff,
+    file_change_tool_location,
 };
+
+enum PreparedFileChangeApproval {
+    Immediate {
+        request_id: codex_app_server_protocol::RequestId,
+        decision: FileChangeApprovalDecision,
+    },
+    Pending(Box<FileChangeApprovalPending>),
+}
+
+struct FileChangeApprovalPending {
+    client: SessionClient,
+    request_id: codex_app_server_protocol::RequestId,
+    tool_call: ToolCallUpdate,
+    options: Vec<PermissionOption>,
+}
+
+impl Thread {
+    pub(in crate::thread) async fn handle_file_change_approval_request_ext(
+        &self,
+        request_id: codex_app_server_protocol::RequestId,
+        params: FileChangeRequestApprovalParams,
+    ) -> Result<(), Error> {
+        let prepared = {
+            let inner = self.inner.lock().await;
+            prepare_file_change_approval(&inner, request_id, params)
+        };
+
+        let (request_id, decision) = match prepared {
+            PreparedFileChangeApproval::Immediate {
+                request_id,
+                decision,
+            } => (request_id, decision),
+            PreparedFileChangeApproval::Pending(pending) => {
+                let outcome = pending
+                    .client
+                    .request_permission(pending.tool_call, pending.options)
+                    .await?;
+                (
+                    pending.request_id,
+                    file_change_approval_decision_from_outcome(outcome),
+                )
+            }
+        };
+
+        let mut inner = self.inner.lock().await;
+        inner
+            .app
+            .send_file_change_approval_response(
+                request_id,
+                FileChangeRequestApprovalResponse { decision },
+            )
+            .await
+    }
+}
 
 pub(in crate::thread) async fn handle_file_change_approval(
     inner: &mut ThreadInner,
     request_id: codex_app_server_protocol::RequestId,
     params: FileChangeRequestApprovalParams,
 ) -> Result<(), Error> {
+    let (request_id, decision) = match prepare_file_change_approval(inner, request_id, params) {
+        PreparedFileChangeApproval::Immediate {
+            request_id,
+            decision,
+        } => (request_id, decision),
+        PreparedFileChangeApproval::Pending(pending) => {
+            let outcome = pending
+                .client
+                .request_permission(pending.tool_call, pending.options)
+                .await?;
+            (
+                pending.request_id,
+                file_change_approval_decision_from_outcome(outcome),
+            )
+        }
+    };
+
+    inner
+        .app
+        .send_file_change_approval_response(
+            request_id,
+            FileChangeRequestApprovalResponse { decision },
+        )
+        .await
+}
+
+fn prepare_file_change_approval(
+    inner: &ThreadInner,
+    request_id: codex_app_server_protocol::RequestId,
+    params: FileChangeRequestApprovalParams,
+) -> PreparedFileChangeApproval {
     if !should_prompt_file_change_approval(inner.collaboration_mode_kind, inner.edit_approval_mode)
     {
-        return inner
-            .app
-            .send_file_change_approval_response(
-                request_id,
-                FileChangeRequestApprovalResponse {
-                    decision: FileChangeApprovalDecision::Accept,
-                },
-            )
-            .await;
+        return PreparedFileChangeApproval::Immediate {
+            request_id,
+            decision: FileChangeApprovalDecision::Accept,
+        };
     }
 
     let tool_call_id = ToolCallId::new(params.item_id.clone());
@@ -94,27 +175,30 @@ pub(in crate::thread) async fn handle_file_change_approval(
     };
     content.extend(details.into_iter().map(Into::into));
 
-    let outcome = inner
-        .client
-        .request_permission(
-            ToolCallUpdate::new(
-                tool_call_id,
-                ToolCallUpdateFields::new()
-                    .title(title)
-                    .kind(ToolKind::Edit)
-                    .status(ToolCallStatus::Pending)
-                    .locations(tool_locations)
-                    .content(content)
-                    .raw_input(serde_json::to_value(&params).ok()),
-            ),
-            vec![
-                PermissionOption::new(ALLOW_ONCE, "Yes", PermissionOptionKind::AllowOnce),
-                PermissionOption::new(REJECT_ONCE, "No", PermissionOptionKind::RejectOnce),
-            ],
-        )
-        .await?;
+    PreparedFileChangeApproval::Pending(Box::new(FileChangeApprovalPending {
+        client: inner.client.clone(),
+        request_id,
+        tool_call: ToolCallUpdate::new(
+            tool_call_id,
+            ToolCallUpdateFields::new()
+                .title(title)
+                .kind(ToolKind::Edit)
+                .status(ToolCallStatus::Pending)
+                .locations(tool_locations)
+                .content(content)
+                .raw_input(serde_json::to_value(&params).ok()),
+        ),
+        options: vec![
+            PermissionOption::new(ALLOW_ONCE, "Yes", PermissionOptionKind::AllowOnce),
+            PermissionOption::new(REJECT_ONCE, "No", PermissionOptionKind::RejectOnce),
+        ],
+    }))
+}
 
-    let decision = match outcome {
+fn file_change_approval_decision_from_outcome(
+    outcome: RequestPermissionOutcome,
+) -> FileChangeApprovalDecision {
+    match outcome {
         RequestPermissionOutcome::Cancelled => FileChangeApprovalDecision::Decline,
         RequestPermissionOutcome::Selected(SelectedPermissionOutcome { option_id, .. }) => {
             match option_id.0.as_ref() {
@@ -123,13 +207,5 @@ pub(in crate::thread) async fn handle_file_change_approval(
             }
         }
         _ => FileChangeApprovalDecision::Decline,
-    };
-
-    inner
-        .app
-        .send_file_change_approval_response(
-            request_id,
-            FileChangeRequestApprovalResponse { decision },
-        )
-        .await
+    }
 }
