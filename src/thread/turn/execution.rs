@@ -11,7 +11,8 @@ use super::{
     TurnInterruptParams, TurnStartParams, UserInput, features::plan, notification_dispatch,
 };
 use codex_app_server_protocol::{
-    JSONRPCMessage, ReviewDelivery, ReviewStartParams, ReviewTarget, ServerRequest,
+    JSONRPCMessage, ReviewDelivery, ReviewStartParams, ReviewTarget, ServerNotification,
+    ServerRequest, ThreadItem,
 };
 
 use tracing::info;
@@ -252,6 +253,33 @@ impl Thread {
         message: JSONRPCMessage,
         turn_id: &str,
     ) -> Result<ActiveTurnMessageOutcome, Error> {
+        if let JSONRPCMessage::Notification(notification) = &message
+            && let Ok(ServerNotification::ItemStarted(payload)) =
+                ServerNotification::try_from(notification.clone())
+            && payload.turn_id == turn_id
+            && let ThreadItem::FileChange {
+                id,
+                changes,
+                status,
+            } = payload.item
+        {
+            let snapshot = {
+                let mut inner = self.inner.lock().await;
+                plan::maybe_advance_fallback_plan(
+                    &mut inner,
+                    turn_id,
+                    crate::thread::FallbackPlanPhase::Implementing,
+                )
+                .await;
+                crate::thread::features::file::events::prepare_file_change_started_snapshot(
+                    &mut inner, id, changes, status,
+                )
+            };
+            crate::thread::features::file::events::emit_file_change_started_snapshot(snapshot)
+                .await;
+            return Ok(ActiveTurnMessageOutcome::Continue);
+        }
+
         if let JSONRPCMessage::Request(request) = &message
             && let Ok(ServerRequest::CommandExecutionRequestApproval { request_id, params }) =
                 ServerRequest::try_from(request.clone())
