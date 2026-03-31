@@ -54,6 +54,8 @@
 | `/threads` | форк | `2026-02-25`, `e1ace61b` | `[ ]` | `[x]` | Реализовано в `src/thread/features/resume/listing.rs`. |
 | `/resume` с picker-ом по текущему workspace | форк + `thread/list` / `thread/resume` | `2026-02-25`, `e1ace61b`; UX/transport стабилизация `2026-03-29`, локально | `[ ]` | `[x]` | Реализовано через `src/thread/features/resume/selector.rs` и `apply.rs`; picker теперь paginated, с полным raw input, уникальным `ToolCallId` и cleanup transport-хвоста при переключении. |
 | `/resume --no-history` | форк | `2026-02-25`, `b5cc35c3` | `[ ]` | `[x]` | Позволяет переключить context без replay старой ленты ACP. |
+| `/new` (`soft-new`) | форк + `thread/start` | локально, `2026-03-31` | `[ ]` | `[x]` | Стартует fresh backend-thread внутри той же ACP-сессии и сбрасывает runtime session state. Ограничение текущего `Zed`: sidebar history не очищается, потому что это не client-side `new_session`, а in-place thread switch. |
+| `/fork` | `codex` (`thread/fork`) + форк | локально, `2026-03-31` | `[ ]` | `[x]` | Форкает текущий materialized backend-thread через `thread/fork` и переводит текущую ACP-сессию на forked thread. Sidebar history тоже остается видимой, потому что `Zed` не делает visual reset для in-place thread switch. |
 | `/archive [partial_id]`, `/unarchive [partial_id]` | `codex` (`thread/archive`, `thread/unarchive`) + форк | нативные RPC есть в `codex`; ACP-ветка форка добавлена локально `2026-03-29` | `[ ]` | `[x]` | `/archive` скрывает тред из обычных списков без hard delete, `/unarchive` возвращает archived тред обратно. Если архивируется текущий активный тред, форк сразу поднимает fresh backend-thread под той же ACP-сессией. Для неоднозначных query archive/unarchive используют picker с полным `raw_input`, как `/resume`. |
 | `/rename <name>` | `codex` (`set_thread_name`) + форк | нативный op есть в `codex`; ACP-ветка форка добавлена локально `2026-03-29` | `[ ]` | `[x]` | Использует `thread/name/set`, сразу обновляет `SessionInfoUpdate` в ACP и поднимает `thread.name` в `/threads` и `/resume`. |
 | `ACP_DISABLE_AUTO_RESTORE=1` для ручного restore-flow | форк | `2026-03-29`, локально | `[ ]` | `[x]` | Capability `load_session/resume_session` остаются видимыми для Zed, но внутри `src/codex_agent.rs` automatic backend-restore заменяется на fresh backend-thread; старый диалог подтягивается вручную через `/resume`. |
@@ -72,17 +74,33 @@
 | `initialize` возвращает `codex_home` | `codex` | `2026-03-24`, `24c4ecaaa` | `[ ]` | В нашем мосте это сейчас не surfaced наружу. |
 | ChatGPT device-code login в app-server | `codex` | `2026-03-27`, `47a9e2e08` | `[ ]` | У форка авторизация пока завязана на существующий login flow, без нового server-side device-code пути. |
 
-## 4. Что Имеет Смысл Брать Следующим
+## 4. Что Стоит Подумать Всерьез
 
-Приоритетно выглядит такой порядок:
+На текущем этапе для форка под `Zed` разумно держать такой shortlist:
 
-1. `close_session`, потому что это чистый parity-gap с официальным адаптером и понятный ACP-level контракт.
-2. Довести MCP passthrough до полной parity-ветки, если потребуется поддержка ACP `sse` или отдельный UX для MCP auth/status.
-3. Документирование reconnect stall-guard и связанной turn-логики в архитектурной карте, чтобы docs не отставали от кода.
-4. Добавить adapter-level конфиг для отключения slash-команд: выключать и `AvailableCommandsUpdate`, и ранний slash-парсинг в prompt-flow. Разумный первый этап: локальный startup-флаг адаптера; расширение общего `codex-core` config имеет смысл только если эта настройка действительно нужна шире форка.
+1. `review` / `review-branch` / `review-commit` как отдельный режим работы, а не только replay already-existing review state.
+2. `status` в selector или как легкую slash-команду с коротким текстовым дампом: модель, approvals, sandbox/mode, usage, thread/session identity.
+3. `/ps`, но только если удастся показать это не уродливо: либо как аккуратный ACP-card/listing flow, либо как понятный status-pane сценарий, а не как сырой шумный dump.
 
-## 5. Что Пока Не Приоритетно
+Отдельное UX-направление, которое стоит держать рядом с этим shortlist:
 
-- `DynamicToolCall`: потенциал есть как у моста к client-side/native UX, но для текущего Zed нет достаточно сильной surfaced-поверхности, чтобы держать даже partial runtime-support в основном коде.
-- Возвращаться к `DynamicToolCall` имеет смысл только если появится конкретный Zed-side use case: например client-native picker, structured editor context или другой интерактивный UI, который нельзя нормально закрыть текущими ACP primitives.
-- Для такого возврата сохранен backup-конспект в `docs/drafts/dynamic-tool-call-backup.md`.
+- Более подробное approval-окно для команд. Сейчас для `Run shell command` не хватает surfaced-деталей о том, какая именно команда пойдет в выполнение. Если `Zed`/ACP это позволит, стоит поднимать в approval UI полную команду или хотя бы компактный preview/summary.
+- Чуть богаче selector UX. Помимо текущих `mode` / `permissions` / `context_control`, имеет смысл подумать, что из `status`, `MCP`, `skills`, `plugins` реально стоит surfaced в selector'ах, а что лучше оставить slash-командам или отдельным flows.
+- Для `soft /new` и `/fork` UX уже реализован, но ограничение нужно считать постоянной оговоркой: пока сам `Zed` не научится reset'ить ACP session view, старые сообщения в sidebar останутся видимыми даже после in-place thread switch.
+
+## 5. Скорее Вторым Эшелоном
+
+- `/diff`, если появится понятный UX-контракт: показывать git diff рабочего дерева, session-local diff, или оба режима.
+- `/debug-config` как developer-facing dump текущего runtime/config состояния.
+- `/init` как bootstrap-команда для project instructions / `AGENTS.md`-style setup.
+- `thread/read` surfaced UX для preview старых тредов без немедленного `resume`.
+
+## 6. Пока Можно Спокойно Не Трогать
+
+- `close_session`: в текущем `Zed` практическая ценность низкая, пока клиент сам не умеет закрывать ACP-сессию и сразу открывать новую для clean sidebar.
+- `/logout`
+- `fs/watch`
+- override feature flags
+- `codex_home` из `initialize`
+- remote auth through client
+- `DynamicToolCall`: потенциал есть как у моста к client-side/native UX, но для текущего Zed нет достаточно сильной surfaced-поверхности, чтобы держать даже partial runtime-support в основном коде. Возвращаться к нему имеет смысл только если появится конкретный Zed-side use case: например client-native picker, structured editor context или другой интерактивный UI, который нельзя нормально закрыть текущими ACP primitives. Для такого возврата сохранен backup-конспект в `docs/drafts/dynamic-tool-call-backup.md`.

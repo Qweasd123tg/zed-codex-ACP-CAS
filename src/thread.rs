@@ -218,6 +218,12 @@ enum SessionCommand {
     PlanPrompt {
         prompt: String,
     },
+    New {
+        args: Option<String>,
+    },
+    Fork {
+        args: Option<String>,
+    },
     Rename {
         name: Option<String>,
     },

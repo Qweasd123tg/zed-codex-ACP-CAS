@@ -107,6 +107,18 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
+    if let Some(rest) = slash_command_rest(text, "/new") {
+        return Some(SessionCommand::New {
+            args: (!rest.is_empty()).then(|| rest.to_string()),
+        });
+    }
+
+    if let Some(rest) = slash_command_rest(text, "/fork") {
+        return Some(SessionCommand::Fork {
+            args: (!rest.is_empty()).then(|| rest.to_string()),
+        });
+    }
+
     if let Some(rest) = text.strip_prefix("/archive") {
         let query = rest.trim();
         return Some(SessionCommand::Archive {
@@ -198,6 +210,12 @@ pub(super) async fn dispatch_session_command(
             session::modes::handle_plan_mode_command(inner, raw_value, mode).await?,
         )),
         SessionCommand::PlanPrompt { prompt } => Ok(CommandDispatchOutcome::PlanPrompt(prompt)),
+        SessionCommand::New { args } => Ok(CommandDispatchOutcome::Stop(
+            session::controls::handle_new_command(inner, args).await?,
+        )),
+        SessionCommand::Fork { args } => Ok(CommandDispatchOutcome::Stop(
+            session::controls::handle_fork_command(inner, args).await?,
+        )),
         SessionCommand::Rename { name } => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_rename_command(inner, name).await?,
         )),
@@ -226,6 +244,14 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
         .input(AvailableCommandInput::Unstructured(
             UnstructuredCommandInput::new("optional partial thread id and/or --no-history"),
         )),
+        AvailableCommand::new(
+            "new",
+            "Start a fresh backend thread in this ACP session without clearing the current sidebar history",
+        ),
+        AvailableCommand::new(
+            "fork",
+            "Fork the current backend thread and keep working in the fork inside this ACP session",
+        ),
         AvailableCommand::new(
             "archive",
             "Archive the current thread or a matched thread so it disappears from normal lists",
@@ -260,6 +286,18 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
             AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("new thread name")),
         ),
     ]
+}
+
+fn slash_command_rest<'a>(text: &'a str, command: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix(command)?;
+    if rest.is_empty() {
+        return Some(rest);
+    }
+
+    rest.chars()
+        .next()
+        .filter(|ch| ch.is_whitespace())
+        .map(|_| rest.trim())
 }
 
 pub(super) fn format_uri_as_link(name: Option<String>, uri: String) -> String {

@@ -20,7 +20,7 @@ use super::features::plan::{
 };
 use super::features::tool_call_ui::kind::{command_looks_like_verification, command_tool_kind};
 use super::features::tool_call_ui::title::command_tool_title;
-use super::prompt_commands::parse_session_command;
+use super::prompt_commands::{builtin_commands, parse_session_command};
 use super::session_config::{
     current_permission_mode_id, mode_state, parse_reasoning_effort, permission_modes,
     policy_to_mode, to_app_approval, to_app_sandbox_mode,
@@ -219,6 +219,46 @@ fn parses_rename_command_without_name() {
 }
 
 #[test]
+fn parses_new_command_without_args() {
+    let prompt: Vec<ContentBlock> = vec!["/new".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::New { args: None })
+    );
+}
+
+#[test]
+fn parses_new_command_with_args_for_usage_handling() {
+    let prompt: Vec<ContentBlock> = vec!["/new later".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::New {
+            args: Some("later".to_string()),
+        })
+    );
+}
+
+#[test]
+fn parses_fork_command_without_args() {
+    let prompt: Vec<ContentBlock> = vec!["/fork".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Fork { args: None })
+    );
+}
+
+#[test]
+fn parses_fork_command_with_args_for_usage_handling() {
+    let prompt: Vec<ContentBlock> = vec!["/fork now".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Fork {
+            args: Some("now".to_string()),
+        })
+    );
+}
+
+#[test]
 fn parses_archive_command_with_query() {
     let prompt: Vec<ContentBlock> = vec!["/archive 019d-test".into()];
     assert_eq!(
@@ -289,6 +329,17 @@ fn parses_plan_command_with_unknown_single_word_as_prompt() {
             prompt: "maybe".to_string(),
         })
     );
+}
+
+#[test]
+fn builtin_commands_include_new_and_fork() {
+    let names = builtin_commands()
+        .into_iter()
+        .map(|command| command.name)
+        .collect::<Vec<_>>();
+
+    assert!(names.contains(&"new".to_string()));
+    assert!(names.contains(&"fork".to_string()));
 }
 
 #[test]

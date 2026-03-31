@@ -102,5 +102,12 @@ impl Thread {
 }
 
 fn should_drain_background_notifications(command: Option<&SessionCommand>) -> bool {
-    !matches!(command, Some(SessionCommand::Resume { .. }))
+    !matches!(
+        command,
+        Some(
+            SessionCommand::Resume { .. }
+                | SessionCommand::New { .. }
+                | SessionCommand::Fork { .. }
+        )
+    )
 }

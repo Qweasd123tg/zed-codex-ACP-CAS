@@ -71,13 +71,16 @@ Sub-agent and collaboration tool-call rendering:
 - Session commands:
   - `/threads`
   - `/resume`
+  - `/new`
+  - `/fork`
   - `/archive`
   - `/unarchive`
   - `/rename`
   - `/compact`
   - `/undo`
   - `/plan`
-- Better thread title handling for resume/archive/rename flows
+- Better thread title handling for resume/archive/rename/fork flows
+- `soft /new` and in-place `/fork` support for switching backend threads inside one ACP session
 - Tool call cards for command, MCP, web, image, file, and collab branches
 - Practical plan mode support
 - Better startup and reconnect diagnostics
@@ -101,6 +104,7 @@ Current strengths of this fork:
 - More robust startup behavior and clearer logging
 - Better session lifecycle handling in ACP clients
 - Better thread titles in lists and resumed sessions
+- Practical in-place thread switching with `/new`, `/fork`, `/resume`, and archive-triggered replacement
 - Practical plan mode support
 - More complete collab and sub-agent UI mapping
 
@@ -110,6 +114,7 @@ Current gaps:
 - Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
 - Some upstream-style flows are still missing or incomplete, including `close_session`, `/init`, `/logout`, and review-oriented flows
+- `soft /new` and `/fork` switch only the backend thread; current Zed-side ACP behavior still does not clear sidebar chat history for in-place thread switches
 - Some behavior still depends on Zed-side ACP support
 
 ## Limitations
@@ -189,7 +194,7 @@ Requirements:
 Build:
 
 ```bash
-cargo build --release
+bash script/build_local_release.sh
 ```
 
 Run:
@@ -197,6 +202,11 @@ Run:
 ```bash
 ./target/release/codex-acp --help
 ```
+
+The local release script also keeps two rollback-friendly copies in the repository:
+
+- `.build/codex-acp-current`
+- `.build/codex-acp-previous`
 
 ## Development Checks
 
@@ -259,11 +269,26 @@ User-facing documentation stays in this README. Deeper project notes are kept se
 
 Near-term work:
 
-- Finish startup request multiplexing cleanup
-- Keep release automation simple and binary-first
-- Test release artifacts on Windows and macOS
-- Keep reducing ACP and Zed session lifecycle edge cases
-- Keep simplifying docs for non-maintainer users
+- Add real review-oriented flows instead of replay-only review residue
+- Surface a clearer `status` view, likely in a selector or lightweight slash command
+- Improve command approval UX so the user can see the actual shell command or a clear preview before approving
+- Keep expanding selector UX carefully where it helps daily use, especially around `status`, `MCP`, `skills`, and `plugins`
+
+Later candidates:
+
+- `/diff`
+- `/debug-config`
+- `/init`
+- `thread/read`
+
+Not a priority for this fork right now:
+
+- `close_session` as a user-visible focus area in current Zed
+- `/logout`
+- `fs/watch`
+- app-server feature flags plumbing
+- `codex_home` surfacing
+- remote auth through client
 
 ## License
 

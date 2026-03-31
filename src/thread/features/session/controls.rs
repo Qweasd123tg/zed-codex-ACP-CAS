@@ -1,5 +1,5 @@
 //! Обработчики slash-команд управления сессией (без `/resume`).
-//! Сюда вынесены compact/undo/archive/rename ветки.
+//! Сюда вынесены compact/undo/archive/rename/new/fork ветки.
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,9 +16,11 @@ use agent_client_protocol::{
     ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use codex_app_server_protocol::{
-    Thread, ThreadArchiveParams, ThreadCompactStartParams, ThreadRollbackParams,
+    AskForApproval as AppAskForApproval, SandboxPolicy as AppSandboxPolicy, Thread,
+    ThreadArchiveParams, ThreadCompactStartParams, ThreadForkParams, ThreadRollbackParams,
     ThreadSetNameParams, ThreadSortKey, ThreadStartParams, ThreadUnarchiveParams,
 };
+use codex_protocol::openai_models::ReasoningEffort;
 use serde_json::json;
 use tracing::warn;
 
@@ -180,6 +182,85 @@ pub(in crate::thread) async fn handle_unarchive_command(
     Ok(StopReason::EndTurn)
 }
 
+pub(in crate::thread) async fn handle_new_command(
+    inner: &mut ThreadInner,
+    args: Option<String>,
+) -> Result<StopReason, Error> {
+    if args.is_some() {
+        inner.client.send_agent_text("Usage: `/new`").await;
+        return Ok(StopReason::EndTurn);
+    }
+
+    flush_thread_switch_transport_state(inner).await?;
+    start_replacement_thread(inner).await?;
+    inner
+        .client
+        .send_agent_text(
+            "Started a fresh backend thread in this ACP session. Existing sidebar history remains visible because Zed does not clear it for in-place thread switches.",
+        )
+        .await;
+    Ok(StopReason::EndTurn)
+}
+
+pub(in crate::thread) async fn handle_fork_command(
+    inner: &mut ThreadInner,
+    args: Option<String>,
+) -> Result<StopReason, Error> {
+    if args.is_some() {
+        inner.client.send_agent_text("Usage: `/fork`").await;
+        return Ok(StopReason::EndTurn);
+    }
+
+    flush_thread_switch_transport_state(inner).await?;
+    let fork = match inner
+        .app
+        .thread_fork(ThreadForkParams {
+            thread_id: inner.thread_id.clone(),
+            model: Some(inner.current_model.clone()),
+            model_provider: Some(inner.current_model_provider.clone()),
+            cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
+            approval_policy: Some(inner.approval_policy),
+            sandbox: Some(inner.sandbox_mode),
+            config: inner.session_mcp_config_overrides.clone(),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(fork) => fork,
+        Err(error) => {
+            if error.to_string().contains("no rollout found for thread id") {
+                inner
+                    .client
+                    .send_agent_text(
+                        "Current thread is not ready to fork yet. Send at least one prompt first, then try `/fork` again.",
+                    )
+                    .await;
+                return Ok(StopReason::EndTurn);
+            }
+            return Err(error);
+        }
+    };
+
+    apply_thread_switch(
+        inner,
+        fork.thread,
+        fork.approval_policy,
+        fork.sandbox,
+        fork.model,
+        fork.model_provider,
+        fork.reasoning_effort,
+        "handle_fork_command",
+    )
+    .await?;
+    inner
+        .client
+        .send_agent_text(
+            "Forked the current backend thread and switched this ACP session to the fork. Existing sidebar history remains visible because Zed does not clear it for in-place thread switches.",
+        )
+        .await;
+    Ok(StopReason::EndTurn)
+}
+
 pub(in crate::thread) async fn handle_rename_command(
     inner: &mut ThreadInner,
     name: Option<String>,
@@ -230,16 +311,39 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
         })
         .await?;
 
+    apply_thread_switch(
+        inner,
+        start.thread,
+        start.approval_policy,
+        start.sandbox,
+        start.model,
+        start.model_provider,
+        start.reasoning_effort,
+        "start_replacement_thread",
+    )
+    .await
+}
+
+async fn apply_thread_switch(
+    inner: &mut ThreadInner,
+    thread: Thread,
+    approval_policy: AppAskForApproval,
+    sandbox_policy: AppSandboxPolicy,
+    model: String,
+    model_provider: String,
+    reasoning_effort: Option<ReasoningEffort>,
+    sync_reason: &'static str,
+) -> Result<(), Error> {
     flush_thread_switch_transport_state(inner).await?;
 
-    inner.thread_id = start.thread.id.clone();
-    inner.workspace_cwd = start.thread.cwd.clone();
-    inner.approval_policy = start.approval_policy;
-    inner.sandbox_policy = start.sandbox.clone();
-    inner.sandbox_mode = crate::thread::session_config::policy_to_mode(&start.sandbox);
-    inner.sync_sandbox_mode_from_policy("start_replacement_thread");
-    inner.current_model = start.model;
-    inner.current_model_provider = start.model_provider;
+    inner.thread_id = thread.id.clone();
+    inner.workspace_cwd = thread.cwd.clone();
+    inner.approval_policy = approval_policy;
+    inner.sandbox_policy = sandbox_policy.clone();
+    inner.sandbox_mode = crate::thread::session_config::policy_to_mode(&sandbox_policy);
+    inner.sync_sandbox_mode_from_policy(sync_reason);
+    inner.current_model = model;
+    inner.current_model_provider = model_provider;
     inner.compaction_in_progress = false;
     inner.last_used_tokens = None;
     inner.context_window_size = None;
@@ -248,15 +352,15 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
     remember_agent_label(
         &mut inner.agent_labels,
         inner.thread_id.clone(),
-        start.thread.agent_nickname.clone(),
-        start.thread.agent_role.clone(),
+        thread.agent_nickname.clone(),
+        thread.agent_role.clone(),
     );
     inner.carryover_plan_steps = None;
     inner.reset_turn_transient_state();
     inner.reasoning_effort = crate::thread::session_config::resolve_reasoning_effort(
         &inner.models,
         &inner.current_model,
-        start.reasoning_effort,
+        reasoning_effort,
     );
     if let Ok(response) = inner.app.get_account_rate_limits().await {
         inner.account_rate_limits = Some(response.rate_limits);
@@ -265,7 +369,7 @@ async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> 
     inner
         .client
         .send_notification(SessionUpdate::SessionInfoUpdate(
-            SessionInfoUpdate::new().title(thread_display_title(&start.thread)),
+            SessionInfoUpdate::new().title(thread_display_title(&thread)),
         ))
         .await;
     notify_config_update(inner).await;
