@@ -68,15 +68,15 @@ jobs:
         include:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            archive_ext: tar.gz
+            binary_name: codex-acp-linux-x86_64-unknown-linux-gnu
             binary_path: target/x86_64-unknown-linux-gnu/release/codex-acp
           - os: macos-14
             target: aarch64-apple-darwin
-            archive_ext: tar.gz
+            binary_name: codex-acp-macos-aarch64-apple-darwin
             binary_path: target/aarch64-apple-darwin/release/codex-acp
           - os: windows-2022
             target: x86_64-pc-windows-msvc
-            archive_ext: zip
+            binary_name: codex-acp-windows-x86_64-pc-windows-msvc.exe
             binary_path: target/x86_64-pc-windows-msvc/release/codex-acp.exe
 
     steps:
@@ -102,34 +102,20 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package Unix artifact
+      - name: Prepare Unix release files
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          VERSION="${{ needs.get-version.outputs.version }}"
-          TARGET="${{ matrix.target }}"
-          BINARY_NAME="${{ env.BINARY_NAME }}"
-          ARCHIVE_NAME="${BINARY_NAME}-cas-${VERSION}-${TARGET}.tar.gz"
-          SHA_NAME="${ARCHIVE_NAME}.sha256"
+          cp "${{ matrix.binary_path }}" "${{ matrix.binary_name }}"
+          shasum -a 256 "${{ matrix.binary_name }}" > "${{ matrix.binary_name }}.sha256"
 
-          cp "${{ matrix.binary_path }}" "$BINARY_NAME"
-          tar czf "$ARCHIVE_NAME" "$BINARY_NAME" README.md LICENSE
-          shasum -a 256 "$ARCHIVE_NAME" > "$SHA_NAME"
-
-      - name: Package Windows artifact
+      - name: Prepare Windows release files
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = "${{ needs.get-version.outputs.version }}"
-          $target = "${{ matrix.target }}"
-          $binaryName = "${{ env.BINARY_NAME }}"
-          $archiveName = "$binaryName-cas-$version-$target.zip"
-          $shaName = "$archiveName.sha256"
-
-          Copy-Item "${{ matrix.binary_path }}" "$binaryName.exe"
-          Compress-Archive -Path "$binaryName.exe", "README.md", "LICENSE" -DestinationPath $archiveName -Force
-          $hash = (Get-FileHash -Algorithm SHA256 $archiveName).Hash.ToLowerInvariant()
-          "$hash  $archiveName" | Out-File -Encoding ascii $shaName
+          Copy-Item "${{ matrix.binary_path }}" "${{ matrix.binary_name }}"
+          $hash = (Get-FileHash -Algorithm SHA256 "${{ matrix.binary_name }}").Hash.ToLowerInvariant()
+          "$hash  ${{ matrix.binary_name }}" | Out-File -Encoding ascii "${{ matrix.binary_name }}.sha256"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -137,10 +123,9 @@ jobs:
           name: binary-${{ matrix.target }}
           if-no-files-found: error
           path: |
-            *.tar.gz
-            *.zip
-            *.sha256
-          retention-days: 1
+            ${{ matrix.binary_name }}
+            ${{ matrix.binary_name }}.sha256
+          retention-days: 7
 
   create-release:
     name: Create Release
@@ -148,10 +133,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v5
         with:
           path: artifacts
 
@@ -168,8 +150,7 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            artifacts/**/*.tar.gz
-            artifacts/**/*.zip
+            artifacts/**/codex-acp-*
             artifacts/**/*.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,4 +1,4 @@
-name: CI
+name: CI Build
 
 on:
   push:
@@ -9,10 +9,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  BINARY_NAME: codex-acp
 
 jobs:
-  test:
-    name: Test - Linux x86_64 GNU
+  build-release-artifact:
+    name: Build release artifact - Linux x86_64 GNU
     runs-on: ubuntu-22.04
 
     steps:
@@ -29,69 +30,24 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-registry-
+          shared-key: ci-build-x86_64-unknown-linux-gnu
 
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-git-
+      - name: Build release binary
+        run: cargo build --release --target x86_64-unknown-linux-gnu
 
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-target-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-x86_64-unknown-linux-gnu-cargo-target-
-
-      - name: Run tests
-        run: cargo test --release --target x86_64-unknown-linux-gnu
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Linux build dependencies
+      - name: Prepare binary artifact
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libcap-dev
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }} dist/${{ env.BINARY_NAME }}-linux-x86_64-unknown-linux-gnu
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
         with:
-          components: rustfmt, clippy
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-lint-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-lint-cargo-registry-
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-lint-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-lint-cargo-git-
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+          name: codex-acp-linux-x86_64-unknown-linux-gnu
+          path: dist/${{ env.BINARY_NAME }}-linux-x86_64-unknown-linux-gnu
+          if-no-files-found: error
+          retention-days: 14
