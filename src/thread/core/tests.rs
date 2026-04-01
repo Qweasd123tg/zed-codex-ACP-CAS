@@ -219,23 +219,9 @@ fn parses_rename_command_without_name() {
 }
 
 #[test]
-fn parses_new_command_without_args() {
+fn no_longer_parses_new_command() {
     let prompt: Vec<ContentBlock> = vec!["/new".into()];
-    assert_eq!(
-        parse_session_command(&prompt),
-        Some(SessionCommand::New { args: None })
-    );
-}
-
-#[test]
-fn parses_new_command_with_args_for_usage_handling() {
-    let prompt: Vec<ContentBlock> = vec!["/new later".into()];
-    assert_eq!(
-        parse_session_command(&prompt),
-        Some(SessionCommand::New {
-            args: Some("later".to_string()),
-        })
-    );
+    assert_eq!(parse_session_command(&prompt), None);
 }
 
 #[test]
@@ -389,7 +375,7 @@ fn parses_plan_command_with_unknown_single_word_as_prompt() {
 }
 
 #[test]
-fn builtin_commands_include_review_new_and_fork() {
+fn builtin_commands_include_review_and_fork() {
     let names = builtin_commands()
         .into_iter()
         .map(|command| command.name)
@@ -397,7 +383,6 @@ fn builtin_commands_include_review_new_and_fork() {
 
     assert!(names.contains(&"init".to_string()));
     assert!(names.contains(&"review".to_string()));
-    assert!(names.contains(&"new".to_string()));
     assert!(names.contains(&"fork".to_string()));
 }
 

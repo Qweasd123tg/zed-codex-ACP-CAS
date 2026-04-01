@@ -110,12 +110,6 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
-    if let Some(rest) = slash_command_rest(text, "/new") {
-        return Some(SessionCommand::New {
-            args: (!rest.is_empty()).then(|| rest.to_string()),
-        });
-    }
-
     if let Some(rest) = slash_command_rest(text, "/fork") {
         return Some(SessionCommand::Fork {
             args: (!rest.is_empty()).then(|| rest.to_string()),
@@ -257,9 +251,6 @@ pub(super) async fn dispatch_session_command(
             prompt,
             mode_kind: ModeKind::Plan,
         }),
-        SessionCommand::New { args } => Ok(CommandDispatchOutcome::Stop(
-            session::controls::handle_new_command(inner, args).await?,
-        )),
         SessionCommand::Fork { args } => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_fork_command(inner, args).await?,
         )),
@@ -302,10 +293,6 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
         .input(AvailableCommandInput::Unstructured(
             UnstructuredCommandInput::new("optional partial thread id and/or --no-history"),
         )),
-        AvailableCommand::new(
-            "new",
-            "Start a fresh backend thread in this ACP session without clearing the current sidebar history",
-        ),
         AvailableCommand::new(
             "fork",
             "Fork the current backend thread and keep working in the fork inside this ACP session",

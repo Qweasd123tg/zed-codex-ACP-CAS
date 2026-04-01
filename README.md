@@ -74,7 +74,6 @@ Sub-agent and collaboration tool-call rendering:
   - `/review`
   - `/threads`
   - `/resume`
-  - `/new`
   - `/fork`
   - `/archive`
   - `/unarchive`
@@ -86,7 +85,7 @@ Sub-agent and collaboration tool-call rendering:
 - Better thread title handling for resume/archive/rename/fork flows
 - ACP `session/fork` surfaced on top of native `thread/fork`
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
-- `soft /new`, in-place `/fork`, and standard ACP `session/fork` support
+- In-place `/fork` and standard ACP `session/fork` support
 - Tool call cards for command, MCP, web, image, file, and collab branches
 - Practical plan mode support
 - Better startup and reconnect diagnostics
@@ -134,7 +133,7 @@ Current strengths of this fork:
 - More reliable pre-prompt and thread-switch cleanup under bursty app-server tails
 - Better thread titles in lists and resumed sessions
 - Inline review flows backed by native `review/start`
-- Practical in-place thread switching with `/new`, `/fork`, `/resume`, and archive-triggered replacement
+- Practical thread switching with native `Zed` `New Thread`, `/fork`, `/resume`, and archive-triggered replacement
 - Standard ACP `session/fork` surfaced separately from the in-place slash `/fork` flow
 - Practical plan mode support
 - More complete collab and sub-agent UI mapping
@@ -146,7 +145,7 @@ Current gaps:
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
 - Some upstream-style flows are still missing or incomplete, including `close_session` and `/logout`
 - There is still no true delete operation from `codex app-server`; `/delete` is kept only as an explicit compatibility alias to `/archive`
-- `soft /new` and `/fork` switch only the backend thread; current Zed-side ACP behavior still does not clear sidebar chat history for in-place thread switches
+- Slash `/new` is intentionally not surfaced anymore. Use native `Zed` `New Thread` for a real new ACP session; in-place backend switching remains only for `/fork` and archive-triggered replacement flows. The old behavior is summarized in `docs/drafts/soft-new-backup.md`
 - `ACP session/fork` is surfaced by this adapter, but current `Zed` still has no native UI entrypoint for it; in practice you use slash `/fork` unless you patch the client
 - `Zed` history already has delete affordances, but the current ACP bridge for external agents does not surface `session/delete`; until that exists, `/delete` remains only a slash alias to `/archive`
 - Some behavior still depends on Zed-side ACP support

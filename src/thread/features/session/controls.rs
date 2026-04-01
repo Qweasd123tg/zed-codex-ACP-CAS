@@ -1,5 +1,5 @@
 //! Обработчики slash-команд управления сессией (без `/resume`).
-//! Сюда вынесены compact/undo/archive/rename/new/fork ветки.
+//! Сюда вынесены compact/undo/archive/rename/fork ветки.
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -191,26 +191,6 @@ pub(in crate::thread) async fn handle_unarchive_command(
         .send_agent_text(format!("Unarchived thread `{title}`."))
         .await;
 
-    Ok(StopReason::EndTurn)
-}
-
-pub(in crate::thread) async fn handle_new_command(
-    inner: &mut ThreadInner,
-    args: Option<String>,
-) -> Result<StopReason, Error> {
-    if args.is_some() {
-        inner.client.send_agent_text("Usage: `/new`").await;
-        return Ok(StopReason::EndTurn);
-    }
-
-    flush_thread_switch_transport_state(inner).await?;
-    start_replacement_thread(inner).await?;
-    inner
-        .client
-        .send_agent_text(
-            "Started a fresh backend thread in this ACP session. Existing sidebar history remains visible because Zed does not clear it for in-place thread switches.",
-        )
-        .await;
     Ok(StopReason::EndTurn)
 }
 
