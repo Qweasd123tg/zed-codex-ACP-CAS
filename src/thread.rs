@@ -92,6 +92,8 @@ use self::unified_diff::{apply_unified_diff_to_text, first_hunk_line, unified_di
 // Пресеты подтверждений статичны и переиспользуются между сессиями без лишних аллокаций.
 static APPROVAL_PRESETS: LazyLock<Vec<ApprovalPreset>> = LazyLock::new(builtin_approval_presets);
 
+type SharedAppServer = Arc<tokio::sync::Mutex<AppServerProcess>>;
+
 // Канонические id опций и лимиты для ACP-промптов и элементов plan-режима.
 const ALLOW_ONCE: &str = "allow-once";
 const REJECT_ONCE: &str = "reject-once";
@@ -120,7 +122,7 @@ pub struct Thread {
 // Внутреннее изменяемое состояние, которое ведётся для одной ACP-сессии.
 struct ThreadInner {
     session_id: SessionId,
-    app: AppServerProcess,
+    app: SharedAppServer,
     codex_home: PathBuf,
     bundled_skills_enabled: bool,
     thread_id: String,

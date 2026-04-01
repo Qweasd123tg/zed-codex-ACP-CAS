@@ -29,6 +29,8 @@ pub(in crate::thread) async fn list_all_threads_with_archived(
     loop {
         let response = inner
             .app
+            .lock()
+            .await
             .thread_list(ThreadListParams {
                 cursor: cursor.take(),
                 limit: Some(100),

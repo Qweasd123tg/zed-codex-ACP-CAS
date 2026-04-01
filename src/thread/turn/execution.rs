@@ -66,26 +66,6 @@ async fn maybe_abort_turn_stall(inner: &mut ThreadInner) -> Option<StopReason> {
     Some(StopReason::EndTurn)
 }
 
-async fn finalize_turn_and_drain(inner: &mut ThreadInner, turn_id: &str) -> Result<(), Error> {
-    inner.finalize_active_turn(turn_id);
-    let drain_outcome = notification_dispatch::drain_post_turn_notifications(
-        inner,
-        turn_id,
-        POST_TURN_NOTIFICATION_DRAIN_TIMEOUT,
-    )
-    .await?;
-    if drain_outcome.was_truncated() {
-        warn!(
-            turn_id,
-            processed_messages = drain_outcome.processed(),
-            outcome = ?drain_outcome,
-            "post-turn transport drain stopped before the queue went quiet"
-        );
-    }
-    crate::thread::features::session::events::flush_pending_thread_title_update(inner).await;
-    Ok(())
-}
-
 async fn prepare_started_turn(
     inner: &mut ThreadInner,
     turn_id: &str,
@@ -97,6 +77,95 @@ async fn prepare_started_turn(
 }
 
 impl Thread {
+    async fn finish_active_turn(
+        &self,
+        turn_id: &str,
+        stop_reason: StopReason,
+    ) -> Result<StopReason, Error> {
+        {
+            let mut inner = self.inner.lock().await;
+            inner.finalize_active_turn(turn_id);
+        }
+
+        let drain_outcome = self
+            .drain_post_turn_notifications_ext(turn_id, POST_TURN_NOTIFICATION_DRAIN_TIMEOUT)
+            .await?;
+        if drain_outcome.was_truncated() {
+            warn!(
+                turn_id,
+                processed_messages = drain_outcome.processed(),
+                outcome = ?drain_outcome,
+                "post-turn transport drain stopped before the queue went quiet"
+            );
+        }
+
+        let mut inner = self.inner.lock().await;
+        crate::thread::features::session::events::flush_pending_thread_title_update(&mut inner)
+            .await;
+        Ok(stop_reason)
+    }
+
+    async fn maybe_finish_stalled_turn(
+        &self,
+        turn_id: &str,
+        pending_command_approval: &Option<PendingTurnCommandApproval>,
+    ) -> Result<Option<StopReason>, Error> {
+        if pending_command_approval.is_some() {
+            return Ok(None);
+        }
+
+        let stop_reason = {
+            let mut inner = self.inner.lock().await;
+            maybe_abort_turn_stall(&mut inner).await
+        };
+        let Some(stop_reason) = stop_reason else {
+            return Ok(None);
+        };
+
+        Ok(Some(self.finish_active_turn(turn_id, stop_reason).await?))
+    }
+
+    async fn cancel_pending_command_approval(
+        &self,
+        pending: PendingTurnCommandApproval,
+    ) -> Result<(), Error> {
+        let app = {
+            let inner = self.inner.lock().await;
+            inner.app.clone()
+        };
+        app.lock()
+            .await
+            .send_command_approval_response(
+            pending.request_id,
+            codex_app_server_protocol::CommandExecutionRequestApprovalResponse {
+                decision: crate::thread::features::approvals::command::command_approval_decision_from_outcome(
+                    RequestPermissionOutcome::Cancelled
+                ),
+            },
+        )
+        .await
+    }
+
+    async fn interrupt_active_turn_if_needed(&self) -> bool {
+        let (app, thread_id, active_turn_id) = {
+            let inner = self.inner.lock().await;
+            let Some(active_turn_id) = inner.active_turn_id.clone() else {
+                return false;
+            };
+            (inner.app.clone(), inner.thread_id.clone(), active_turn_id)
+        };
+        drop(
+            app.lock()
+                .await
+                .turn_interrupt(TurnInterruptParams {
+                    thread_id,
+                    turn_id: active_turn_id,
+                })
+                .await,
+        );
+        true
+    }
+
     pub(super) async fn run_single_turn_ext(
         &self,
         input: Vec<UserInput>,
@@ -114,6 +183,8 @@ impl Thread {
                 plan::collaboration_mode_for_turn(collaboration_mode_kind, &model, effort);
             let turn_response = inner
                 .app
+                .lock()
+                .await
                 .turn_start(TurnStartParams {
                     thread_id,
                     input,
@@ -145,6 +216,8 @@ impl Thread {
             let thread_id = inner.thread_id.clone();
             let review_response = inner
                 .app
+                .lock()
+                .await
                 .review_start(ReviewStartParams {
                     thread_id,
                     target,
@@ -164,6 +237,10 @@ impl Thread {
         let mut interrupted = false;
         let mut cancel_rx = self.cancel_tx.subscribe();
         let mut pending_command_approval: Option<PendingTurnCommandApproval> = None;
+        let app = {
+            let inner = self.inner.lock().await;
+            inner.app.clone()
+        };
 
         loop {
             let watchdog = tokio::time::sleep(TURN_MESSAGE_POLL_INTERVAL);
@@ -172,38 +249,16 @@ impl Thread {
                 result = cancel_rx.changed() => {
                     if result.is_ok() && !interrupted {
                         if let Some(pending) = pending_command_approval.take() {
-                            let mut inner = self.inner.lock().await;
-                            inner.app.send_command_approval_response(
-                                pending.request_id,
-                                codex_app_server_protocol::CommandExecutionRequestApprovalResponse {
-                                    decision: crate::thread::features::approvals::command::command_approval_decision_from_outcome(
-                                        RequestPermissionOutcome::Cancelled
-                                    ),
-                                },
-                            ).await?;
+                            self.cancel_pending_command_approval(pending).await?;
                         }
-                        let mut inner = self.inner.lock().await;
-                        if let Some(active_turn_id) = inner.active_turn_id.clone() {
-                            let thread_id = inner.thread_id.clone();
-                            drop(inner.app.turn_interrupt(TurnInterruptParams {
-                                thread_id,
-                                turn_id: active_turn_id,
-                            }).await);
-                            interrupted = true;
-                        }
+                        interrupted = self.interrupt_active_turn_if_needed().await;
                     }
                 }
                 _ = &mut watchdog => {
-                    if pending_command_approval.is_some() {
-                        continue;
-                    }
-                    let stop_reason = {
-                        let mut inner = self.inner.lock().await;
-                        maybe_abort_turn_stall(&mut inner).await
-                    };
-                    if let Some(stop_reason) = stop_reason {
-                        let mut inner = self.inner.lock().await;
-                        finalize_turn_and_drain(&mut inner, &turn_id).await?;
+                    if let Some(stop_reason) = self
+                        .maybe_finish_stalled_turn(&turn_id, &pending_command_approval)
+                        .await?
+                    {
                         return Ok(stop_reason);
                     }
                 }
@@ -227,18 +282,14 @@ impl Thread {
                     } else {
                         codex_app_server_protocol::CommandExecutionApprovalDecision::Cancel
                     };
-                    let mut inner = self.inner.lock().await;
-                    inner.app.send_command_approval_response(
+                    app.lock().await.send_command_approval_response(
                         request_id,
                         codex_app_server_protocol::CommandExecutionRequestApprovalResponse {
                             decision,
                         },
                     ).await?;
                 }
-                message = async {
-                    let mut inner = self.inner.lock().await;
-                    inner.app.next_message().await
-                }, if pending_command_approval.is_none() => {
+                message = async { app.lock().await.next_message().await }, if pending_command_approval.is_none() => {
                     let message = message?;
                     match self.handle_active_turn_message(message, &turn_id).await? {
                         ActiveTurnMessageOutcome::Continue => {}
@@ -247,21 +298,13 @@ impl Thread {
                             continue;
                         }
                         ActiveTurnMessageOutcome::Stop(stop_reason) => {
-                        let mut inner = self.inner.lock().await;
-                        finalize_turn_and_drain(&mut inner, &turn_id).await?;
-                        return Ok(stop_reason);
+                            return self.finish_active_turn(&turn_id, stop_reason).await;
                         }
                     }
-                    if pending_command_approval.is_some() {
-                        continue;
-                    }
-                    let stop_reason = {
-                        let mut inner = self.inner.lock().await;
-                        maybe_abort_turn_stall(&mut inner).await
-                    };
-                    if let Some(stop_reason) = stop_reason {
-                        let mut inner = self.inner.lock().await;
-                        finalize_turn_and_drain(&mut inner, &turn_id).await?;
+                    if let Some(stop_reason) = self
+                        .maybe_finish_stalled_turn(&turn_id, &pending_command_approval)
+                        .await?
+                    {
                         return Ok(stop_reason);
                     }
                 }

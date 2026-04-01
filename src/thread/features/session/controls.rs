@@ -1,10 +1,10 @@
-//! Обработчики slash-команд управления сессией (без `/resume`).
-//! Сюда вынесены compact/undo/archive/rename/fork ветки.
+//! Обработчики slash-команд управления сессией (без `/resume` и `/undo`).
+//! Сюда вынесены compact/archive/rename/fork ветки.
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
+use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::{
     format_relative_timestamp, list_all_threads_with_archived, thread_display_title,
 };
@@ -13,16 +13,17 @@ use crate::thread::features::session::{
     session_info_title_update_from_unix, session_info_title_update_now,
 };
 use crate::thread::session_lifecycle::is_missing_rollout_thread_error;
-use crate::thread::{ThreadInner, replay::replay_turns, turn_notify::notify_config_update};
+use crate::thread::{Thread as SessionThread, ThreadInner, turn_notify::notify_config_update};
 use agent_client_protocol::{
     Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
     SelectedPermissionOutcome, SessionUpdate, StopReason, ToolCallId, ToolCallStatus,
     ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use codex_app_server_protocol::{
-    AskForApproval as AppAskForApproval, SandboxPolicy as AppSandboxPolicy, Thread,
-    ThreadArchiveParams, ThreadCompactStartParams, ThreadForkParams, ThreadRollbackParams,
-    ThreadSetNameParams, ThreadSortKey, ThreadStartParams, ThreadUnarchiveParams,
+    AskForApproval as AppAskForApproval, RateLimitSnapshot as AppRateLimitSnapshot,
+    SandboxPolicy as AppSandboxPolicy, Thread as AppThread, ThreadArchiveParams,
+    ThreadCompactStartParams, ThreadForkParams, ThreadSetNameParams, ThreadSortKey,
+    ThreadStartParams, ThreadUnarchiveParams,
 };
 use codex_protocol::openai_models::ReasoningEffort;
 use serde_json::json;
@@ -36,46 +37,205 @@ struct ThreadSwitchState {
     reasoning_effort: Option<ReasoningEffort>,
 }
 
+impl SessionThread {
+    pub(in crate::thread) async fn handle_archive_command_ext(
+        &self,
+        thread_id: Option<String>,
+    ) -> Result<StopReason, Error> {
+        let (selected, is_current_thread, app, client) = {
+            let mut inner = self.inner.lock().await;
+            let selected =
+                resolve_thread_for_archive(&mut inner, thread_id.as_deref(), false).await?;
+            let is_current_thread = selected
+                .as_ref()
+                .is_some_and(|thread| thread.id == inner.thread_id);
+            (
+                selected,
+                is_current_thread,
+                inner.app.clone(),
+                inner.client.clone(),
+            )
+        };
+        let Some(selected) = selected else {
+            return Ok(StopReason::EndTurn);
+        };
+        let title = thread_display_title(&selected);
+
+        if is_current_thread {
+            flush_thread_switch_transport_state(&app).await?;
+        }
+
+        app.lock()
+            .await
+            .thread_archive(ThreadArchiveParams {
+                thread_id: selected.id.clone(),
+            })
+            .await?;
+
+        if is_current_thread {
+            if let Err(error) = self.start_replacement_thread_ext().await {
+                warn!(
+                    thread_id = %selected.id,
+                    error = %error,
+                    "failed to start replacement thread after archiving current thread; attempting restore"
+                );
+                match app
+                    .lock()
+                    .await
+                    .thread_unarchive(ThreadUnarchiveParams {
+                        thread_id: selected.id.clone(),
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        client
+                            .send_agent_text(format!(
+                                "Failed to start a fresh session after archiving `{title}`. Restored the original thread.\n\nError: {error}"
+                            ))
+                            .await;
+                        return Ok(StopReason::EndTurn);
+                    }
+                    Err(unarchive_error) => {
+                        return Err(Error::internal_error().data(format!(
+                            "Archived current thread `{title}` but failed to start a fresh session ({error}) and failed to restore it ({unarchive_error})."
+                        )));
+                    }
+                }
+            }
+            client
+                .send_agent_text(format!(
+                    "Archived current thread `{title}` and started a fresh session."
+                ))
+                .await;
+        } else {
+            client
+                .send_agent_text(format!("Archived thread `{title}`."))
+                .await;
+        }
+
+        Ok(StopReason::EndTurn)
+    }
+
+    pub(in crate::thread) async fn handle_fork_command_ext(
+        &self,
+        args: Option<String>,
+    ) -> Result<StopReason, Error> {
+        let (app, client, fork_params) = {
+            let inner = self.inner.lock().await;
+            if args.is_some() {
+                inner.client.send_agent_text("Usage: `/fork`").await;
+                return Ok(StopReason::EndTurn);
+            }
+
+            (
+                inner.app.clone(),
+                inner.client.clone(),
+                ThreadForkParams {
+                    thread_id: inner.thread_id.clone(),
+                    model: Some(inner.current_model.clone()),
+                    model_provider: Some(inner.current_model_provider.clone()),
+                    cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
+                    approval_policy: Some(inner.approval_policy),
+                    sandbox: Some(inner.sandbox_mode),
+                    config: inner.session_mcp_config_overrides.clone(),
+                    ..Default::default()
+                },
+            )
+        };
+
+        flush_thread_switch_transport_state(&app).await?;
+        let fork = match app.lock().await.thread_fork(fork_params).await {
+            Ok(fork) => fork,
+            Err(error) if is_missing_rollout_thread_error(&error) => {
+                client
+                    .send_agent_text(
+                        "Current thread is not ready to fork yet. Send at least one prompt first, then try `/fork` again.",
+                    )
+                    .await;
+                return Ok(StopReason::EndTurn);
+            }
+            Err(error) => return Err(error),
+        };
+
+        self.apply_thread_switch_ext(
+            fork.thread,
+            ThreadSwitchState {
+                approval_policy: fork.approval_policy,
+                sandbox_policy: fork.sandbox,
+                model: fork.model,
+                model_provider: fork.model_provider,
+                reasoning_effort: fork.reasoning_effort,
+            },
+            "handle_fork_command_ext",
+        )
+        .await?;
+        client
+            .send_agent_text(
+                "Forked the current backend thread and switched this ACP session to the fork. Existing sidebar history remains visible because Zed does not clear it for in-place thread switches.",
+            )
+            .await;
+        Ok(StopReason::EndTurn)
+    }
+
+    async fn start_replacement_thread_ext(&self) -> Result<(), Error> {
+        let (app, start_params) = {
+            let inner = self.inner.lock().await;
+            (
+                inner.app.clone(),
+                ThreadStartParams {
+                    model: Some(inner.current_model.clone()),
+                    model_provider: Some(inner.current_model_provider.clone()),
+                    cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
+                    approval_policy: Some(inner.approval_policy),
+                    sandbox: Some(inner.sandbox_mode),
+                    config: inner.session_mcp_config_overrides.clone(),
+                    ..Default::default()
+                },
+            )
+        };
+
+        let start = app.lock().await.thread_start(start_params).await?;
+        self.apply_thread_switch_ext(
+            start.thread,
+            ThreadSwitchState {
+                approval_policy: start.approval_policy,
+                sandbox_policy: start.sandbox,
+                model: start.model,
+                model_provider: start.model_provider,
+                reasoning_effort: start.reasoning_effort,
+            },
+            "start_replacement_thread_ext",
+        )
+        .await
+    }
+
+    async fn apply_thread_switch_ext(
+        &self,
+        thread: AppThread,
+        state: ThreadSwitchState,
+        sync_reason: &'static str,
+    ) -> Result<(), Error> {
+        let app = {
+            let inner = self.inner.lock().await;
+            inner.app.clone()
+        };
+
+        flush_thread_switch_transport_state(&app).await?;
+        let account_rate_limits = match app.lock().await.get_account_rate_limits().await {
+            Ok(response) => Some(response.rate_limits),
+            Err(_) => None,
+        };
+
+        let mut inner = self.inner.lock().await;
+        apply_thread_switch(&mut inner, thread, state, account_rate_limits, sync_reason).await
+    }
+}
+
 pub(in crate::thread) async fn handle_compact_command(
     inner: &mut ThreadInner,
 ) -> Result<StopReason, Error> {
     let message = start_context_compaction(inner).await?;
     inner.client.send_agent_text(message).await;
-    Ok(StopReason::EndTurn)
-}
-
-pub(in crate::thread) async fn handle_undo_command(
-    inner: &mut ThreadInner,
-    num_turns: u32,
-) -> Result<StopReason, Error> {
-    let response = inner
-        .app
-        .thread_rollback(ThreadRollbackParams {
-            thread_id: inner.thread_id.clone(),
-            num_turns,
-        })
-        .await?;
-
-    let workspace_cwd = inner.workspace_cwd.clone();
-    remember_agent_label(
-        &mut inner.agent_labels,
-        response.thread.id.clone(),
-        response.thread.agent_nickname.clone(),
-        response.thread.agent_role.clone(),
-    );
-    warm_agent_labels_for_turns(inner, &response.thread.turns).await;
-    let agent_labels = inner.agent_labels.clone();
-    replay_turns(
-        &inner.client,
-        &workspace_cwd,
-        &agent_labels,
-        response.thread.turns,
-    )
-    .await;
-    inner
-        .client
-        .send_agent_text(format!("Rolled back last {num_turns} turn(s)."))
-        .await;
     Ok(StopReason::EndTurn)
 }
 
@@ -88,6 +248,8 @@ pub(in crate::thread) async fn start_context_compaction(
 
     inner
         .app
+        .lock()
+        .await
         .thread_compact_start(ThreadCompactStartParams {
             thread_id: inner.thread_id.clone(),
         })
@@ -99,74 +261,6 @@ pub(in crate::thread) async fn start_context_compaction(
     inner.context_usage_source = None;
     notify_config_update(inner).await;
     Ok("Context compaction started. Wait for \"Context compacted.\" before sending the next prompt.".to_string())
-}
-
-pub(in crate::thread) async fn handle_archive_command(
-    inner: &mut ThreadInner,
-    thread_id: Option<String>,
-) -> Result<StopReason, Error> {
-    let Some(selected) = resolve_thread_for_archive(inner, thread_id.as_deref(), false).await?
-    else {
-        return Ok(StopReason::EndTurn);
-    };
-    let is_current_thread = selected.id == inner.thread_id;
-    let title = thread_display_title(&selected);
-
-    if is_current_thread {
-        flush_thread_switch_transport_state(inner).await?;
-    }
-
-    inner
-        .app
-        .thread_archive(ThreadArchiveParams {
-            thread_id: selected.id.clone(),
-        })
-        .await?;
-
-    if is_current_thread {
-        if let Err(error) = start_replacement_thread(inner).await {
-            warn!(
-                thread_id = %selected.id,
-                error = %error,
-                "failed to start replacement thread after archiving current thread; attempting restore"
-            );
-            match inner
-                .app
-                .thread_unarchive(ThreadUnarchiveParams {
-                    thread_id: selected.id.clone(),
-                })
-                .await
-            {
-                Ok(_) => {
-                    inner
-                        .client
-                        .send_agent_text(format!(
-                            "Failed to start a fresh session after archiving `{title}`. Restored the original thread.\n\nError: {error}"
-                        ))
-                        .await;
-                    return Ok(StopReason::EndTurn);
-                }
-                Err(unarchive_error) => {
-                    return Err(Error::internal_error().data(format!(
-                        "Archived current thread `{title}` but failed to start a fresh session ({error}) and failed to restore it ({unarchive_error})."
-                    )));
-                }
-            }
-        }
-        inner
-            .client
-            .send_agent_text(format!(
-                "Archived current thread `{title}` and started a fresh session."
-            ))
-            .await;
-    } else {
-        inner
-            .client
-            .send_agent_text(format!("Archived thread `{title}`."))
-            .await;
-    }
-
-    Ok(StopReason::EndTurn)
 }
 
 pub(in crate::thread) async fn handle_unarchive_command(
@@ -181,6 +275,8 @@ pub(in crate::thread) async fn handle_unarchive_command(
 
     inner
         .app
+        .lock()
+        .await
         .thread_unarchive(ThreadUnarchiveParams {
             thread_id: selected.id,
         })
@@ -191,65 +287,6 @@ pub(in crate::thread) async fn handle_unarchive_command(
         .send_agent_text(format!("Unarchived thread `{title}`."))
         .await;
 
-    Ok(StopReason::EndTurn)
-}
-
-pub(in crate::thread) async fn handle_fork_command(
-    inner: &mut ThreadInner,
-    args: Option<String>,
-) -> Result<StopReason, Error> {
-    if args.is_some() {
-        inner.client.send_agent_text("Usage: `/fork`").await;
-        return Ok(StopReason::EndTurn);
-    }
-
-    flush_thread_switch_transport_state(inner).await?;
-    let fork = match inner
-        .app
-        .thread_fork(ThreadForkParams {
-            thread_id: inner.thread_id.clone(),
-            model: Some(inner.current_model.clone()),
-            model_provider: Some(inner.current_model_provider.clone()),
-            cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
-            approval_policy: Some(inner.approval_policy),
-            sandbox: Some(inner.sandbox_mode),
-            config: inner.session_mcp_config_overrides.clone(),
-            ..Default::default()
-        })
-        .await
-    {
-        Ok(fork) => fork,
-        Err(error) if is_missing_rollout_thread_error(&error) => {
-            inner
-                .client
-                .send_agent_text(
-                    "Current thread is not ready to fork yet. Send at least one prompt first, then try `/fork` again.",
-                )
-                .await;
-            return Ok(StopReason::EndTurn);
-        }
-        Err(error) => return Err(error),
-    };
-
-    apply_thread_switch(
-        inner,
-        fork.thread,
-        ThreadSwitchState {
-            approval_policy: fork.approval_policy,
-            sandbox_policy: fork.sandbox,
-            model: fork.model,
-            model_provider: fork.model_provider,
-            reasoning_effort: fork.reasoning_effort,
-        },
-        "handle_fork_command",
-    )
-    .await?;
-    inner
-        .client
-        .send_agent_text(
-            "Forked the current backend thread and switched this ACP session to the fork. Existing sidebar history remains visible because Zed does not clear it for in-place thread switches.",
-        )
-        .await;
     Ok(StopReason::EndTurn)
 }
 
@@ -270,6 +307,8 @@ pub(in crate::thread) async fn handle_rename_command(
 
     inner
         .app
+        .lock()
+        .await
         .thread_set_name(ThreadSetNameParams {
             thread_id: inner.thread_id.clone(),
             name: name.clone(),
@@ -289,43 +328,13 @@ pub(in crate::thread) async fn handle_rename_command(
     Ok(StopReason::EndTurn)
 }
 
-async fn start_replacement_thread(inner: &mut ThreadInner) -> Result<(), Error> {
-    let start = inner
-        .app
-        .thread_start(ThreadStartParams {
-            model: Some(inner.current_model.clone()),
-            model_provider: Some(inner.current_model_provider.clone()),
-            cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
-            approval_policy: Some(inner.approval_policy),
-            sandbox: Some(inner.sandbox_mode),
-            config: inner.session_mcp_config_overrides.clone(),
-            ..Default::default()
-        })
-        .await?;
-
-    apply_thread_switch(
-        inner,
-        start.thread,
-        ThreadSwitchState {
-            approval_policy: start.approval_policy,
-            sandbox_policy: start.sandbox,
-            model: start.model,
-            model_provider: start.model_provider,
-            reasoning_effort: start.reasoning_effort,
-        },
-        "start_replacement_thread",
-    )
-    .await
-}
-
 async fn apply_thread_switch(
     inner: &mut ThreadInner,
-    thread: Thread,
+    thread: AppThread,
     state: ThreadSwitchState,
+    account_rate_limits: Option<AppRateLimitSnapshot>,
     sync_reason: &'static str,
 ) -> Result<(), Error> {
-    flush_thread_switch_transport_state(inner).await?;
-
     inner.thread_id = thread.id.clone();
     inner.workspace_cwd = thread.cwd.clone();
     inner.approval_policy = state.approval_policy;
@@ -353,8 +362,8 @@ async fn apply_thread_switch(
         &inner.current_model,
         state.reasoning_effort,
     );
-    if let Ok(response) = inner.app.get_account_rate_limits().await {
-        inner.account_rate_limits = Some(response.rate_limits);
+    if let Some(account_rate_limits) = account_rate_limits {
+        inner.account_rate_limits = Some(account_rate_limits);
     }
 
     inner
@@ -371,7 +380,7 @@ async fn resolve_thread_for_archive(
     inner: &mut ThreadInner,
     query: Option<&str>,
     archived: bool,
-) -> Result<Option<Thread>, Error> {
+) -> Result<Option<AppThread>, Error> {
     let all_threads =
         list_all_threads_with_archived(inner, ThreadSortKey::UpdatedAt, None, None, archived)
             .await?;
@@ -439,9 +448,9 @@ async fn resolve_thread_for_archive(
 
 async fn pick_thread_from_candidates(
     inner: &mut ThreadInner,
-    candidates: Vec<Thread>,
+    candidates: Vec<AppThread>,
     archived: bool,
-) -> Result<Option<Thread>, Error> {
+) -> Result<Option<AppThread>, Error> {
     let tool_call_id = format!(
         "{}-selector-{}",
         if archived { "unarchive" } else { "archive" },
@@ -516,7 +525,7 @@ async fn pick_thread_from_candidates(
         .find(|thread| thread.id == *selected_thread_id))
 }
 
-fn thread_matches_query(thread: &Thread, query: &str) -> bool {
+fn thread_matches_query(thread: &AppThread, query: &str) -> bool {
     if thread.id.contains(query) {
         return true;
     }
@@ -528,7 +537,7 @@ fn thread_matches_query(thread: &Thread, query: &str) -> bool {
             .is_some_and(|name| name.to_lowercase().contains(&needle))
 }
 
-fn thread_picker_label(thread: &Thread) -> String {
+fn thread_picker_label(thread: &AppThread) -> String {
     let branch = thread
         .git_info
         .as_ref()
@@ -544,7 +553,7 @@ fn thread_picker_label(thread: &Thread) -> String {
     )
 }
 
-fn thread_picker_raw_input(candidates: &[Thread], archived: bool) -> serde_json::Value {
+fn thread_picker_raw_input(candidates: &[AppThread], archived: bool) -> serde_json::Value {
     json!({
         "archived": archived,
         "count": candidates.len(),

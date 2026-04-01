@@ -36,6 +36,11 @@ pub(crate) struct SessionMcpSetup {
     pub(crate) summary: ContextSelectorSummary,
 }
 
+struct StartedBackendThread {
+    app: AppServerProcess,
+    start: ThreadStartResponse,
+}
+
 fn startup_error(stage: &str, error: Error) -> Error {
     Error::internal_error().data(format!("{stage}: {error}"))
 }
@@ -257,6 +262,48 @@ pub(in crate::thread) async fn thread_resume_with_startup_retry(
     unreachable!("retry loop must return on success or final error")
 }
 
+async fn spawn_initialized_app(session_id: Option<&SessionId>) -> Result<AppServerProcess, Error> {
+    let mut app = AppServerProcess::spawn("codex")
+        .await
+        .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
+    if let Some(session_id) = session_id {
+        info!(session_id = %session_id, "Initializing codex app-server");
+    } else {
+        info!("Initializing codex app-server");
+    }
+    app.initialize("codex-acp-cas", "Codex ACP CAS")
+        .await
+        .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
+    Ok(app)
+}
+
+async fn start_backend_thread(
+    config: &Config,
+    cwd: &Path,
+    session_id: Option<&SessionId>,
+    session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
+) -> Result<StartedBackendThread, Error> {
+    let mut app = spawn_initialized_app(session_id).await?;
+    if let Some(session_id) = session_id {
+        info!(session_id = %session_id, "Starting backend thread");
+    } else {
+        info!(cwd = %cwd.display(), "Starting backend thread for new ACP session");
+    }
+    let start = app
+        .thread_start(ThreadStartParams {
+            model: config.model.clone(),
+            model_provider: Some(config.model_provider_id.clone()),
+            cwd: Some(cwd.to_string_lossy().to_string()),
+            approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
+            sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
+            config: session_mcp_config_overrides,
+            ..Default::default()
+        })
+        .await
+        .map_err(|error| startup_error("failed to start backend thread", error))?;
+    Ok(StartedBackendThread { app, start })
+}
+
 impl Thread {
     async fn fork_as_new_session(
         &self,
@@ -274,7 +321,7 @@ impl Thread {
             session_mcp_config_overrides,
             session_mcp_summary,
         ) = {
-            let mut inner = self.inner.lock().await;
+            let inner = self.inner.lock().await;
             let source_thread_id = inner.thread_id.clone();
             let source_model = inner.current_model.clone();
             let source_model_provider = inner.current_model_provider.clone();
@@ -292,6 +339,8 @@ impl Thread {
             };
             let fork = match inner
                 .app
+                .lock()
+                .await
                 .thread_fork(ThreadForkParams {
                     thread_id: source_thread_id.clone(),
                     model: Some(source_model),
@@ -383,7 +432,7 @@ impl Thread {
         Thread {
             inner: tokio::sync::Mutex::new(ThreadInner {
                 session_id: session_id.clone(),
-                app,
+                app: Arc::new(tokio::sync::Mutex::new(app)),
                 codex_home: config.codex_home.clone(),
                 bundled_skills_enabled: config.bundled_skills_enabled(),
                 thread_id: resume.thread.id,
@@ -473,7 +522,7 @@ impl Thread {
         Thread {
             inner: tokio::sync::Mutex::new(ThreadInner {
                 session_id: session_id.clone(),
-                app,
+                app: Arc::new(tokio::sync::Mutex::new(app)),
                 codex_home: codex_home.clone(),
                 bundled_skills_enabled,
                 thread_id: start.thread.id,
@@ -540,27 +589,13 @@ impl Thread {
             cwd = %cwd.display(),
             "Bootstrapping fresh backend thread for existing ACP session"
         );
-        let mut app = AppServerProcess::spawn("codex")
-            .await
-            .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
-        info!(session_id = %session_id, "Initializing codex app-server");
-        app.initialize("codex-acp-cas", "Codex ACP CAS")
-            .await
-            .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
-
-        info!(session_id = %session_id, "Starting backend thread");
-        let start = app
-            .thread_start(ThreadStartParams {
-                model: config.model.clone(),
-                model_provider: Some(config.model_provider_id.clone()),
-                cwd: Some(cwd.to_string_lossy().to_string()),
-                approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
-                sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
-                config: session_mcp_config_overrides.clone(),
-                ..Default::default()
-            })
-            .await
-            .map_err(|error| startup_error("failed to start backend thread", error))?;
+        let StartedBackendThread { app, start } = start_backend_thread(
+            config,
+            &cwd,
+            Some(&session_id),
+            session_mcp_config_overrides.clone(),
+        )
+        .await?;
 
         Ok(Self::build_started_thread(
             session_id,
@@ -587,27 +622,8 @@ impl Thread {
         session_mcp_summary: ContextSelectorSummary,
     ) -> Result<(SessionId, Self), Error> {
         info!(cwd = %cwd.display(), "Bootstrapping new ACP session");
-        let mut app = AppServerProcess::spawn("codex")
-            .await
-            .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
-        info!("Initializing codex app-server");
-        app.initialize("codex-acp-cas", "Codex ACP CAS")
-            .await
-            .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
-
-        info!(cwd = %cwd.display(), "Starting backend thread for new ACP session");
-        let start = app
-            .thread_start(ThreadStartParams {
-                model: config.model.clone(),
-                model_provider: Some(config.model_provider_id.clone()),
-                cwd: Some(cwd.to_string_lossy().to_string()),
-                approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
-                sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
-                config: session_mcp_config_overrides.clone(),
-                ..Default::default()
-            })
-            .await
-            .map_err(|error| startup_error("failed to start backend thread", error))?;
+        let StartedBackendThread { app, start } =
+            start_backend_thread(config, &cwd, None, session_mcp_config_overrides.clone()).await?;
 
         let session_id = SessionId::new(start.thread.id.clone());
         let thread = Self::build_started_thread(

@@ -85,7 +85,7 @@
 
 - Чуть богаче selector UX уже partially shipped: нижний `context_control` selector теперь surfacing `status`, `ctx %`, `MCP` и `skills` как read-only summary entries с короткой строкой в списке и расширенным `description`. `Status` intentionally держит на кнопке только суммарный `used`; detail/report раскрывает workspace, account и `used / in / out`. Отдельный hover-only канал здесь по-прежнему упирается в текущий ACP / `Zed` client contract.
 - Следующий вопрос не “добавлять ли `status` / `MCP` / `skills` вообще”, а какие ещё данные реально стоит поднимать в selector'ы, а что лучше оставить slash-командам или отдельным flows. Кандидат из этой зоны сейчас в первую очередь `plugins`.
-- Для нового чистого чата канонический путь теперь native `Zed` `New Thread`, а не slash-команда форка. In-place switch в рантайме оставлен только для `/fork` и archive-triggered replacement; пока сам `Zed` не научится reset'ить ACP session view, старые сообщения в sidebar останутся видимыми после таких in-place switch сценариев.
+- Для нового чистого чата канонический путь теперь native `Zed` `New Thread`. In-place switch в рантайме сознательно оставлен только для `/fork` и archive-triggered replacement; пока сам `Zed` не научится reset'ить ACP session view, старые сообщения в sidebar останутся видимыми после таких сценариев.
 
 ## 4.1 Текущие Ограничения Zed UI
 

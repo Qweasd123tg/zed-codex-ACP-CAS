@@ -146,10 +146,8 @@ Current gaps:
 - Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
 - Some upstream-style flows are still missing or incomplete, including `close_session` and `/logout`
-- There is still no true delete operation from `codex app-server`; `/delete` is kept only as an explicit compatibility alias to `/archive`
-- Slash `/new` is intentionally not surfaced anymore. Use native `Zed` `New Thread` for a real new ACP session; in-place backend switching remains only for `/fork` and archive-triggered replacement flows. The old behavior is summarized in `docs/drafts/soft-new-backup.md`
-- `ACP session/fork` is surfaced by this adapter, but current `Zed` still has no native UI entrypoint for it; in practice you use slash `/fork` unless you patch the client
-- `Zed` history already has delete affordances, but the current ACP bridge for external agents does not surface `session/delete`; until that exists, `/delete` remains only a slash alias to `/archive`
+- There is still no true delete path end-to-end: `codex app-server` does not give this fork a practical hard-delete flow, and the current ACP bridge in `Zed` still does not surface `session/delete`, so `/delete` stays only as a compatibility alias to `/archive`
+- Slash `/new` is intentionally not surfaced anymore. Use native `Zed` `New Thread` for a real new ACP session; in-place backend switching remains only for `/fork` and archive-triggered replacement flows. Standard ACP `session/fork` is supported by the adapter, but current `Zed` still has no dedicated UI entrypoint for it, so slash `/fork` remains the practical path unless you patch the client. The old soft-new behavior is summarized in `docs/drafts/soft-new-backup.md`
 - Some behavior still depends on Zed-side ACP support
 
 ## Limitations

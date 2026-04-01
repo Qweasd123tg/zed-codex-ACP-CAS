@@ -40,19 +40,6 @@ impl Thread {
     }
 }
 
-pub(in crate::thread) async fn handle_resume_selector_command(
-    inner: &mut ThreadInner,
-    query: Option<&str>,
-    include_history: bool,
-) -> Result<StopReason, Error> {
-    match resolve_resume_selection(inner, query).await? {
-        ResumeSelection::Stop(stop_reason) => Ok(stop_reason),
-        ResumeSelection::Thread(thread_id) => {
-            super::apply::handle_resume_command(inner, &thread_id, include_history).await
-        }
-    }
-}
-
 async fn resolve_resume_selection(
     inner: &mut ThreadInner,
     query: Option<&str>,

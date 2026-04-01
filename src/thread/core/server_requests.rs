@@ -14,8 +14,9 @@ pub(super) async fn handle_server_request(
     let server_request = match ServerRequest::try_from(request) {
         Ok(server_request) => server_request,
         Err(err) => {
+            let mut app = inner.app.lock().await;
             protocol_contract::reject_unparseable_server_request(
-                &mut inner.app,
+                &mut app,
                 request_id,
                 &request_method,
                 &err,
@@ -36,8 +37,9 @@ pub(super) async fn handle_server_request(
             approvals::user_input::handle_tool_request_user_input(inner, request_id, params).await
         }
         ServerRequest::McpServerElicitationRequest { request_id, .. } => {
+            let mut app = inner.app.lock().await;
             protocol_contract::reject_unsupported_server_request(
-                &mut inner.app,
+                &mut app,
                 request_id,
                 "mcpServer/elicitation/request",
             )
@@ -48,32 +50,36 @@ pub(super) async fn handle_server_request(
                 .await
         }
         ServerRequest::DynamicToolCall { request_id, .. } => {
+            let mut app = inner.app.lock().await;
             protocol_contract::reject_unsupported_server_request(
-                &mut inner.app,
+                &mut app,
                 request_id,
                 "item/tool/call",
             )
             .await
         }
         ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } => {
+            let mut app = inner.app.lock().await;
             protocol_contract::reject_unsupported_server_request(
-                &mut inner.app,
+                &mut app,
                 request_id,
                 "account/chatgptAuthTokens/refresh",
             )
             .await
         }
         ServerRequest::ApplyPatchApproval { request_id, .. } => {
+            let mut app = inner.app.lock().await;
             protocol_contract::reject_unsupported_server_request(
-                &mut inner.app,
+                &mut app,
                 request_id,
                 "applyPatchApproval",
             )
             .await
         }
         ServerRequest::ExecCommandApproval { request_id, .. } => {
+            let mut app = inner.app.lock().await;
             protocol_contract::reject_unsupported_server_request(
-                &mut inner.app,
+                &mut app,
                 request_id,
                 "execCommandApproval",
             )

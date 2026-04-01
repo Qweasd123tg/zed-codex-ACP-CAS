@@ -37,6 +37,8 @@ pub(in crate::thread) async fn handle_command_approval(
 
     inner
         .app
+        .lock()
+        .await
         .send_command_approval_response(
             pending.request_id,
             CommandExecutionRequestApprovalResponse { decision },

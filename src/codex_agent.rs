@@ -50,6 +50,7 @@ pub struct CodexAgent {
 }
 
 const STARTUP_RESTORE_GUARD_WINDOW: Duration = Duration::from_secs(5);
+const STARTUP_COMMANDS_SYNC_DELAY: Duration = Duration::from_millis(200);
 
 impl CodexAgent {
     fn auto_restore_enabled_from_env() -> bool {
@@ -98,20 +99,37 @@ impl CodexAgent {
         Ok(())
     }
 
-    fn spawn_available_commands_sync(thread: Rc<Thread>) {
+    fn spawn_post_load_startup_tasks(thread: Rc<Thread>, replay_loaded_history: bool) {
+        let notify_thread = thread.clone();
         tokio::task::spawn_local(async move {
             // Сначала отдаём клиенту session response, затем публикуем динамические
             // метаданные команд, чтобы не ловить UI-гонки на старте новой ACP-сессии.
             tokio::task::yield_now().await;
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            thread.notify_available_commands().await;
+            tokio::time::sleep(STARTUP_COMMANDS_SYNC_DELAY).await;
+            notify_thread.notify_available_commands().await;
+            if replay_loaded_history {
+                notify_thread.replay_loaded_history().await;
+            }
         });
-    }
 
-    fn spawn_startup_metadata_refresh(thread: Rc<Thread>) {
         tokio::task::spawn_local(async move {
             thread.refresh_startup_metadata().await;
         });
+    }
+
+    async fn load_and_register_session(
+        &self,
+        session_id: SessionId,
+        thread: Rc<Thread>,
+        replay_loaded_history: bool,
+    ) -> Result<agent_client_protocol::LoadSessionResponse, Error> {
+        let load = thread.load().await?;
+        if replay_loaded_history {
+            thread.mark_history_replay_pending().await;
+        }
+        Self::spawn_post_load_startup_tasks(thread.clone(), replay_loaded_history);
+        self.sessions.borrow_mut().insert(session_id, thread);
+        Ok(load)
     }
 
     fn should_bypass_startup_restore(&self) -> bool {
@@ -295,13 +313,9 @@ impl Agent for CodexAgent {
         )
         .await?;
         let thread = Rc::new(thread);
-        let load = thread.load().await?;
-        Self::spawn_available_commands_sync(thread.clone());
-        Self::spawn_startup_metadata_refresh(thread.clone());
-
-        self.sessions
-            .borrow_mut()
-            .insert(session_id.clone(), thread);
+        let load = self
+            .load_and_register_session(session_id.clone(), thread, false)
+            .await?;
 
         info!(
             session_id = %session_id,
@@ -360,21 +374,11 @@ impl Agent for CodexAgent {
             )
         };
 
-        let load = thread.load().await?;
         // При обычном load-сценарии реплеим историю; если сработал startup guard,
         // открываем свежий backend-thread под тем же ACP session handle.
-        Self::spawn_available_commands_sync(thread.clone());
-        Self::spawn_startup_metadata_refresh(thread.clone());
-        if !bypass_startup_restore {
-            thread.mark_history_replay_pending().await;
-            let replay_thread = thread.clone();
-            tokio::task::spawn_local(async move {
-                tokio::task::yield_now().await;
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                replay_thread.replay_loaded_history().await;
-            });
-        }
-        self.sessions.borrow_mut().insert(session_id, thread);
+        let load = self
+            .load_and_register_session(session_id, thread, !bypass_startup_restore)
+            .await?;
 
         info!(
             bypass_startup_restore,
@@ -430,11 +434,10 @@ impl Agent for CodexAgent {
             )
         };
 
-        let load = thread.load().await?;
         // Для session/resume не реплеим историю, но обновляем динамические команды после старта.
-        Self::spawn_available_commands_sync(thread.clone());
-        Self::spawn_startup_metadata_refresh(thread.clone());
-        self.sessions.borrow_mut().insert(session_id, thread);
+        let load = self
+            .load_and_register_session(session_id, thread, false)
+            .await?;
 
         info!(
             bypass_startup_restore,
@@ -485,12 +488,9 @@ impl Agent for CodexAgent {
             .await?;
 
         let thread = Rc::new(thread);
-        let load = thread.load().await?;
-        Self::spawn_available_commands_sync(thread.clone());
-        Self::spawn_startup_metadata_refresh(thread.clone());
-        self.sessions
-            .borrow_mut()
-            .insert(forked_session_id.clone(), thread);
+        let load = self
+            .load_and_register_session(forked_session_id.clone(), thread, false)
+            .await?;
 
         info!(
             session_id = %forked_session_id,

@@ -58,9 +58,11 @@ impl Thread {
             }
         };
 
-        let mut inner = self.inner.lock().await;
+        let inner = self.inner.lock().await;
         inner
             .app
+            .lock()
+            .await
             .send_file_change_approval_response(
                 request_id,
                 FileChangeRequestApprovalResponse { decision },
@@ -93,6 +95,8 @@ pub(in crate::thread) async fn handle_file_change_approval(
 
     inner
         .app
+        .lock()
+        .await
         .send_file_change_approval_response(
             request_id,
             FileChangeRequestApprovalResponse { decision },

@@ -201,21 +201,26 @@ impl Thread {
             return Err(Error::invalid_params().data("num_turns must be >= 1"));
         }
 
-        let (remaining_turns, replay_data) = {
-            let mut inner = self.inner.lock().await;
+        let (app, thread_id) = {
+            let inner = self.inner.lock().await;
             if replay_history && inner.history_replay_in_progress {
                 return Err(Error::invalid_params().data(
                     "history replay is still running; wait for it to finish before rolling back again",
                 ));
             }
-            let thread_id = inner.thread_id.clone();
-            let response = inner
-                .app
-                .thread_rollback(ThreadRollbackParams {
-                    thread_id,
-                    num_turns,
-                })
-                .await?;
+            (inner.app.clone(), inner.thread_id.clone())
+        };
+        let response = app
+            .lock()
+            .await
+            .thread_rollback(ThreadRollbackParams {
+                thread_id,
+                num_turns,
+            })
+            .await?;
+
+        let (remaining_turns, replay_data) = {
+            let mut inner = self.inner.lock().await;
             let remaining_turns = response.thread.turns.len();
 
             if replay_history {

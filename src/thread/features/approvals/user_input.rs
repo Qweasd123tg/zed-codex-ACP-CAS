@@ -115,6 +115,8 @@ pub(in crate::thread) async fn handle_tool_request_user_input(
 
     inner
         .app
+        .lock()
+        .await
         .send_tool_request_user_input_response(request_id, ToolRequestUserInputResponse { answers })
         .await
 }

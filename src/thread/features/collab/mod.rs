@@ -71,6 +71,8 @@ async fn ensure_agent_label(inner: &mut ThreadInner, thread_id: &str) {
 
     match inner
         .app
+        .lock()
+        .await
         .thread_read(ThreadReadParams {
             thread_id: thread_id.to_string(),
             include_turns: false,

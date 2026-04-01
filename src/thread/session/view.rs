@@ -23,10 +23,24 @@ impl Thread {
 
     // Не делаем лишний blocking model/list на bootstrap, если модели уже пришли из start/resume.
     pub async fn load(&self) -> Result<LoadSessionResponse, Error> {
-        let mut inner = self.inner.lock().await;
-        if inner.models.is_empty() {
-            match inner.app.model_list().await {
-                Ok(models) => inner.models = models.data,
+        let app = {
+            let inner = self.inner.lock().await;
+            inner.app.clone()
+        };
+
+        let models = {
+            let inner = self.inner.lock().await;
+            (!inner.models.is_empty()).then(|| inner.models.clone())
+        };
+
+        if models.is_none() {
+            match app.lock().await.model_list().await {
+                Ok(response) => {
+                    let mut inner = self.inner.lock().await;
+                    if inner.models.is_empty() {
+                        inner.models = response.data;
+                    }
+                }
                 Err(error) => {
                     warn!(
                         error = %error,
@@ -36,6 +50,7 @@ impl Thread {
             }
         }
 
+        let inner = self.inner.lock().await;
         Ok(LoadSessionResponse::new()
             .models(session_config::session_model_state(
                 &inner.models,
@@ -100,13 +115,14 @@ impl Thread {
 
     pub async fn refresh_startup_metadata(&self) {
         let started_at = Instant::now();
-        let (thread_id, workspace_cwd, codex_home, bundled_skills_enabled) = {
+        let (thread_id, workspace_cwd, codex_home, bundled_skills_enabled, app) = {
             let inner = self.inner.lock().await;
             (
                 inner.thread_id.clone(),
                 inner.workspace_cwd.clone(),
                 inner.codex_home.clone(),
                 inner.bundled_skills_enabled,
+                inner.app.clone(),
             )
         };
 
@@ -118,8 +134,8 @@ impl Thread {
         .await;
 
         let (account_rate_limits, account_status) = {
-            let mut inner = self.inner.lock().await;
-            let account_rate_limits = match inner.app.get_account_rate_limits().await {
+            let mut app = app.lock().await;
+            let account_rate_limits = match app.get_account_rate_limits().await {
                 Ok(response) => Some(response.rate_limits),
                 Err(error) => {
                     warn!(
@@ -130,7 +146,7 @@ impl Thread {
                     None
                 }
             };
-            let account_status = match inner.app.get_account().await {
+            let account_status = match app.get_account().await {
                 Ok(response) => build_account_status(response.account),
                 Err(error) => {
                     warn!(

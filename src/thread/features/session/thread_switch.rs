@@ -6,7 +6,7 @@ use agent_client_protocol::Error;
 use codex_app_server_protocol::JSONRPCMessage;
 use tracing::warn;
 
-use crate::thread::{ThreadInner, notification_dispatch::DrainOutcome};
+use crate::thread::{SharedAppServer, notification_dispatch::DrainOutcome};
 
 const THREAD_SWITCH_TRANSPORT_FLUSH_TOTAL_TIMEOUT_MS: u64 = 300;
 const THREAD_SWITCH_TRANSPORT_FLUSH_TIMEOUT_MS: u64 = 20;
@@ -14,7 +14,7 @@ const THREAD_SWITCH_TRANSPORT_FLUSH_IDLE_POLLS: usize = 2;
 const THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES: usize = 256;
 
 pub(in crate::thread) async fn flush_thread_switch_transport_state(
-    inner: &mut ThreadInner,
+    app: &SharedAppServer,
 ) -> Result<(), Error> {
     let deadline = tokio::time::Instant::now()
         + Duration::from_millis(THREAD_SWITCH_TRANSPORT_FLUSH_TOTAL_TIMEOUT_MS);
@@ -35,7 +35,7 @@ pub(in crate::thread) async fn flush_thread_switch_transport_state(
         let wait_for = remaining.min(Duration::from_millis(
             THREAD_SWITCH_TRANSPORT_FLUSH_TIMEOUT_MS,
         ));
-        let message = match tokio::time::timeout(wait_for, inner.app.next_message()).await {
+        let message = match tokio::time::timeout(wait_for, app.lock().await.next_message()).await {
             Ok(message) => {
                 quiet_polls = 0;
                 message?
@@ -49,7 +49,7 @@ pub(in crate::thread) async fn flush_thread_switch_transport_state(
             }
         };
         processed += 1;
-        handle_stale_thread_switch_message(inner, message).await?;
+        handle_stale_thread_switch_message(app, message).await?;
     };
 
     if matches!(
@@ -68,7 +68,7 @@ pub(in crate::thread) async fn flush_thread_switch_transport_state(
 }
 
 async fn handle_stale_thread_switch_message(
-    inner: &mut ThreadInner,
+    app: &SharedAppServer,
     message: JSONRPCMessage,
 ) -> Result<(), Error> {
     match message {
@@ -83,8 +83,8 @@ async fn handle_stale_thread_switch_message(
                 method = %request.method,
                 "rejecting stale app-server request during thread switch"
             );
-            inner
-                .app
+            app.lock()
+                .await
                 .send_server_request_error(
                     request.id,
                     -32600,

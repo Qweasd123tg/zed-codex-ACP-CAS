@@ -66,30 +66,20 @@ pub(in crate::thread) async fn replay_plan_text(client: &SessionClient, text: St
 
 // Replay-ветка для входа в review mode.
 pub(in crate::thread) async fn replay_entered_review_mode(client: &SessionClient, review: String) {
-    client
-        .send_agent_thought(format!("Entered review mode: {review}"))
-        .await;
+    send_review_mode_update(client, "Entered", review).await;
 }
 
 pub(in crate::thread) async fn emit_entered_review_mode(inner: &mut ThreadInner, review: String) {
-    inner
-        .client
-        .send_agent_thought(format!("Entered review mode: {review}"))
-        .await;
+    send_review_mode_update(&inner.client, "Entered", review).await;
 }
 
 // Replay-ветка для выхода из review mode.
 pub(in crate::thread) async fn replay_exited_review_mode(client: &SessionClient, review: String) {
-    client
-        .send_agent_thought(format!("Exited review mode: {review}"))
-        .await;
+    send_review_mode_update(client, "Exited", review).await;
 }
 
 pub(in crate::thread) async fn emit_exited_review_mode(inner: &mut ThreadInner, review: String) {
-    inner
-        .client
-        .send_agent_thought(format!("Exited review mode: {review}"))
-        .await;
+    send_review_mode_update(&inner.client, "Exited", review).await;
 }
 
 // Replay-ветка для compaction item.
@@ -103,12 +93,7 @@ pub(in crate::thread) async fn emit_thread_name_updated(inner: &mut ThreadInner,
         return;
     }
 
-    inner
-        .client
-        .send_notification(SessionUpdate::SessionInfoUpdate(
-            session_info_title_update_now(title),
-        ))
-        .await;
+    send_thread_title_update(&inner.client, title).await;
 }
 
 pub(in crate::thread) async fn flush_pending_thread_title_update(inner: &mut ThreadInner) {
@@ -116,12 +101,7 @@ pub(in crate::thread) async fn flush_pending_thread_title_update(inner: &mut Thr
         return;
     };
 
-    inner
-        .client
-        .send_notification(SessionUpdate::SessionInfoUpdate(
-            session_info_title_update_now(title),
-        ))
-        .await;
+    send_thread_title_update(&inner.client, title).await;
 }
 
 // Превращаем mixed user input в плоский текст для replay.
@@ -152,4 +132,18 @@ fn render_user_inputs(inputs: Vec<UserInput>) -> String {
     }
 
     rendered
+}
+
+async fn send_review_mode_update(client: &SessionClient, verb: &str, review: String) {
+    client
+        .send_agent_thought(format!("{verb} review mode: {review}"))
+        .await;
+}
+
+async fn send_thread_title_update(client: &SessionClient, title: String) {
+    client
+        .send_notification(SessionUpdate::SessionInfoUpdate(
+            session_info_title_update_now(title),
+        ))
+        .await;
 }

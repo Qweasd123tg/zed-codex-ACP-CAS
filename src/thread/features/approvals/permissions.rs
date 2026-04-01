@@ -61,6 +61,8 @@ pub(in crate::thread) async fn handle_permissions_request_approval(
 
     inner
         .app
+        .lock()
+        .await
         .send_permissions_request_approval_response(
             request_id,
             approval_response_from_outcome(outcome, &params.permissions),

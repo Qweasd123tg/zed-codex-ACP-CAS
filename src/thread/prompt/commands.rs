@@ -221,29 +221,21 @@ pub(super) async fn dispatch_session_command(
                 }
             }
         }
-        SessionCommand::Resume {
-            thread_id,
-            include_history,
-        } => Ok(CommandDispatchOutcome::Stop(
-            resume::selector::handle_resume_selector_command(
-                inner,
-                thread_id.as_deref(),
-                include_history,
-            )
-            .await?,
-        )),
-        SessionCommand::Archive { thread_id } => Ok(CommandDispatchOutcome::Stop(
-            session::controls::handle_archive_command(inner, thread_id).await?,
-        )),
+        SessionCommand::Resume { .. } => {
+            Err(Error::internal_error().data("resume should be handled directly in prompt flow"))
+        }
+        SessionCommand::Archive { .. } => {
+            Err(Error::internal_error().data("archive should be handled directly in prompt flow"))
+        }
         SessionCommand::Unarchive { thread_id } => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_unarchive_command(inner, thread_id).await?,
         )),
         SessionCommand::Compact => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_compact_command(inner).await?,
         )),
-        SessionCommand::Undo { num_turns } => Ok(CommandDispatchOutcome::Stop(
-            session::controls::handle_undo_command(inner, num_turns).await?,
-        )),
+        SessionCommand::Undo { .. } => {
+            Err(Error::internal_error().data("undo should be handled directly in prompt flow"))
+        }
         SessionCommand::PlanMode { raw_value, mode } => Ok(CommandDispatchOutcome::Stop(
             session::modes::handle_plan_mode_command(inner, raw_value, mode).await?,
         )),
@@ -251,9 +243,9 @@ pub(super) async fn dispatch_session_command(
             prompt,
             mode_kind: ModeKind::Plan,
         }),
-        SessionCommand::Fork { args } => Ok(CommandDispatchOutcome::Stop(
-            session::controls::handle_fork_command(inner, args).await?,
-        )),
+        SessionCommand::Fork { .. } => {
+            Err(Error::internal_error().data("fork should be handled directly in prompt flow"))
+        }
         SessionCommand::Rename { name } => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_rename_command(inner, name).await?,
         )),

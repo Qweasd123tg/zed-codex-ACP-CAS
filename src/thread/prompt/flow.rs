@@ -2,7 +2,7 @@
 
 use super::{
     Error, ModeKind, PLAN_IMPLEMENTATION_PROMPT, ReviewTarget, SessionCommand, StopReason, Thread,
-    notification_dispatch, prompt_commands, turn_execution, turn_notify,
+    prompt_commands, turn_execution, turn_notify,
 };
 use agent_client_protocol::ContentBlock;
 
@@ -24,9 +24,39 @@ impl Thread {
             Some(SessionCommand::Undo { num_turns }) => Some(*num_turns),
             _ => None,
         };
+        let archive_thread_id = match &command {
+            Some(SessionCommand::Archive { thread_id }) => Some(thread_id.clone()),
+            _ => None,
+        };
+        let fork_args = match &command {
+            Some(SessionCommand::Fork { args }) => Some(args.clone()),
+            _ => None,
+        };
         let mut prompt_override: Option<String> = None;
         let mut prompt_override_mode_kind: Option<ModeKind> = None;
         let mut review_target: Option<ReviewTarget> = None;
+        {
+            let inner = self.inner.lock().await;
+            if inner.history_replay_in_progress {
+                inner
+                    .client
+                    .send_agent_text(
+                        "History replay is still running. Wait for it to finish before sending the next prompt or session command.",
+                    )
+                    .await;
+                return Ok(StopReason::EndTurn);
+            }
+        }
+        if should_drain_background_notifications(command.as_ref()) {
+            let drain_outcome = self.drain_background_notifications_ext().await?;
+            if drain_outcome.was_truncated() {
+                tracing::warn!(
+                    processed_messages = drain_outcome.processed(),
+                    outcome = ?drain_outcome,
+                    "background transport drain stopped before the queue went quiet"
+                );
+            }
+        }
         let mut inner = self.inner.lock().await;
         if inner.history_replay_in_progress {
             inner
@@ -36,17 +66,6 @@ impl Thread {
                 )
                 .await;
             return Ok(StopReason::EndTurn);
-        }
-        if should_drain_background_notifications(command.as_ref()) {
-            let drain_outcome =
-                notification_dispatch::drain_background_notifications(&mut inner).await?;
-            if drain_outcome.was_truncated() {
-                tracing::warn!(
-                    processed_messages = drain_outcome.processed(),
-                    outcome = ?drain_outcome,
-                    "background transport drain stopped before the queue went quiet"
-                );
-            }
         }
         if let Some((thread_id, include_history)) = resume_request {
             drop(inner);
@@ -65,6 +84,14 @@ impl Thread {
                 .send_agent_text(format!("Rolled back last {num_turns} turn(s)."))
                 .await;
             return Ok(StopReason::EndTurn);
+        }
+        if let Some(thread_id) = archive_thread_id {
+            drop(inner);
+            return self.handle_archive_command_ext(thread_id).await;
+        }
+        if let Some(args) = fork_args {
+            drop(inner);
+            return self.handle_fork_command_ext(args).await;
         }
         if let Some(command) = command {
             match prompt_commands::dispatch_session_command(&mut inner, command).await? {
@@ -119,41 +146,65 @@ impl Thread {
             .await?;
         let mut inner = self.inner.lock().await;
 
-        if stop_reason == StopReason::EndTurn
-            && collaboration_mode_kind == ModeKind::Plan
-            && (inner.active_turn_saw_plan_item
-                || inner.active_turn_saw_plan_delta
-                || inner
-                    .last_plan_steps
-                    .iter()
-                    .any(|step| !step.trim().is_empty()))
+        if let Some(implementation_input) =
+            maybe_prepare_plan_implementation(&mut inner, stop_reason, collaboration_mode_kind)
+                .await?
         {
-            let implement_now = turn_execution::prompt_plan_implementation(&mut inner).await?;
-            if implement_now {
-                if !inner.last_plan_steps.is_empty() {
-                    inner.carryover_plan_steps = Some(inner.last_plan_steps.clone());
-                }
-                inner.collaboration_mode_kind = ModeKind::Default;
-                turn_notify::notify_mode_and_config_update(&inner).await;
-                let implementation_input =
-                    prompt_commands::build_prompt_items(vec![ContentBlock::from(
-                        PLAN_IMPLEMENTATION_PROMPT,
-                    )]);
-                if !implementation_input.is_empty() {
-                    inner
-                        .client
-                        .send_agent_text("Switching to default mode and implementing the plan.")
-                        .await;
-                    drop(inner);
-                    return self
-                        .run_single_turn_ext(implementation_input, ModeKind::Default)
-                        .await;
-                }
-            }
+            drop(inner);
+            return self
+                .run_single_turn_ext(implementation_input, ModeKind::Default)
+                .await;
         }
 
         Ok(stop_reason)
     }
+}
+
+async fn maybe_prepare_plan_implementation(
+    inner: &mut crate::thread::ThreadInner,
+    stop_reason: StopReason,
+    collaboration_mode_kind: ModeKind,
+) -> Result<Option<Vec<codex_app_server_protocol::UserInput>>, Error> {
+    if !should_offer_plan_implementation(inner, stop_reason, collaboration_mode_kind) {
+        return Ok(None);
+    }
+
+    if !turn_execution::prompt_plan_implementation(inner).await? {
+        return Ok(None);
+    }
+
+    if !inner.last_plan_steps.is_empty() {
+        inner.carryover_plan_steps = Some(inner.last_plan_steps.clone());
+    }
+    inner.collaboration_mode_kind = ModeKind::Default;
+    turn_notify::notify_mode_and_config_update(inner).await;
+
+    let implementation_input =
+        prompt_commands::build_prompt_items(vec![ContentBlock::from(PLAN_IMPLEMENTATION_PROMPT)]);
+    if implementation_input.is_empty() {
+        return Ok(None);
+    }
+
+    inner
+        .client
+        .send_agent_text("Switching to default mode and implementing the plan.")
+        .await;
+    Ok(Some(implementation_input))
+}
+
+fn should_offer_plan_implementation(
+    inner: &crate::thread::ThreadInner,
+    stop_reason: StopReason,
+    collaboration_mode_kind: ModeKind,
+) -> bool {
+    stop_reason == StopReason::EndTurn
+        && collaboration_mode_kind == ModeKind::Plan
+        && (inner.active_turn_saw_plan_item
+            || inner.active_turn_saw_plan_delta
+            || inner
+                .last_plan_steps
+                .iter()
+                .any(|step| !step.trim().is_empty()))
 }
 
 fn should_drain_background_notifications(command: Option<&SessionCommand>) -> bool {
