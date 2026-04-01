@@ -141,6 +141,13 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
+    if let Some(rest) = text.strip_prefix("/delete") {
+        let query = rest.trim();
+        return Some(SessionCommand::Archive {
+            thread_id: (!query.is_empty()).then(|| query.to_string()),
+        });
+    }
+
     if let Some(rest) = text.strip_prefix("/unarchive") {
         let query = rest.trim();
         return Some(SessionCommand::Unarchive {

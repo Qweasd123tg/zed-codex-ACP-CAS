@@ -12,6 +12,7 @@ use crate::thread::features::session::thread_switch::flush_thread_switch_transpo
 use crate::thread::features::session::{
     session_info_title_update_from_unix, session_info_title_update_now,
 };
+use crate::thread::session_lifecycle::is_missing_rollout_thread_error;
 use crate::thread::{ThreadInner, replay::replay_turns, turn_notify::notify_config_update};
 use agent_client_protocol::{
     Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
@@ -238,18 +239,16 @@ pub(in crate::thread) async fn handle_fork_command(
         .await
     {
         Ok(fork) => fork,
-        Err(error) => {
-            if error.to_string().contains("no rollout found for thread id") {
-                inner
-                    .client
-                    .send_agent_text(
-                        "Current thread is not ready to fork yet. Send at least one prompt first, then try `/fork` again.",
-                    )
-                    .await;
-                return Ok(StopReason::EndTurn);
-            }
-            return Err(error);
+        Err(error) if is_missing_rollout_thread_error(&error) => {
+            inner
+                .client
+                .send_agent_text(
+                    "Current thread is not ready to fork yet. Send at least one prompt first, then try `/fork` again.",
+                )
+                .await;
+            return Ok(StopReason::EndTurn);
         }
+        Err(error) => return Err(error),
     };
 
     apply_thread_switch(

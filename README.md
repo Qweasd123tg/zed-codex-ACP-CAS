@@ -64,6 +64,7 @@ Sub-agent and collaboration tool-call rendering:
 - Session lifecycle:
   - `new_session`
   - `load_session`
+  - `fork_session`
   - `resume_session`
   - `list_sessions`
 - Session-scoped MCP passthrough for `stdio` and `http`
@@ -81,9 +82,11 @@ Sub-agent and collaboration tool-call rendering:
   - `/compact`
   - `/undo`
   - `/plan`
+  - hidden compatibility alias `/delete -> /archive`
 - Better thread title handling for resume/archive/rename/fork flows
+- ACP `session/fork` surfaced on top of native `thread/fork`
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
-- `soft /new` and in-place `/fork` support for switching backend threads inside one ACP session
+- `soft /new`, in-place `/fork`, and standard ACP `session/fork` support
 - Tool call cards for command, MCP, web, image, file, and collab branches
 - Practical plan mode support
 - Better startup and reconnect diagnostics
@@ -132,6 +135,7 @@ Current strengths of this fork:
 - Better thread titles in lists and resumed sessions
 - Inline review flows backed by native `review/start`
 - Practical in-place thread switching with `/new`, `/fork`, `/resume`, and archive-triggered replacement
+- Standard ACP `session/fork` surfaced separately from the in-place slash `/fork` flow
 - Practical plan mode support
 - More complete collab and sub-agent UI mapping
 
@@ -141,7 +145,10 @@ Current gaps:
 - Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
 - Some upstream-style flows are still missing or incomplete, including `close_session` and `/logout`
+- There is still no true delete operation from `codex app-server`; `/delete` is kept only as an explicit compatibility alias to `/archive`
 - `soft /new` and `/fork` switch only the backend thread; current Zed-side ACP behavior still does not clear sidebar chat history for in-place thread switches
+- `ACP session/fork` is surfaced by this adapter, but current `Zed` still has no native UI entrypoint for it; in practice you use slash `/fork` unless you patch the client
+- `Zed` history already has delete affordances, but the current ACP bridge for external agents does not surface `session/delete`; until that exists, `/delete` remains only a slash alias to `/archive`
 - Some behavior still depends on Zed-side ACP support
 
 ## Limitations
@@ -149,7 +156,7 @@ Current gaps:
 - MCP passthrough supports `stdio` and `http` today
 - MCP `sse` passthrough is not supported yet
 - `item/tool/call` / `DynamicToolCall` requests are rejected as unsupported
-- `/undo` itself works, but the visual rewind/edit button in current `Zed` still depends on a client-side ACP fix for rollback wiring; in practice that means patching or rebuilding `Zed` if you want the native button UX
+- `/undo` itself works, and the adapter also exposes rollback via ACP ext methods, but the visual rewind/edit button and the pencil-style edit UX in current `Zed` still depend on a client-side ACP fix: the external-agent ACP bridge does not wire `truncate()` / rollback ext-methods for this flow yet. In practice that means patching or rebuilding `Zed` if you want the native button UX
 - While history replay is restoring after `load_session` or replaying `/undo`, new prompts and session commands are intentionally fenced until replay finishes; this avoids overlapping turn/replay state in one ACP session
 - Linux is the most tested platform right now
 - Multi-platform release artifacts can exist before all platforms are equally tested in real use
@@ -274,6 +281,8 @@ Useful environment variables:
 - `CODEX_ACP_STARTUP_METADATA_TIMEOUT_MS=<milliseconds>`
 
 `CODEX_ACP_STARTUP_TIMEOUT_MS` now also bounds the `turn/start` handshake, so an app-server that stops responding before it returns a `turn_id` does not leave the ACP UI spinning forever.
+
+`ACP_DISABLE_AUTO_RESTORE=1` suppresses only the earliest startup-driven backend restore right after the agent boots. Later explicit opens from Zed history continue to use the normal restore path. If you want a clean startup and still keep manual history opens working, this is the intended mode.
 
 ## Troubleshooting
 

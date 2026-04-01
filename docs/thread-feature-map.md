@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-03-31` (`/init` prompt bootstrap surfaced in `PromptCommands`/`PromptFlow`).
+Обновлено: `2026-04-01` (`session/fork` surfaced in `CodexAgent` on top of existing `thread/fork` lifecycle).
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -100,10 +100,13 @@ flowchart LR
 Смысл этой санитизации: stale notifications старого треда глушатся, stale server requests явно отклоняются ответом, а не теряются молча.
 Picker и `/threads` при этом предпочитают `thread.name`, если тред был явно переименован через `/rename`, и только потом показывают `preview`.
 После успешного `/resume` текущая ACP-сессия теперь сразу получает `SessionInfoUpdate` с `title` и `updated_at`, чтобы клиентский заголовок не застревал на последнем slash-prompt, а history/recent списки не деградировали в `Unknown`.
+При этом live `ThreadNameUpdated` во время активного turn теперь не форсит ACP `title` мгновенно: автообновление имени буферизуется и публикуется уже после завершения turn, чтобы не сбивать client-side provisional-title / generating UX в `Zed`.
 Для `load_session` и `/undo` history replay теперь дополнительно fenced через `history_replay_in_progress`: pending-состояние выставляется заранее в `src/codex_agent.rs` / `src/thread/session/view.rs`, а `src/thread/prompt/flow.rs` не пускает новый prompt или session command, пока `src/thread/core/replay.rs` ещё восстанавливает историю.
 Это же позволяет не держать `ThreadInner` mutex во время тяжёлого `/undo` replay: `thread_rollback`, label-cache warmup и snapshot нужных полей остаются под lock, а сам `replay::replay_turns(...)` идёт уже после выхода из критической секции.
 Тот же паттерн теперь применён и к `/resume --history`: selector остаётся тонким, а `src/thread/features/resume/apply.rs` под lock делает transport scrub, `thread_resume`, runtime state sync и snapshot replay-данных, после чего history replay идёт уже вне общего mutex под тем же `history_replay_in_progress` fence.
+При включённом `ACP_DISABLE_AUTO_RESTORE=1` `src/codex_agent.rs` подавляет только самый ранний startup-driven backend-restore в небольшом окне после старта агента: вместо него поднимается fresh backend-thread под тем же ACP session handle. Более поздние явные открытия из history снова идут через нормальный restore-path.
 Важно: старые сообщения, уже показанные ACP-клиентом, при этом не очищаются — это ограничение UI/API клиента, а не replay-пайплайна адаптера.
+Отдельно: `/undo` rollback-flow у адаптера рабочий, и ACP ext rollback methods тоже реализованы в `src/codex_agent.rs`, но native rewind/edit button и pencil-style edit UX по-прежнему упираются в client-side wiring `Zed`: внешний ACP bridge пока не wire-ит `truncate()` / ext rollback path для этого сценария. Аналогично `ACP session/fork` уже surfaced в адаптере, но отдельного native UI entrypoint под него в текущем `Zed` пока нет; history delete affordance тоже остается Zed-side задачей до появления `session/delete` в ACP bridge.
 
 ## 5) Collab/Subagents ветка
 
@@ -189,6 +192,8 @@ flowchart LR
 - Если ACP-сессия стартует с `mcp_servers`, эти session-scoped overrides теперь тоже входят в этот связный набор:
   они собираются в `src/thread/session/lifecycle.rs`, хранятся в `ThreadInner`, подаются в `thread/start` / `thread/resume`
   и должны переживать replacement-thread внутри той же ACP-сессии.
+- Тот же lifecycle-набор теперь обслуживает и стандартный ACP `session/fork`: `src/codex_agent.rs` публикует capability и handler,
+  а `src/thread/session/lifecycle.rs` использует существующий `thread/fork` backend, после чего поднимает forked ACP session как отдельный `Thread`.
 
 6. Изменение collab/subagents контракта:
 - `src/thread/features/collab/render.rs`
@@ -290,7 +295,8 @@ flowchart LR
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
 | `src/thread/prompt/*` | Парсинг slash-команд, fixed prompt-turn override-ы (`/init`, `/plan <prompt>`), routing в review/session-turn flow |
 | `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread, transport scrub при переключении |
-| `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, archive/unarchive picker UI, session replay события, `SessionInfoUpdate` (`title` + `updated_at`), history replay fencing и runtime handling нижних session selectors |
+| `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, hidden `/delete -> /archive` alias, archive/unarchive picker UI, ACP `session/fork` bootstrap helper, session replay события, `SessionInfoUpdate` (`title` + `updated_at`), history replay fencing и runtime handling нижних session selectors |
+| `src/codex_agent.rs` + `src/thread/session/lifecycle.rs` | ACP `session/fork` capability и handler поверх существующего `thread/fork` backend |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
 | `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw payload |
 | `src/thread/features/status_mapping.rs` | app-server status -> ACP status |

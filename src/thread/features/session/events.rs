@@ -98,6 +98,24 @@ pub(in crate::thread) async fn replay_context_compaction(client: &SessionClient)
 }
 
 pub(in crate::thread) async fn emit_thread_name_updated(inner: &mut ThreadInner, title: String) {
+    if inner.active_turn_id.is_some() {
+        inner.pending_thread_title_update = Some(title);
+        return;
+    }
+
+    inner
+        .client
+        .send_notification(SessionUpdate::SessionInfoUpdate(
+            session_info_title_update_now(title),
+        ))
+        .await;
+}
+
+pub(in crate::thread) async fn flush_pending_thread_title_update(inner: &mut ThreadInner) {
+    let Some(title) = inner.pending_thread_title_update.take() else {
+        return;
+    };
+
     inner
         .client
         .send_notification(SessionUpdate::SessionInfoUpdate(

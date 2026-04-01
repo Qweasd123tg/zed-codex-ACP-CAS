@@ -3,14 +3,14 @@
 
 use agent_client_protocol::{
     Agent, AgentCapabilities, AuthMethod, AuthMethodId, AuthenticateRequest, AuthenticateResponse,
-    CancelNotification, ClientCapabilities, Error, ExtRequest, ExtResponse, Implementation,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, McpCapabilities, NewSessionRequest,
-    NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse, ProtocolVersion,
-    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionId,
-    SessionListCapabilities, SessionResumeCapabilities, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-    SetSessionModelRequest, SetSessionModelResponse,
+    CancelNotification, ClientCapabilities, Error, ExtRequest, ExtResponse, ForkSessionRequest,
+    ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    McpCapabilities, NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest,
+    PromptResponse, ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse,
+    SessionCapabilities, SessionForkCapabilities, SessionId, SessionListCapabilities,
+    SessionResumeCapabilities, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
 };
 use codex_core::{
     CodexAuth,
@@ -21,10 +21,11 @@ use codex_login::{CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR};
 use serde::Deserialize;
 use serde_json::value::to_raw_value;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 use tracing::{debug, info};
 
@@ -42,9 +43,13 @@ pub struct CodexAgent {
     client_capabilities: Arc<Mutex<ClientCapabilities>>,
     config: Config,
     auto_restore_enabled: bool,
+    startup_instant: Instant,
+    startup_restore_bypassed: Cell<bool>,
     // Реестр активных ACP-сессий в памяти на время жизни процесса.
     sessions: Rc<RefCell<HashMap<SessionId, Rc<Thread>>>>,
 }
+
+const STARTUP_RESTORE_GUARD_WINDOW: Duration = Duration::from_secs(5);
 
 impl CodexAgent {
     fn auto_restore_enabled_from_env() -> bool {
@@ -63,12 +68,15 @@ impl CodexAgent {
             false,
             config.cli_auth_credentials_store_mode,
         );
+        let auto_restore_enabled = Self::auto_restore_enabled_from_env();
 
         Self {
             auth_manager,
             client_capabilities: Arc::default(),
             config,
-            auto_restore_enabled: Self::auto_restore_enabled_from_env(),
+            auto_restore_enabled,
+            startup_instant: Instant::now(),
+            startup_restore_bypassed: Cell::new(false),
             sessions: Rc::default(),
         }
     }
@@ -88,6 +96,33 @@ impl CodexAgent {
             return Err(Error::auth_required());
         }
         Ok(())
+    }
+
+    fn spawn_available_commands_sync(thread: Rc<Thread>) {
+        tokio::task::spawn_local(async move {
+            // Сначала отдаём клиенту session response, затем публикуем динамические
+            // метаданные команд, чтобы не ловить UI-гонки на старте новой ACP-сессии.
+            tokio::task::yield_now().await;
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            thread.notify_available_commands().await;
+        });
+    }
+
+    fn should_bypass_startup_restore(&self) -> bool {
+        if self.auto_restore_enabled {
+            return false;
+        }
+
+        if self.startup_restore_bypassed.get() {
+            return false;
+        }
+
+        if self.startup_instant.elapsed() > STARTUP_RESTORE_GUARD_WINDOW {
+            return false;
+        }
+
+        self.startup_restore_bypassed.set(true);
+        true
     }
 }
 
@@ -138,6 +173,7 @@ impl Agent for CodexAgent {
             .load_session(true);
         capabilities.session_capabilities = SessionCapabilities::new()
             .list(SessionListCapabilities::new())
+            .fork(SessionForkCapabilities::new())
             .resume(SessionResumeCapabilities::new());
 
         let mut auth_methods = vec![
@@ -253,14 +289,7 @@ impl Agent for CodexAgent {
         .await?;
         let thread = Rc::new(thread);
         let load = thread.load().await?;
-        let notify_thread = thread.clone();
-        tokio::task::spawn_local(async move {
-            // Сначала отдаём клиенту ответ load/new, затем публикуем
-            // динамические метаданные команд, чтобы избежать гонок UI при старте.
-            tokio::task::yield_now().await;
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            notify_thread.notify_available_commands().await;
-        });
+        Self::spawn_available_commands_sync(thread.clone());
 
         self.sessions
             .borrow_mut()
@@ -288,9 +317,11 @@ impl Agent for CodexAgent {
         let session_mcp_setup =
             build_session_mcp_setup(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
 
-        let thread = if self.auto_restore_enabled {
+        let bypass_startup_restore = self.should_bypass_startup_restore();
+
+        let thread = if bypass_startup_restore {
             Rc::new(
-                Thread::resume_session(
+                Thread::start_session_for_existing_session_id(
                     session_id.clone(),
                     &self.config,
                     cwd,
@@ -302,7 +333,7 @@ impl Agent for CodexAgent {
             )
         } else {
             Rc::new(
-                Thread::start_session_for_existing_session_id(
+                Thread::resume_session(
                     session_id.clone(),
                     &self.config,
                     cwd,
@@ -315,15 +346,10 @@ impl Agent for CodexAgent {
         };
 
         let load = thread.load().await?;
-        let notify_thread = thread.clone();
-        tokio::task::spawn_local(async move {
-            // При обычном load-сценарии реплеим историю; при отключённом auto-restore
-            // просто открываем свежий backend-thread под тем же ACP session handle.
-            tokio::task::yield_now().await;
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            notify_thread.notify_available_commands().await;
-        });
-        if self.auto_restore_enabled {
+        // При обычном load-сценарии реплеим историю; если сработал startup guard,
+        // открываем свежий backend-thread под тем же ACP session handle.
+        Self::spawn_available_commands_sync(thread.clone());
+        if !bypass_startup_restore {
             thread.mark_history_replay_pending().await;
             let replay_thread = thread.clone();
             tokio::task::spawn_local(async move {
@@ -353,9 +379,11 @@ impl Agent for CodexAgent {
         let session_mcp_setup =
             build_session_mcp_setup(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
 
-        let thread = if self.auto_restore_enabled {
+        let bypass_startup_restore = self.should_bypass_startup_restore();
+
+        let thread = if bypass_startup_restore {
             Rc::new(
-                Thread::resume_session(
+                Thread::start_session_for_existing_session_id(
                     session_id.clone(),
                     &self.config,
                     cwd,
@@ -367,7 +395,7 @@ impl Agent for CodexAgent {
             )
         } else {
             Rc::new(
-                Thread::start_session_for_existing_session_id(
+                Thread::resume_session(
                     session_id.clone(),
                     &self.config,
                     cwd,
@@ -380,13 +408,8 @@ impl Agent for CodexAgent {
         };
 
         let load = thread.load().await?;
-        let notify_thread = thread.clone();
-        tokio::task::spawn_local(async move {
-            // Для session/resume не реплеим историю, но обновляем динамические команды после старта.
-            tokio::task::yield_now().await;
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            notify_thread.notify_available_commands().await;
-        });
+        // Для session/resume не реплеим историю, но обновляем динамические команды после старта.
+        Self::spawn_available_commands_sync(thread.clone());
         self.sessions.borrow_mut().insert(session_id, thread);
 
         Ok(ResumeSessionResponse::new()
@@ -404,8 +427,51 @@ impl Agent for CodexAgent {
         Thread::list_sessions(&self.config, request.cwd, request.cursor).await
     }
 
+    async fn fork_session(
+        &self,
+        request: ForkSessionRequest,
+    ) -> Result<ForkSessionResponse, Error> {
+        self.check_auth().await?;
+
+        let ForkSessionRequest {
+            session_id,
+            cwd,
+            mcp_servers,
+            ..
+        } = request;
+
+        let session_mcp_setup =
+            build_session_mcp_setup(self.config.mcp_servers.get(), &cwd, mcp_servers)?;
+        let source_thread = self.get_thread(&session_id)?;
+        let (forked_session_id, thread) = source_thread
+            .fork_session(
+                &self.config,
+                cwd,
+                self.client_capabilities.clone(),
+                session_mcp_setup.config_overrides,
+                session_mcp_setup.summary,
+            )
+            .await?;
+
+        let thread = Rc::new(thread);
+        let load = thread.load().await?;
+        Self::spawn_available_commands_sync(thread.clone());
+        self.sessions
+            .borrow_mut()
+            .insert(forked_session_id.clone(), thread);
+
+        Ok(ForkSessionResponse::new(forked_session_id)
+            .modes(load.modes)
+            .models(load.models)
+            .config_options(load.config_options))
+    }
+
     async fn prompt(&self, request: PromptRequest) -> Result<PromptResponse, Error> {
         self.check_auth().await?;
+
+        // Даем ACP-клиенту шанс отрисовать running turn/spinner до того, как
+        // начнем pre-prompt drain и остальную подготовку внутри Thread::prompt.
+        tokio::task::yield_now().await;
 
         let thread = self.get_thread(&request.session_id)?;
         let stop_reason = thread.prompt(request).await?;
@@ -521,10 +587,19 @@ impl TryFrom<AuthMethodId> for CodexAuthMethod {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_core::config::Config;
+    use std::path::PathBuf;
 
     fn build_ext_request(method: &str, value: serde_json::Value) -> ExtRequest {
         let raw = to_raw_value(&value).expect("raw value");
         ExtRequest::new(method, Arc::from(raw))
+    }
+
+    fn build_test_config() -> Config {
+        let mut config = Config::load_default_with_cli_overrides(vec![])
+            .expect("default config should load for tests");
+        config.cwd = PathBuf::from("/tmp/codex-acp-cas-tests");
+        config
     }
 
     #[test]
@@ -589,5 +664,23 @@ mod tests {
 
         let error = parse_thread_rollback_ext_params(&request).expect_err("should fail");
         assert_eq!(error.code, agent_client_protocol::ErrorCode::InvalidParams);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn initialize_advertises_session_fork_capability() {
+        let agent = CodexAgent::new(build_test_config());
+        let response = agent
+            .initialize(InitializeRequest::new(ProtocolVersion::V1))
+            .await
+            .expect("initialize should succeed");
+
+        assert!(
+            response
+                .agent_capabilities
+                .session_capabilities
+                .fork
+                .is_some(),
+            "session/fork capability should be advertised",
+        );
     }
 }

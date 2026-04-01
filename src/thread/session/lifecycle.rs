@@ -26,7 +26,7 @@ use super::{
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::session_usage_cache::{context_usage_cache_path, restore_cached_context_usage};
-use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::{ThreadForkParams, ThreadResumeResponse, ThreadStartResponse};
 use tracing::{info, warn};
 
 const RESUME_STARTUP_RETRY_ATTEMPTS: usize = 6;
@@ -231,7 +231,7 @@ fn env_to_map(env: Vec<EnvVariable>) -> Option<HashMap<String, String>> {
     }
 }
 
-fn is_retryable_missing_rollout_resume_error(error: &Error) -> bool {
+pub(in crate::thread) fn is_missing_rollout_thread_error(error: &Error) -> bool {
     let message = error.to_string();
     message.contains("no rollout found for thread id")
 }
@@ -244,7 +244,7 @@ pub(in crate::thread) async fn thread_resume_with_startup_retry(
         match app.thread_resume(params.clone()).await {
             Ok(response) => return Ok(response),
             Err(error)
-                if is_retryable_missing_rollout_resume_error(&error)
+                if is_missing_rollout_thread_error(&error)
                     && attempt < RESUME_STARTUP_RETRY_ATTEMPTS =>
             {
                 let retry_number = attempt + 1;
@@ -266,6 +266,199 @@ pub(in crate::thread) async fn thread_resume_with_startup_retry(
 }
 
 impl Thread {
+    async fn fork_as_new_session(
+        &self,
+        config: &Config,
+        cwd: PathBuf,
+        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        requested_session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
+        requested_session_mcp_summary: ContextSelectorSummary,
+    ) -> Result<(SessionId, Self), Error> {
+        let requested_mcp_override_present = requested_session_mcp_config_overrides.is_some();
+        let (
+            source_thread_id,
+            session_id,
+            resumed_cwd,
+            session_mcp_config_overrides,
+            session_mcp_summary,
+        ) = {
+            let mut inner = self.inner.lock().await;
+            let source_thread_id = inner.thread_id.clone();
+            let source_model = inner.current_model.clone();
+            let source_model_provider = inner.current_model_provider.clone();
+            let source_approval_policy = inner.approval_policy;
+            let source_sandbox_mode = inner.sandbox_mode;
+            let session_mcp_config_overrides = if requested_mcp_override_present {
+                requested_session_mcp_config_overrides.clone()
+            } else {
+                inner.session_mcp_config_overrides.clone()
+            };
+            let session_mcp_summary = if requested_mcp_override_present {
+                requested_session_mcp_summary
+            } else {
+                inner.session_mcp_summary.clone()
+            };
+            let fork = match inner
+                .app
+                .thread_fork(ThreadForkParams {
+                    thread_id: source_thread_id.clone(),
+                    model: Some(source_model),
+                    model_provider: Some(source_model_provider),
+                    cwd: Some(cwd.to_string_lossy().to_string()),
+                    approval_policy: Some(source_approval_policy),
+                    sandbox: Some(source_sandbox_mode),
+                    config: session_mcp_config_overrides.clone(),
+                    ..Default::default()
+                })
+                .await
+            {
+                Ok(fork) => fork,
+                Err(error) if is_missing_rollout_thread_error(&error) => {
+                    return Err(Error::invalid_params().data(
+                        "Current session is not ready to fork yet. Send at least one prompt first, then try again.",
+                    ));
+                }
+                Err(error) => return Err(error),
+            };
+
+            (
+                source_thread_id,
+                SessionId::new(fork.thread.id),
+                fork.thread.cwd,
+                session_mcp_config_overrides,
+                session_mcp_summary,
+            )
+        };
+
+        info!(
+            session_id = %session_id,
+            source_thread_id = %source_thread_id,
+            cwd = %resumed_cwd.display(),
+            "Bootstrapping forked ACP session"
+        );
+
+        let thread = Self::resume_session(
+            session_id.clone(),
+            config,
+            resumed_cwd,
+            client_capabilities,
+            session_mcp_config_overrides,
+            session_mcp_summary,
+        )
+        .await?;
+
+        Ok((session_id, thread))
+    }
+
+    async fn build_resumed_thread(
+        session_id: SessionId,
+        config: &Config,
+        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
+        session_mcp_summary: ContextSelectorSummary,
+        mut app: AppServerProcess,
+        resume: ThreadResumeResponse,
+    ) -> Self {
+        let models = match app.model_list().await {
+            Ok(response) => response.data,
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    session_id = %session_id,
+                    "Failed to load model list during resumed session startup"
+                );
+                Vec::new()
+            }
+        };
+        let account_rate_limits = match app.get_account_rate_limits().await {
+            Ok(response) => Some(response.rate_limits),
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    session_id = %session_id,
+                    "Failed to read rate limits during resumed session startup"
+                );
+                None
+            }
+        };
+        let reasoning_effort =
+            resolve_reasoning_effort(&models, &resume.model, resume.reasoning_effort);
+        let context_usage_cache_path = context_usage_cache_path(&config.codex_home);
+        let cached_context_usage = restore_cached_context_usage(
+            &context_usage_cache_path,
+            &resume.thread.id,
+            &resume.thread.turns,
+        );
+        let resumed_workspace_cwd = resume.thread.cwd.clone();
+        let session_skills_summary =
+            load_session_skills_summary(config, &resumed_workspace_cwd).await;
+        let account_status = load_account_status(&mut app).await;
+        let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
+        let mut agent_labels = HashMap::new();
+        remember_agent_label(
+            &mut agent_labels,
+            resume.thread.id.clone(),
+            resume.thread.agent_nickname.clone(),
+            resume.thread.agent_role.clone(),
+        );
+
+        Thread {
+            inner: tokio::sync::Mutex::new(ThreadInner {
+                session_id: session_id.clone(),
+                app,
+                codex_home: config.codex_home.clone(),
+                bundled_skills_enabled: config.bundled_skills_enabled(),
+                thread_id: resume.thread.id,
+                context_usage_cache_path,
+                session_mcp_config_overrides,
+                session_mcp_summary,
+                session_skills_summary,
+                account_status,
+                workspace_cwd: resumed_workspace_cwd,
+                client: SessionClient::new(session_id, client_capabilities),
+                approval_policy: resume.approval_policy,
+                sandbox_policy: resume.sandbox.clone(),
+                sandbox_mode: policy_to_mode(&resume.sandbox),
+                edit_approval_mode: EditApprovalMode::AutoApprove,
+                collaboration_mode_kind: ModeKind::Default,
+                current_model: resume.model,
+                current_model_provider: resume.model_provider,
+                reasoning_effort,
+                agent_labels,
+                compaction_in_progress: false,
+                last_used_tokens: cached_context_usage.map(|(used, _)| used),
+                total_token_usage: None,
+                context_window_size: cached_context_usage.map(|(_, size)| size),
+                context_usage_source: cached_context_usage.map(|_| ContextUsageSource::Cached),
+                account_rate_limits,
+                models,
+                active_turn_id: None,
+                active_turn_mode_kind: None,
+                active_turn_saw_plan_item: false,
+                active_turn_saw_plan_delta: false,
+                started_tool_calls: HashSet::new(),
+                completed_turn_ids: HashSet::new(),
+                turn_plan_updates_seen: HashSet::new(),
+                fallback_plan: None,
+                file_change_locations: HashMap::new(),
+                file_change_started_changes: HashMap::new(),
+                file_change_before_contents: HashMap::new(),
+                latest_turn_diff: None,
+                file_change_paths_this_turn: HashSet::new(),
+                synced_paths_this_turn: HashSet::new(),
+                last_plan_steps: Vec::new(),
+                carryover_plan_steps: None,
+                pending_thread_title_update: None,
+                replay_turns: resume.thread.turns,
+                history_replay_in_progress: false,
+                turn_last_progress_at: std::time::Instant::now(),
+                turn_reconnect_warning_count: 0,
+                turn_reconnect_retry_limit_hit: false,
+            }),
+            cancel_tx,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn build_started_thread(
         session_id: SessionId,
@@ -352,6 +545,7 @@ impl Thread {
                 synced_paths_this_turn: HashSet::new(),
                 last_plan_steps: Vec::new(),
                 carryover_plan_steps: None,
+                pending_thread_title_update: None,
                 replay_turns: vec![],
                 history_replay_in_progress: false,
                 turn_last_progress_at: std::time::Instant::now(),
@@ -501,7 +695,7 @@ impl Thread {
 
         let resume = match thread_resume_with_startup_retry(&mut app, resume_params.clone()).await {
             Ok(resume) => resume,
-            Err(error) if is_retryable_missing_rollout_resume_error(&error) => {
+            Err(error) if is_missing_rollout_thread_error(&error) => {
                 warn!(
                     requested_thread_id = resume_params.thread_id,
                     "resume source is unavailable or not materialized; starting a fresh backend thread for this ACP session"
@@ -518,104 +712,34 @@ impl Thread {
             }
             Err(error) => return Err(error),
         };
+        Ok(Self::build_resumed_thread(
+            session_id,
+            config,
+            client_capabilities,
+            session_mcp_config_overrides,
+            session_mcp_summary,
+            app,
+            resume,
+        )
+        .await)
+    }
 
-        let models = match app.model_list().await {
-            Ok(response) => response.data,
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    session_id = %session_id,
-                    "Failed to load model list during resumed session startup"
-                );
-                Vec::new()
-            }
-        };
-        let account_rate_limits = match app.get_account_rate_limits().await {
-            Ok(response) => Some(response.rate_limits),
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    session_id = %session_id,
-                    "Failed to read rate limits during resumed session startup"
-                );
-                None
-            }
-        };
-        let reasoning_effort =
-            resolve_reasoning_effort(&models, &resume.model, resume.reasoning_effort);
-        let context_usage_cache_path = context_usage_cache_path(&config.codex_home);
-        let cached_context_usage = restore_cached_context_usage(
-            &context_usage_cache_path,
-            &resume.thread.id,
-            &resume.thread.turns,
-        );
-        let resumed_workspace_cwd = resume.thread.cwd.clone();
-        let session_skills_summary =
-            load_session_skills_summary(config, &resumed_workspace_cwd).await;
-        let account_status = load_account_status(&mut app).await;
-        let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
-        let mut agent_labels = HashMap::new();
-        remember_agent_label(
-            &mut agent_labels,
-            resume.thread.id.clone(),
-            resume.thread.agent_nickname.clone(),
-            resume.thread.agent_role.clone(),
-        );
-
-        Ok(Thread {
-            inner: tokio::sync::Mutex::new(ThreadInner {
-                session_id: session_id.clone(),
-                app,
-                codex_home: config.codex_home.clone(),
-                bundled_skills_enabled: config.bundled_skills_enabled(),
-                thread_id: resume.thread.id,
-                context_usage_cache_path,
-                session_mcp_config_overrides,
-                session_mcp_summary,
-                session_skills_summary,
-                account_status,
-                workspace_cwd: resumed_workspace_cwd,
-                client: SessionClient::new(session_id, client_capabilities),
-                approval_policy: resume.approval_policy,
-                sandbox_policy: resume.sandbox.clone(),
-                sandbox_mode: policy_to_mode(&resume.sandbox),
-                edit_approval_mode: EditApprovalMode::AutoApprove,
-                collaboration_mode_kind: ModeKind::Default,
-                current_model: resume.model,
-                current_model_provider: resume.model_provider,
-                reasoning_effort,
-                agent_labels,
-                compaction_in_progress: false,
-                last_used_tokens: cached_context_usage.map(|(used, _)| used),
-                total_token_usage: None,
-                context_window_size: cached_context_usage.map(|(_, size)| size),
-                context_usage_source: cached_context_usage.map(|_| ContextUsageSource::Cached),
-                account_rate_limits,
-                models,
-                active_turn_id: None,
-                active_turn_mode_kind: None,
-                active_turn_saw_plan_item: false,
-                active_turn_saw_plan_delta: false,
-                started_tool_calls: HashSet::new(),
-                completed_turn_ids: HashSet::new(),
-                turn_plan_updates_seen: HashSet::new(),
-                fallback_plan: None,
-                file_change_locations: HashMap::new(),
-                file_change_started_changes: HashMap::new(),
-                file_change_before_contents: HashMap::new(),
-                latest_turn_diff: None,
-                file_change_paths_this_turn: HashSet::new(),
-                synced_paths_this_turn: HashSet::new(),
-                last_plan_steps: Vec::new(),
-                carryover_plan_steps: None,
-                replay_turns: resume.thread.turns,
-                history_replay_in_progress: false,
-                turn_last_progress_at: std::time::Instant::now(),
-                turn_reconnect_warning_count: 0,
-                turn_reconnect_retry_limit_hit: false,
-            }),
-            cancel_tx,
-        })
+    pub async fn fork_session(
+        &self,
+        config: &Config,
+        cwd: PathBuf,
+        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        requested_session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
+        requested_session_mcp_summary: ContextSelectorSummary,
+    ) -> Result<(SessionId, Self), Error> {
+        self.fork_as_new_session(
+            config,
+            cwd,
+            client_capabilities,
+            requested_session_mcp_config_overrides,
+            requested_session_mcp_summary,
+        )
+        .await
     }
 
     pub async fn list_sessions(
@@ -677,7 +801,7 @@ impl Thread {
 mod tests {
     use super::{
         build_session_mcp_config_overrides, format_session_updated_at,
-        is_retryable_missing_rollout_resume_error,
+        is_missing_rollout_thread_error,
     };
     use agent_client_protocol::{Error, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
     use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
@@ -688,20 +812,20 @@ mod tests {
     fn detects_retryable_missing_rollout_resume_error() {
         let error = Error::internal_error()
             .data("thread/resume failed: no rollout found for thread id 019-test (code -32600)");
-        assert!(is_retryable_missing_rollout_resume_error(&error));
+        assert!(is_missing_rollout_thread_error(&error));
     }
 
     #[test]
     fn ignores_other_resume_errors() {
         let error = Error::internal_error().data("thread/resume failed: auth required");
-        assert!(!is_retryable_missing_rollout_resume_error(&error));
+        assert!(!is_missing_rollout_thread_error(&error));
     }
 
     #[test]
     fn detects_retryable_missing_rollout_even_in_wrapped_error_text() {
         let error = Error::internal_error()
             .data("Internal error: \"no rollout found for thread id 019-test\"");
-        assert!(is_retryable_missing_rollout_resume_error(&error));
+        assert!(is_missing_rollout_thread_error(&error));
     }
 
     #[test]

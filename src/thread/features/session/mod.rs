@@ -115,7 +115,7 @@ mod tests {
     fn session_info_update_from_unix_uses_rfc3339() {
         let update = session_info_title_update_from_unix("demo", 1_775_014_896);
         let updated_at = update.updated_at.value().expect("updated_at present");
-        let parsed = DateTime::parse_from_rfc3339(&updated_at).expect("valid rfc3339");
+        let parsed = DateTime::parse_from_rfc3339(updated_at).expect("valid rfc3339");
         assert_eq!(parsed.timestamp(), 1_775_014_896);
     }
 
@@ -123,6 +123,6 @@ mod tests {
     fn session_info_update_now_uses_rfc3339() {
         let update = session_info_title_update_now("demo");
         let updated_at = update.updated_at.value().expect("updated_at present");
-        DateTime::parse_from_rfc3339(&updated_at).expect("valid rfc3339");
+        DateTime::parse_from_rfc3339(updated_at).expect("valid rfc3339");
     }
 }

@@ -82,6 +82,7 @@ async fn finalize_turn_and_drain(inner: &mut ThreadInner, turn_id: &str) -> Resu
             "post-turn transport drain stopped before the queue went quiet"
         );
     }
+    crate::thread::features::session::events::flush_pending_thread_title_update(inner).await;
     Ok(())
 }
 

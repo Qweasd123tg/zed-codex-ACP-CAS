@@ -23,6 +23,7 @@ impl ThreadInner {
         self.file_change_paths_this_turn.clear();
         self.synced_paths_this_turn.clear();
         self.last_plan_steps.clear();
+        self.pending_thread_title_update = None;
         self.turn_last_progress_at = std::time::Instant::now();
         self.turn_reconnect_warning_count = 0;
         self.turn_reconnect_retry_limit_hit = false;

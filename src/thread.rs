@@ -163,6 +163,7 @@ struct ThreadInner {
     synced_paths_this_turn: HashSet<PathBuf>,
     last_plan_steps: Vec<String>,
     carryover_plan_steps: Option<Vec<String>>,
+    pending_thread_title_update: Option<String>,
     replay_turns: Vec<AppTurn>,
     history_replay_in_progress: bool,
     turn_last_progress_at: std::time::Instant,
