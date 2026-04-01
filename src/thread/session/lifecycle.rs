@@ -14,9 +14,8 @@ use codex_core::skills::SkillsManager;
 use serde_json::Value as JsonValue;
 
 use super::session_config::{
-    AccountStatus, ContextSelectorSummary, build_account_status, build_mcp_summary,
-    build_skills_summary, policy_to_mode, resolve_reasoning_effort, to_app_approval,
-    to_app_sandbox_mode,
+    AccountStatus, ContextSelectorSummary, build_mcp_summary, build_skills_summary, policy_to_mode,
+    resolve_reasoning_effort, to_app_approval, to_app_sandbox_mode,
 };
 use super::{
     AppServerProcess, ClientCapabilities, Config, ContextUsageSource, EditApprovalMode, Error,
@@ -45,6 +44,14 @@ fn format_session_updated_at(updated_at: i64) -> String {
     chrono::DateTime::<chrono::Utc>::from_timestamp(updated_at, 0)
         .map(|value| value.to_rfc3339())
         .unwrap_or_else(|| updated_at.to_string())
+}
+
+fn pending_skills_summary() -> ContextSelectorSummary {
+    ContextSelectorSummary {
+        label: "Skills · loading".to_string(),
+        description: "Discovering workspace skills for this session.".to_string(),
+        report: "Workspace skills are still being discovered for this session.".to_string(),
+    }
 }
 
 pub(crate) fn build_session_mcp_setup(
@@ -189,21 +196,6 @@ pub(in crate::thread) async fn load_session_skills_summary_for_cwd(
     );
     let outcome = skills_manager.skills_for_cwd(cwd, false).await;
     build_skills_summary(&outcome)
-}
-
-async fn load_session_skills_summary(config: &Config, cwd: &Path) -> ContextSelectorSummary {
-    load_session_skills_summary_for_cwd(&config.codex_home, config.bundled_skills_enabled(), cwd)
-        .await
-}
-
-async fn load_account_status(app: &mut AppServerProcess) -> AccountStatus {
-    match app.get_account().await {
-        Ok(response) => build_account_status(response.account),
-        Err(error) => {
-            warn!(error = %error, "Failed to read account status during session startup");
-            AccountStatus::default()
-        }
-    }
 }
 
 fn headers_to_map(headers: Vec<HttpHeader>) -> Option<HashMap<String, String>> {
@@ -365,20 +357,9 @@ impl Thread {
                 warn!(
                     error = %error,
                     session_id = %session_id,
-                    "Failed to load model list during resumed session startup"
+                "Failed to load model list during resumed session startup"
                 );
                 Vec::new()
-            }
-        };
-        let account_rate_limits = match app.get_account_rate_limits().await {
-            Ok(response) => Some(response.rate_limits),
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    session_id = %session_id,
-                    "Failed to read rate limits during resumed session startup"
-                );
-                None
             }
         };
         let reasoning_effort =
@@ -390,9 +371,6 @@ impl Thread {
             &resume.thread.turns,
         );
         let resumed_workspace_cwd = resume.thread.cwd.clone();
-        let session_skills_summary =
-            load_session_skills_summary(config, &resumed_workspace_cwd).await;
-        let account_status = load_account_status(&mut app).await;
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
         let mut agent_labels = HashMap::new();
         remember_agent_label(
@@ -412,8 +390,8 @@ impl Thread {
                 context_usage_cache_path,
                 session_mcp_config_overrides,
                 session_mcp_summary,
-                session_skills_summary,
-                account_status,
+                session_skills_summary: pending_skills_summary(),
+                account_status: AccountStatus::default(),
                 workspace_cwd: resumed_workspace_cwd,
                 client: SessionClient::new(session_id, client_capabilities),
                 approval_policy: resume.approval_policy,
@@ -430,7 +408,7 @@ impl Thread {
                 total_token_usage: None,
                 context_window_size: cached_context_usage.map(|(_, size)| size),
                 context_usage_source: cached_context_usage.map(|_| ContextUsageSource::Cached),
-                account_rate_limits,
+                account_rate_limits: None,
                 models,
                 active_turn_id: None,
                 active_turn_mode_kind: None,
@@ -480,13 +458,6 @@ impl Thread {
                 Vec::new()
             }
         };
-        let account_rate_limits = match app.get_account_rate_limits().await {
-            Ok(response) => Some(response.rate_limits),
-            Err(error) => {
-                warn!(error = %error, "Failed to read rate limits during session startup");
-                None
-            }
-        };
         let reasoning_effort =
             resolve_reasoning_effort(&models, &start.model, start.reasoning_effort);
 
@@ -527,7 +498,7 @@ impl Thread {
                 total_token_usage: None,
                 context_window_size: None,
                 context_usage_source: None,
-                account_rate_limits,
+                account_rate_limits: None,
                 models,
                 active_turn_id: None,
                 active_turn_mode_kind: None,
@@ -590,8 +561,6 @@ impl Thread {
             })
             .await
             .map_err(|error| startup_error("failed to start backend thread", error))?;
-        let session_skills_summary = load_session_skills_summary(config, &cwd).await;
-        let account_status = load_account_status(&mut app).await;
 
         Ok(Self::build_started_thread(
             session_id,
@@ -601,8 +570,8 @@ impl Thread {
             client_capabilities,
             session_mcp_config_overrides,
             session_mcp_summary,
-            session_skills_summary,
-            account_status,
+            pending_skills_summary(),
+            AccountStatus::default(),
             app,
             start,
         )
@@ -641,8 +610,6 @@ impl Thread {
             .map_err(|error| startup_error("failed to start backend thread", error))?;
 
         let session_id = SessionId::new(start.thread.id.clone());
-        let session_skills_summary = load_session_skills_summary(config, &cwd).await;
-        let account_status = load_account_status(&mut app).await;
         let thread = Self::build_started_thread(
             session_id.clone(),
             config.codex_home.clone(),
@@ -651,8 +618,8 @@ impl Thread {
             client_capabilities,
             session_mcp_config_overrides,
             session_mcp_summary,
-            session_skills_summary,
-            account_status,
+            pending_skills_summary(),
+            AccountStatus::default(),
             app,
             start,
         )

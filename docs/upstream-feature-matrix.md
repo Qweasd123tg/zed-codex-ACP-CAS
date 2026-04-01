@@ -1,6 +1,6 @@
 # Матрица Фич И Сравнение С Upstream
 
-Актуально на `2026-04-01` после прогона `bash script/update_references.sh`, RFC3339-фикса для `session/list.updated_at` и повторной сверки Zed history UI.
+Актуально на `2026-04-02` после прогона `bash script/update_references.sh`, RFC3339-фикса для `session/list.updated_at`, повторной сверки Zed history UI и локальной оптимизации startup path.
 
 ## Снимок References
 
@@ -25,6 +25,7 @@
 - По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `10/15` полных совпадений, `0/15` частичных совпадений и `5/15` явных пробелов.
 - Основные пробелы относительно официального адаптера: `close_session`, `/logout` и отдельные client-native UX-ветки, которые в текущем Zed ACP пока не дают достаточной отдачи.
 - Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/plan`, app-server-ориентированный flow восстановления тредов, нижний `Context` control и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
+- Дополнительно форк теперь быстрее отдает первый ready-thread в `Zed`: skills/account/rate-limit metadata догружаются сразу после session response отдельным config update, а не держат весь `new_session` / `load_session` / `resume_session` в startup-loading.
 
 ## 1. Parity С Официальным `zed codex acp`
 
@@ -95,6 +96,7 @@
 - Внутренний padding и layout approval-card задает сам `Zed`; адаптер может только слегка подправлять текстовое содержимое, но не контролирует нативные отступы контейнера.
 - Если разбивать approval body на несколько ACP content-item'ов, `Zed` рисует между ними разделители. Для code block это выглядит плохо, поэтому command approval body у нас теперь отдается одним markdown-блоком.
 - Верхний label `Run Command` тоже рисует сам клиент по `ToolKind::Execute`; адаптер может менять только вторичный title и содержимое body.
+- Selected-agent / `New Thread` trigger в текущем `Zed` может визуально пульсировать только пока движется указатель мыши. По фактическому поведению это больше похоже на client-side repaint/animation quirk, чем на отдельную задержку ACP startup path.
 - Для ACP session history `updated_at` реально показывается только в полном history-view и во встроенном блоке `Recent` внутри чата. Toolbar/dropdown `Recently Updated` в `Zed` рендерит только `title`, без времени, `cwd` и `meta`.
 - `cwd` и `meta` в `AgentSessionInfo` до клиента доезжают, но текущие history/render пути `Zed` их не рисуют. Это уже client-side ограничение, а не баг адаптера.
 

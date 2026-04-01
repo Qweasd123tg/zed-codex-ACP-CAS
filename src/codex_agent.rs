@@ -108,6 +108,12 @@ impl CodexAgent {
         });
     }
 
+    fn spawn_startup_metadata_refresh(thread: Rc<Thread>) {
+        tokio::task::spawn_local(async move {
+            thread.refresh_startup_metadata().await;
+        });
+    }
+
     fn should_bypass_startup_restore(&self) -> bool {
         if self.auto_restore_enabled {
             return false;
@@ -261,6 +267,7 @@ impl Agent for CodexAgent {
 
     async fn new_session(&self, request: NewSessionRequest) -> Result<NewSessionResponse, Error> {
         self.check_auth().await?;
+        let started_at = Instant::now();
 
         let NewSessionRequest {
             cwd, mcp_servers, ..
@@ -290,10 +297,17 @@ impl Agent for CodexAgent {
         let thread = Rc::new(thread);
         let load = thread.load().await?;
         Self::spawn_available_commands_sync(thread.clone());
+        Self::spawn_startup_metadata_refresh(thread.clone());
 
         self.sessions
             .borrow_mut()
             .insert(session_id.clone(), thread);
+
+        info!(
+            session_id = %session_id,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            "Finished ACP new_session critical startup path"
+        );
 
         Ok(NewSessionResponse::new(session_id)
             .modes(load.modes)
@@ -306,6 +320,7 @@ impl Agent for CodexAgent {
         request: LoadSessionRequest,
     ) -> Result<LoadSessionResponse, Error> {
         self.check_auth().await?;
+        let started_at = Instant::now();
 
         let LoadSessionRequest {
             session_id,
@@ -349,6 +364,7 @@ impl Agent for CodexAgent {
         // При обычном load-сценарии реплеим историю; если сработал startup guard,
         // открываем свежий backend-thread под тем же ACP session handle.
         Self::spawn_available_commands_sync(thread.clone());
+        Self::spawn_startup_metadata_refresh(thread.clone());
         if !bypass_startup_restore {
             thread.mark_history_replay_pending().await;
             let replay_thread = thread.clone();
@@ -360,6 +376,12 @@ impl Agent for CodexAgent {
         }
         self.sessions.borrow_mut().insert(session_id, thread);
 
+        info!(
+            bypass_startup_restore,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            "Finished ACP load_session critical startup path"
+        );
+
         Ok(load)
     }
 
@@ -368,6 +390,7 @@ impl Agent for CodexAgent {
         request: ResumeSessionRequest,
     ) -> Result<ResumeSessionResponse, Error> {
         self.check_auth().await?;
+        let started_at = Instant::now();
 
         let ResumeSessionRequest {
             session_id,
@@ -410,7 +433,14 @@ impl Agent for CodexAgent {
         let load = thread.load().await?;
         // Для session/resume не реплеим историю, но обновляем динамические команды после старта.
         Self::spawn_available_commands_sync(thread.clone());
+        Self::spawn_startup_metadata_refresh(thread.clone());
         self.sessions.borrow_mut().insert(session_id, thread);
+
+        info!(
+            bypass_startup_restore,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            "Finished ACP resume_session critical startup path"
+        );
 
         Ok(ResumeSessionResponse::new()
             .modes(load.modes)
@@ -432,6 +462,7 @@ impl Agent for CodexAgent {
         request: ForkSessionRequest,
     ) -> Result<ForkSessionResponse, Error> {
         self.check_auth().await?;
+        let started_at = Instant::now();
 
         let ForkSessionRequest {
             session_id,
@@ -456,9 +487,16 @@ impl Agent for CodexAgent {
         let thread = Rc::new(thread);
         let load = thread.load().await?;
         Self::spawn_available_commands_sync(thread.clone());
+        Self::spawn_startup_metadata_refresh(thread.clone());
         self.sessions
             .borrow_mut()
             .insert(forked_session_id.clone(), thread);
+
+        info!(
+            session_id = %forked_session_id,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            "Finished ACP fork_session critical startup path"
+        );
 
         Ok(ForkSessionResponse::new(forked_session_id)
             .modes(load.modes)

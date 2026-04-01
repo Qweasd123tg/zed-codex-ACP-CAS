@@ -1,12 +1,17 @@
 //! Загрузчики session view и метаданных, которые ACP использует для resume и восстановления контекста.
 
-use tracing::warn;
+use std::time::Instant;
+
+use tracing::{info, warn};
 
 use super::{
     AvailableCommandsUpdate, ConfigOptionUpdate, CurrentModeUpdate, Error, LoadSessionResponse,
-    SessionConfigOption, SessionUpdate, Thread, session_config,
+    SessionConfigOption, SessionUpdate, Thread, session_config, turn_notify,
 };
-use crate::thread::{features::collab, prompt_commands, replay};
+use crate::thread::{
+    features::collab, prompt_commands, replay, session_config::build_account_status,
+    session_lifecycle::load_session_skills_summary_for_cwd,
+};
 
 impl Thread {
     pub async fn mark_history_replay_pending(&self) {
@@ -91,6 +96,67 @@ impl Thread {
                 AvailableCommandsUpdate::new(prompt_commands::builtin_commands()),
             ))
             .await;
+    }
+
+    pub async fn refresh_startup_metadata(&self) {
+        let started_at = Instant::now();
+        let (thread_id, workspace_cwd, codex_home, bundled_skills_enabled) = {
+            let inner = self.inner.lock().await;
+            (
+                inner.thread_id.clone(),
+                inner.workspace_cwd.clone(),
+                inner.codex_home.clone(),
+                inner.bundled_skills_enabled,
+            )
+        };
+
+        let session_skills_summary = load_session_skills_summary_for_cwd(
+            &codex_home,
+            bundled_skills_enabled,
+            &workspace_cwd,
+        )
+        .await;
+
+        let (account_rate_limits, account_status) = {
+            let mut inner = self.inner.lock().await;
+            let account_rate_limits = match inner.app.get_account_rate_limits().await {
+                Ok(response) => Some(response.rate_limits),
+                Err(error) => {
+                    warn!(
+                        error = %error,
+                        thread_id,
+                        "Failed to read rate limits during deferred startup metadata refresh"
+                    );
+                    None
+                }
+            };
+            let account_status = match inner.app.get_account().await {
+                Ok(response) => build_account_status(response.account),
+                Err(error) => {
+                    warn!(
+                        error = %error,
+                        thread_id,
+                        "Failed to read account status during deferred startup metadata refresh"
+                    );
+                    Default::default()
+                }
+            };
+            (account_rate_limits, account_status)
+        };
+
+        let mut inner = self.inner.lock().await;
+        inner.account_rate_limits = account_rate_limits;
+        inner.account_status = account_status;
+        if inner.workspace_cwd == workspace_cwd {
+            inner.session_skills_summary = session_skills_summary;
+        }
+        turn_notify::notify_config_update(&inner).await;
+
+        info!(
+            thread_id = %inner.thread_id,
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            "Finished deferred session startup metadata refresh"
+        );
     }
 
     pub async fn replay_loaded_history(&self) {

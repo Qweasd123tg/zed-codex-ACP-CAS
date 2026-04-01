@@ -89,6 +89,7 @@ Sub-agent and collaboration tool-call rendering:
 - Tool call cards for command, MCP, web, image, file, and collab branches
 - Practical plan mode support
 - Better startup and reconnect diagnostics
+- Shorter first-open loading pulse: skills/account/limits metadata now hydrate right after the initial session response instead of blocking `new_session` / `load_session` / `resume_session`
 - Safer turn-start timeout and stale turn-tail cleanup around reconnects
 - Safer history replay fencing for `/undo` and auto-restored session history
 - Less UI freeze risk during `/resume --history` by replaying restored history outside the main session mutex
@@ -119,6 +120,7 @@ This project does not claim full upstream parity.
 Current strengths of this fork:
 
 - More robust startup behavior and clearer logging
+- Less startup latency before Zed gets a ready ACP thread
 - Better session lifecycle handling in ACP clients
 - Less UI freeze risk during `/undo` history rebuilds
 - Less UI freeze risk during `/resume --history` thread switches
@@ -156,6 +158,7 @@ Current gaps:
 - MCP `sse` passthrough is not supported yet
 - `item/tool/call` / `DynamicToolCall` requests are rejected as unsupported
 - `/undo` itself works, and the adapter also exposes rollback via ACP ext methods, but the visual rewind/edit button and the pencil-style edit UX in current `Zed` still depend on a client-side ACP fix: the external-agent ACP bridge does not wire `truncate()` / rollback ext-methods for this flow yet. In practice that means patching or rebuilding `Zed` if you want the native button UX
+- The selected-agent / `New Thread` trigger in current `Zed` can show a visibly odd pulsing state that appears only while the pointer is moving. In practice this looks like a client-side repaint/animation quirk, not an ACP startup stall in the adapter
 - While history replay is restoring after `load_session` or replaying `/undo`, new prompts and session commands are intentionally fenced until replay finishes; this avoids overlapping turn/replay state in one ACP session
 - Linux is the most tested platform right now
 - Multi-platform release artifacts can exist before all platforms are equally tested in real use
