@@ -5,6 +5,7 @@ use std::time::Duration;
 use codex_app_server_protocol::JSONRPCMessage;
 use tracing::warn;
 
+use crate::app_server::{SharedAppMessageInbox, recv_message_from_inbox};
 use crate::thread::{
     Error, SharedAppServer, StopReason, Thread, ThreadInner, features::notification,
     server_requests::handle_server_request,
@@ -127,15 +128,10 @@ async fn handle_drain_message(
 }
 
 async fn receive_drain_message(
-    app: &SharedAppServer,
+    inbox: &SharedAppMessageInbox,
     wait_for: Duration,
 ) -> Result<Option<JSONRPCMessage>, Error> {
-    match tokio::time::timeout(wait_for, async {
-        let mut app = app.lock().await;
-        app.next_message().await
-    })
-    .await
-    {
+    match tokio::time::timeout(wait_for, recv_message_from_inbox(inbox)).await {
         Ok(message) => Ok(Some(message?)),
         Err(_) => Ok(None),
     }
@@ -143,7 +139,8 @@ async fn receive_drain_message(
 
 async fn drain_transport_until_quiet_ext(
     thread: &Thread,
-    app: &SharedAppServer,
+    _app: &SharedAppServer,
+    inbox: &SharedAppMessageInbox,
     expected_turn_id: &str,
     config: DrainConfig,
 ) -> Result<DrainOutcome, Error> {
@@ -163,7 +160,7 @@ async fn drain_transport_until_quiet_ext(
 
         let remaining = deadline - now;
         let wait_for = remaining.min(config.poll_timeout);
-        let Some(message) = receive_drain_message(app, wait_for).await? else {
+        let Some(message) = receive_drain_message(inbox, wait_for).await? else {
             quiet_polls += 1;
             if quiet_polls >= config.idle_polls_to_drain {
                 return Ok(DrainOutcome::Drained { processed });
@@ -188,10 +185,15 @@ impl Thread {
             let inner = self.inner.lock().await;
             inner.app.clone()
         };
+        let inbox = {
+            let app = app.lock().await;
+            app.message_inbox()
+        };
 
         drain_transport_until_quiet_ext(
             self,
             &app,
+            &inbox,
             expected_turn_id,
             DrainConfig {
                 drain_context: "post-turn drain",
@@ -209,10 +211,15 @@ impl Thread {
             let inner = self.inner.lock().await;
             inner.app.clone()
         };
+        let inbox = {
+            let app = app.lock().await;
+            app.message_inbox()
+        };
 
         drain_transport_until_quiet_ext(
             self,
             &app,
+            &inbox,
             "",
             DrainConfig {
                 drain_context: "background drain",

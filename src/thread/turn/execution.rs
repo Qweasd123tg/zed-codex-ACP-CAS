@@ -241,6 +241,10 @@ impl Thread {
             let inner = self.inner.lock().await;
             inner.app.clone()
         };
+        let message_inbox = {
+            let app = app.lock().await;
+            app.message_inbox()
+        };
 
         loop {
             let watchdog = tokio::time::sleep(TURN_MESSAGE_POLL_INTERVAL);
@@ -289,7 +293,7 @@ impl Thread {
                         },
                     ).await?;
                 }
-                message = async { app.lock().await.next_message().await }, if pending_command_approval.is_none() => {
+                message = async { crate::app_server::recv_message_from_inbox(&message_inbox).await }, if pending_command_approval.is_none() => {
                     let message = message?;
                     match self.handle_active_turn_message(message, &turn_id).await? {
                         ActiveTurnMessageOutcome::Continue => {}

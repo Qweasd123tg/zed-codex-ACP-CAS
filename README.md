@@ -102,6 +102,7 @@ Sub-agent and collaboration tool-call rendering:
 - Less reconnect spam: reconnect warnings now collapse into one normalized status line while reconnect-assisted stalled turns still abort cleanly
 - Less brittle transport cleanup: background drain and thread-switch flush now wait for the queue to go quiet instead of assuming `64` messages or one tiny timeout is enough
 - Less turn-completion lock contention: turn diff ACP writeback now runs outside the main session mutex and skips paths already reserved by file-change lifecycle
+- Less transport serialization during quiet backend periods: app-server stdout now has a dedicated reader/inbox, so cancel, interrupt, post-turn drain, and thread-switch cleanup do not sit behind one long `next_message()` mutex wait
 
 ## Why Use This Fork
 
@@ -133,6 +134,7 @@ Current strengths of this fork:
 - Less risk of ghost approvals from stale app-server requests during drain/flush cleanup
 - Clearer reconnect UX with one normalized retry status and cleaner reconnect-assisted stall aborts
 - More reliable pre-prompt and thread-switch cleanup under bursty app-server tails
+- Better transport responsiveness while the backend is quiet: app-server message reads no longer monopolize the transport mutex for the full wait window
 - Better thread titles in lists and resumed sessions
 - Inline review flows backed by native `review/start`
 - Practical thread switching with native `Zed` `New Thread`, `/fork`, `/resume`, and archive-triggered replacement

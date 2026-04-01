@@ -6,6 +6,7 @@ use agent_client_protocol::Error;
 use codex_app_server_protocol::JSONRPCMessage;
 use tracing::warn;
 
+use crate::app_server::recv_message_from_inbox;
 use crate::thread::{SharedAppServer, notification_dispatch::DrainOutcome};
 
 const THREAD_SWITCH_TRANSPORT_FLUSH_TOTAL_TIMEOUT_MS: u64 = 300;
@@ -16,6 +17,10 @@ const THREAD_SWITCH_TRANSPORT_FLUSH_MAX_MESSAGES: usize = 256;
 pub(in crate::thread) async fn flush_thread_switch_transport_state(
     app: &SharedAppServer,
 ) -> Result<(), Error> {
+    let inbox = {
+        let app = app.lock().await;
+        app.message_inbox()
+    };
     let deadline = tokio::time::Instant::now()
         + Duration::from_millis(THREAD_SWITCH_TRANSPORT_FLUSH_TOTAL_TIMEOUT_MS);
     let mut processed = 0;
@@ -35,7 +40,7 @@ pub(in crate::thread) async fn flush_thread_switch_transport_state(
         let wait_for = remaining.min(Duration::from_millis(
             THREAD_SWITCH_TRANSPORT_FLUSH_TIMEOUT_MS,
         ));
-        let message = match tokio::time::timeout(wait_for, app.lock().await.next_message()).await {
+        let message = match tokio::time::timeout(wait_for, recv_message_from_inbox(&inbox)).await {
             Ok(message) => {
                 quiet_polls = 0;
                 message?

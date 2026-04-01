@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-04-01` (`session/fork` surfaced in `CodexAgent` on top of existing `thread/fork` lifecycle).
+Обновлено: `2026-04-02` (`session/fork` surfaced in `CodexAgent`, then app-server transport waits moved onto a dedicated reader/inbox path).
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -77,6 +77,9 @@ flowchart TD
 - `src/thread/features/notification/*` — доменная обработка событий.
 
 `dispatch` должен маршрутизировать, а не содержать бизнес-логику.
+С апреля 2026 transport-поток здесь уже не равен прямому `stdout.read -> hold app mutex -> handle message`:
+`src/app_server.rs` теперь держит отдельный background reader, матчинг active RPC response и inbox для out-of-band сообщений.
+Из-за этого `turn/execution`, post-turn drain и thread-switch flush могут ждать входящие сообщения без длинного удержания transport mutex.
 
 ## 4) Replay/Resume pipeline
 
