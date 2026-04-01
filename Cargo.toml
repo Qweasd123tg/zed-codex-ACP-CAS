@@ -20,6 +20,7 @@ path = "src/lib.rs"
 agent-client-protocol = { version = "=0.9.4", features = ["unstable"] }
 anyhow = "1"
 async-trait = "0.1"
+chrono = "0.4"
 clap = "4"
 codex-apply-patch = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-app-server-protocol = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }

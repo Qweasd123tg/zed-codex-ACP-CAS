@@ -41,6 +41,12 @@ fn startup_error(stage: &str, error: Error) -> Error {
     Error::internal_error().data(format!("{stage}: {error}"))
 }
 
+fn format_session_updated_at(updated_at: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(updated_at, 0)
+        .map(|value| value.to_rfc3339())
+        .unwrap_or_else(|| updated_at.to_string())
+}
+
 pub(crate) fn build_session_mcp_setup(
     base_mcp_servers: &HashMap<String, McpServerConfig>,
     cwd: &Path,
@@ -659,7 +665,7 @@ impl Thread {
                 let title = thread_display_title(&thread);
                 agent_client_protocol::SessionInfo::new(SessionId::new(thread.id), thread.cwd)
                     .title(Some(title))
-                    .updated_at(Some(thread.updated_at.to_string()))
+                    .updated_at(Some(format_session_updated_at(thread.updated_at)))
             })
             .collect();
 
@@ -669,7 +675,10 @@ impl Thread {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_session_mcp_config_overrides, is_retryable_missing_rollout_resume_error};
+    use super::{
+        build_session_mcp_config_overrides, format_session_updated_at,
+        is_retryable_missing_rollout_resume_error,
+    };
     use agent_client_protocol::{Error, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
     use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
     use std::collections::HashMap;
@@ -693,6 +702,15 @@ mod tests {
         let error = Error::internal_error()
             .data("Internal error: \"no rollout found for thread id 019-test\"");
         assert!(is_retryable_missing_rollout_resume_error(&error));
+    }
+
+    #[test]
+    fn formats_session_list_updated_at_as_rfc3339() {
+        let formatted = format_session_updated_at(1_775_014_896);
+
+        let parsed = chrono::DateTime::parse_from_rfc3339(&formatted)
+            .expect("session list updated_at should be RFC3339");
+        assert_eq!(parsed.timestamp(), 1_775_014_896);
     }
 
     #[test]

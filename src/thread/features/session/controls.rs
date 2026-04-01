@@ -9,11 +9,14 @@ use crate::thread::features::resume::common::{
     format_relative_timestamp, list_all_threads_with_archived, thread_display_title,
 };
 use crate::thread::features::session::thread_switch::flush_thread_switch_transport_state;
+use crate::thread::features::session::{
+    session_info_title_update_from_unix, session_info_title_update_now,
+};
 use crate::thread::{ThreadInner, replay::replay_turns, turn_notify::notify_config_update};
 use agent_client_protocol::{
     Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-    SelectedPermissionOutcome, SessionInfoUpdate, SessionUpdate, StopReason, ToolCallId,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    SelectedPermissionOutcome, SessionUpdate, StopReason, ToolCallId, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use codex_app_server_protocol::{
     AskForApproval as AppAskForApproval, SandboxPolicy as AppSandboxPolicy, Thread,
@@ -297,7 +300,7 @@ pub(in crate::thread) async fn handle_rename_command(
     inner
         .client
         .send_notification(SessionUpdate::SessionInfoUpdate(
-            SessionInfoUpdate::new().title(name.clone()),
+            session_info_title_update_now(name.clone()),
         ))
         .await;
     inner
@@ -378,7 +381,7 @@ async fn apply_thread_switch(
     inner
         .client
         .send_notification(SessionUpdate::SessionInfoUpdate(
-            SessionInfoUpdate::new().title(thread_display_title(&thread)),
+            session_info_title_update_from_unix(thread_display_title(&thread), thread.updated_at),
         ))
         .await;
     notify_config_update(inner).await;

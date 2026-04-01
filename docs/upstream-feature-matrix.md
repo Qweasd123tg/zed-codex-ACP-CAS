@@ -1,17 +1,17 @@
 # Матрица Фич И Сравнение С Upstream
 
-Актуально на `2026-03-31` после прогона `bash script/update_references.sh`, синхронизации локального кода по `RequestPermissions`, UX-обновлений session config и warning forwarding.
+Актуально на `2026-04-01` после прогона `bash script/update_references.sh`, RFC3339-фикса для `session/list.updated_at` и повторной сверки Zed history UI.
 
 ## Снимок References
 
 | Reference | Состояние | Дата / commit | Примечание |
 | --- | --- | --- | --- |
-| `agent-client-protocol` | обновлен | `2026-03-28`, `5124dce` | Локальная ссылка теперь указывает на `v0.11.4-2-g5124dce`. |
-| `codex-acp-upstream` | обновлен | `2026-03-23`, `09fb7b1` | Локальная ссылка теперь указывает на `v0.10.0-2-g09fb7b1`. Это основной источник для сравнения с официальным `zed codex acp`. |
-| `codex` | обновлен | `2026-03-28`, `4e119a3b3` | Локальная ссылка теперь указывает на `rusty-v8-v146.4.0-261-g4e119a3b3`. |
-| `zed` | не обновлен | `2026-02-25`, `046b173b87` | `update_references.sh` пропустил репозиторий, потому что там локально изменен `crates/agent_servers/src/acp.rs`. |
+| `agent-client-protocol` | обновлен | `2026-04-01`, `f21d317` | Локальная ссылка теперь указывает на `v0.11.4-24-gf21d317`. |
+| `codex-acp-upstream` | обновлен | `2026-03-31`, `c3e95ca` | Локальная ссылка теперь указывает на `v0.11.1`. Это основной источник для сравнения с официальным `zed codex acp`. |
+| `codex` | обновлен | `2026-04-01`, `dc263f592` | Локальная ссылка теперь указывает на `rusty-v8-v146.4.0-313-gdc263f592`. |
+| `zed` | обновлен | `2026-04-01`, `5a9c763d9a` | Локальная ссылка теперь указывает на `nightly` (`references/zed@nightly`). |
 
-Сравнение ниже опирается прежде всего на `references/codex-acp-upstream@v0.10.0-2-g09fb7b1` и `references/codex@rusty-v8-v146.4.0-261-g4e119a3b3`. `zed`-референс здесь вторичен.
+Сравнение ниже опирается прежде всего на `references/codex-acp-upstream@v0.11.1` и `references/codex@rusty-v8-v146.4.0-313-gdc263f592`. `zed`-референс здесь вторичен.
 
 ## Легенда
 
@@ -31,7 +31,7 @@
 | Фича | Источник | Дата | Оригинальный `zed codex acp` | Наш форк | Где у нас / комментарий |
 | --- | --- | --- | --- | --- | --- |
 | `load_session` с replay истории | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У upstream replay идет через `src/codex_agent.rs`; у нас загрузка и replay разведены на `src/codex_agent.rs` и `src/thread/session/lifecycle.rs`. |
-| `list_sessions` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У upstream список идет из rollout storage, у нас из `thread/list` app-server в `src/thread/session/lifecycle.rs`. |
+| `list_sessions` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У upstream список идет из rollout storage, у нас из `thread/list` app-server в `src/thread/session/lifecycle.rs`. С `2026-04-01` адаптер форматирует `updated_at` как RFC3339 и в `session/list`, и в live `SessionInfoUpdate`, чтобы Zed history не падал в `Unknown`. |
 | `close_session` | `codex-acp-upstream` | `2026-03-13`, `be20828` | `[x]` | `[ ]` | В нашем `src/codex_agent.rs` capability `close` и handler `close_session` не реализованы. |
 | Usage update / контекстное окно | `codex-acp-upstream`, `codex` | `2026-02-27`, `34dc10c`; протокол виден в `codex` на `2026-03-03`, `8da7e4bda` | `[x]` | `[x]` | У нас есть `ThreadTokenUsageUpdated` в `src/thread/features/notification/mod.rs` и `send_usage_update` в `src/thread/session/client.rs`. |
 | Session config: `mode`, `permissions`, `model`, `reasoning_effort`, `context_control` | `codex-acp-upstream` + форк | `<= 2026-02-18`, `c0b82cc`; `permissions` и `context_control` локально, selector enrich `2026-03-31` | `[x]` | `[x]` | У нас это разнесено по `src/thread/session/config/*` и `src/thread/session/settings.rs`; `mode` и `permissions` теперь отдельные selectors, а `context_control` показывает `status`, `ctx %`, `MCP`, `skills`, account limits (`5h`/`wk`) и умеет запускать compaction. `status` в short label держит суммарный `used`, а detail/report — workspace, account и `used / in / out`. |
@@ -95,6 +95,8 @@
 - Внутренний padding и layout approval-card задает сам `Zed`; адаптер может только слегка подправлять текстовое содержимое, но не контролирует нативные отступы контейнера.
 - Если разбивать approval body на несколько ACP content-item'ов, `Zed` рисует между ними разделители. Для code block это выглядит плохо, поэтому command approval body у нас теперь отдается одним markdown-блоком.
 - Верхний label `Run Command` тоже рисует сам клиент по `ToolKind::Execute`; адаптер может менять только вторичный title и содержимое body.
+- Для ACP session history `updated_at` реально показывается только в полном history-view и во встроенном блоке `Recent` внутри чата. Toolbar/dropdown `Recently Updated` в `Zed` рендерит только `title`, без времени, `cwd` и `meta`.
+- `cwd` и `meta` в `AgentSessionInfo` до клиента доезжают, но текущие history/render пути `Zed` их не рисуют. Это уже client-side ограничение, а не баг адаптера.
 
 ## 5. Скорее Вторым Эшелоном
 

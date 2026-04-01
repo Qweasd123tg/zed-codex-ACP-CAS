@@ -3,12 +3,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use agent_client_protocol::{Error, SessionInfoUpdate, SessionUpdate, StopReason};
+use agent_client_protocol::{Error, SessionUpdate, StopReason};
 use codex_app_server_protocol::{ThreadResumeParams, Turn as AppTurn};
 
 use crate::thread::features::collab::CollabAgentLabel;
 use crate::thread::features::collab::{remember_agent_label, warm_agent_labels_for_turns};
 use crate::thread::features::resume::common::thread_display_title;
+use crate::thread::features::session::session_info_title_update_from_unix;
 use crate::thread::features::session::thread_switch::flush_thread_switch_transport_state;
 use crate::thread::session_lifecycle::{
     load_session_skills_summary_for_cwd, thread_resume_with_startup_retry,
@@ -165,7 +166,10 @@ async fn apply_resumed_thread(
     inner
         .client
         .send_notification(SessionUpdate::SessionInfoUpdate(
-            SessionInfoUpdate::new().title(thread_display_title(&resume.thread)),
+            session_info_title_update_from_unix(
+                thread_display_title(&resume.thread),
+                resume.thread.updated_at,
+            ),
         ))
         .await;
     if include_history {

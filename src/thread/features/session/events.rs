@@ -3,9 +3,10 @@
 
 use std::fmt::Write as _;
 
-use agent_client_protocol::{SessionInfoUpdate, SessionUpdate};
+use agent_client_protocol::SessionUpdate;
 use codex_app_server_protocol::UserInput;
 
+use super::session_info_title_update_now;
 use crate::thread::{SessionClient, ThreadInner, turn_notify::notify_config_update};
 
 // Replay-ветка пользовательского сообщения: сворачиваем mixed input в единый текстовый блок.
@@ -100,7 +101,7 @@ pub(in crate::thread) async fn emit_thread_name_updated(inner: &mut ThreadInner,
     inner
         .client
         .send_notification(SessionUpdate::SessionInfoUpdate(
-            SessionInfoUpdate::new().title(title),
+            session_info_title_update_now(title),
         ))
         .await;
 }

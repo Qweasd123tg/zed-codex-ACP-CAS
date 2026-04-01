@@ -197,6 +197,17 @@ Then configure Zed to use the binary path:
 3. Add a custom agent server entry pointing to the `codex-acp` binary.
 4. Restart Zed if the new agent does not appear immediately.
 
+If you run the adapter directly from a repository checkout during local development, prefer
+pointing Zed at `.build/codex-acp-current` and rebuilding with:
+
+```bash
+bash script/build_local_release.sh
+```
+
+That script rotates `.build/codex-acp-current` and `.build/codex-acp-previous`. Rebuilding only
+`target/release/codex-acp` does not update the binary path if Zed is already configured to use
+`.build/codex-acp-current`.
+
 Example:
 
 ```json
