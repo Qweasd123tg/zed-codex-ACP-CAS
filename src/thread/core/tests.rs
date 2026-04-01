@@ -643,14 +643,14 @@ fn plan_entries_all_pending_detects_mixed_statuses() {
 }
 
 #[test]
-fn fallback_plan_does_not_advance_to_done_without_tool_activity() {
+fn fallback_plan_can_advance_to_done_without_tool_activity() {
     let state = FallbackPlanState {
         turn_id: "turn_1".to_string(),
         phase: FallbackPlanPhase::Planning,
         saw_tool_activity: false,
         steps: vec![],
     };
-    assert!(!fallback_plan_should_advance(
+    assert!(fallback_plan_should_advance(
         &state,
         FallbackPlanPhase::Done
     ));
@@ -683,6 +683,33 @@ fn fallback_plan_cannot_enter_summarizing_without_tool_activity() {
         "turn_1",
         false
     ));
+}
+
+#[test]
+fn fallback_plan_distributes_progress_for_longer_step_lists() {
+    let steps = vec![
+        "step 1".to_string(),
+        "step 2".to_string(),
+        "step 3".to_string(),
+        "step 4".to_string(),
+        "step 5".to_string(),
+        "step 6".to_string(),
+    ];
+
+    let implementing = fallback_plan_entries_for_steps(FallbackPlanPhase::Implementing, &steps);
+    let verifying = fallback_plan_entries_for_steps(FallbackPlanPhase::Verifying, &steps);
+    let summarizing = fallback_plan_entries_for_steps(FallbackPlanPhase::Summarizing, &steps);
+
+    assert_eq!(implementing[0].status, PlanEntryStatus::Completed);
+    assert_eq!(implementing[1].status, PlanEntryStatus::InProgress);
+    assert_eq!(implementing[2].status, PlanEntryStatus::Pending);
+
+    assert_eq!(verifying[2].status, PlanEntryStatus::Completed);
+    assert_eq!(verifying[3].status, PlanEntryStatus::InProgress);
+    assert_eq!(verifying[4].status, PlanEntryStatus::Pending);
+
+    assert_eq!(summarizing[4].status, PlanEntryStatus::Completed);
+    assert_eq!(summarizing[5].status, PlanEntryStatus::InProgress);
 }
 
 #[test]

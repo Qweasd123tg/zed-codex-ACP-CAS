@@ -88,6 +88,7 @@ Sub-agent and collaboration tool-call rendering:
 - In-place `/fork` and standard ACP `session/fork` support
 - Tool call cards for command, MCP, web, image, file, and collab branches
 - Practical plan mode support
+- Better default-mode fallback plan progress for long step lists: visible checkpoints now advance across the list instead of only snapping at the very end of work
 - Better startup and reconnect diagnostics
 - Shorter first-open loading pulse: skills/account/limits metadata now hydrate right after the initial session response instead of blocking `new_session` / `load_session` / `resume_session`
 - Safer turn-start timeout and stale turn-tail cleanup around reconnects
@@ -146,6 +147,7 @@ Current gaps:
 
 - No full structured elicitation parity yet
 - Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
+- Default-mode fallback checkpoint rendering is intentionally pragmatic ACP UI, not a pixel-for-pixel clone of Codex CLI autoplan visuals
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
 - Some upstream-style flows are still missing or incomplete, including `close_session` and `/logout`
 - There is still no true delete path end-to-end: `codex app-server` does not give this fork a practical hard-delete flow, and the current ACP bridge in `Zed` still does not surface `session/delete`, so `/delete` stays only as a compatibility alias to `/archive`

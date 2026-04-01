@@ -100,9 +100,6 @@ pub(in crate::thread) fn fallback_plan_should_advance(
     if next_phase <= state.phase {
         return false;
     }
-    if next_phase == FallbackPlanPhase::Done && !state.saw_tool_activity {
-        return false;
-    }
     true
 }
 
@@ -110,9 +107,41 @@ pub(in crate::thread) fn fallback_plan_entries_for_steps(
     phase: FallbackPlanPhase,
     steps: &[String],
 ) -> Vec<PlanEntry> {
-    fn status_for_step(phase: FallbackPlanPhase, index: usize) -> PlanEntryStatus {
-        let target = phase as usize;
-        if phase == FallbackPlanPhase::Done || index < target {
+    fn in_progress_step_index(phase: FallbackPlanPhase, step_count: usize) -> Option<usize> {
+        if step_count == 0 || phase == FallbackPlanPhase::Done {
+            return None;
+        }
+
+        if step_count == 1 {
+            return Some(0);
+        }
+
+        let last_index = step_count - 1;
+        let distributed_index = |phase_slot: usize| last_index * phase_slot / 3;
+
+        Some(match phase {
+            FallbackPlanPhase::Planning => 0,
+            FallbackPlanPhase::Implementing => distributed_index(1).max(1),
+            FallbackPlanPhase::Verifying => distributed_index(2).max(1),
+            FallbackPlanPhase::Summarizing => last_index,
+            FallbackPlanPhase::Done => unreachable!("handled above"),
+        })
+    }
+
+    fn status_for_step(
+        phase: FallbackPlanPhase,
+        index: usize,
+        step_count: usize,
+    ) -> PlanEntryStatus {
+        if phase == FallbackPlanPhase::Done {
+            return PlanEntryStatus::Completed;
+        }
+
+        let Some(target) = in_progress_step_index(phase, step_count) else {
+            return PlanEntryStatus::Pending;
+        };
+
+        if index < target {
             PlanEntryStatus::Completed
         } else if index == target {
             PlanEntryStatus::InProgress
@@ -135,6 +164,7 @@ pub(in crate::thread) fn fallback_plan_entries_for_steps(
     } else {
         steps.to_vec()
     };
+    let step_count = labels.len();
 
     labels
         .into_iter()
@@ -143,7 +173,7 @@ pub(in crate::thread) fn fallback_plan_entries_for_steps(
             PlanEntry::new(
                 label,
                 PlanEntryPriority::Medium,
-                status_for_step(phase, index),
+                status_for_step(phase, index, step_count),
             )
         })
         .collect()
