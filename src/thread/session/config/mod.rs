@@ -43,6 +43,7 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
         Option<&'a codex_app_server_protocol::TokenUsageBreakdown>,
     pub(in crate::thread) session_mcp_summary: &'a context::ContextSelectorSummary,
     pub(in crate::thread) session_skills_summary: &'a context::ContextSelectorSummary,
+    pub(in crate::thread) session_plugins_summary: &'a context::ContextSelectorSummary,
 }
 
 pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOptionsInput<'_> {
@@ -65,6 +66,7 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         total_token_usage: inner.total_token_usage.as_ref(),
         session_mcp_summary: &inner.session_mcp_summary,
         session_skills_summary: &inner.session_skills_summary,
+        session_plugins_summary: &inner.session_plugins_summary,
     }
 }
 
@@ -88,6 +90,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         total_token_usage,
         session_mcp_summary,
         session_skills_summary,
+        session_plugins_summary,
     } = input;
 
     let mode_state = mode_state(collaboration_mode_kind);
@@ -208,10 +211,11 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 compaction_in_progress,
                 session_mcp_summary,
                 session_skills_summary,
+                session_plugins_summary,
             ),
         )
         .description(
-            "Inspect session status, context usage, MCP, skills, limits, or start compaction",
+            "Inspect session status, context usage, MCP, skills, plugins, limits, or start compaction",
         ),
     );
 
@@ -220,9 +224,9 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
 
 pub(super) use context::{
     AccountStatus, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
-    ContextSelectorSummary, MCP_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
-    build_account_status, build_mcp_summary, build_skills_summary, context_usage_message,
-    session_status_message,
+    ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE,
+    SKILLS_STATUS_VALUE, build_account_status, build_mcp_summary, build_plugins_summary,
+    build_skills_summary, context_usage_message, full_status_report,
 };
 pub(super) use limits::combined_limits_reset_message;
 pub(super) use reasoning::{

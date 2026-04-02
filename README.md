@@ -71,6 +71,7 @@ Sub-agent and collaboration tool-call rendering:
 - History replay after `load_session` and `resume_session`
 - Session commands:
   - `/init`
+  - `/status`
   - `/review`
   - `/threads`
   - `/resume`
@@ -87,6 +88,8 @@ Sub-agent and collaboration tool-call rendering:
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
 - In-place `/fork` and standard ACP `session/fork` support
 - Tool call cards for command, MCP, web, image, file, and collab branches
+- Clearer status surfacing through `/status` and the existing `Context` selector
+- `Context` selector summaries for session status, context usage, MCP, skills, plugins, limits, and compaction
 - Practical plan mode support
 - Better default-mode fallback plan progress for long step lists: visible checkpoints now advance across the list instead of only snapping at the very end of work
 - Better startup and reconnect diagnostics
@@ -141,6 +144,8 @@ Current strengths of this fork:
 - Practical thread switching with native `Zed` `New Thread`, `/fork`, `/resume`, and archive-triggered replacement
 - Standard ACP `session/fork` surfaced separately from the in-place slash `/fork` flow
 - Practical plan mode support
+- Canonical session status surfacing through `/status` plus the `Context` selector
+- `plugins` now sit alongside `status`, `MCP`, `skills`, and limits in the selector UX
 - More complete collab and sub-agent UI mapping
 
 Current gaps:
@@ -332,8 +337,8 @@ Current Zed-specific UI caveats are tracked in [docs/upstream-feature-matrix.md]
 
 Near-term work:
 
-- Surface a clearer `status` view, likely in a selector or lightweight slash command
-- Keep expanding selector UX carefully where it helps daily use, especially around `status`, `MCP`, `skills`, and `plugins`
+- Keep refining the `Context` selector and `/status` report where it helps daily use
+- Decide the next surfaced preview flow after status, most likely `thread/read` or `/diff`
 
 Later candidates:
 

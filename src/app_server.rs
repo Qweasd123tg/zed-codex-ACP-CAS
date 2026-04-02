@@ -14,9 +14,10 @@ use codex_app_server_protocol::{
     GetAccountParams, GetAccountRateLimitsResponse, GetAccountResponse, InitializeCapabilities,
     InitializeParams, InitializeResponse, JSONRPCError, JSONRPCErrorError, JSONRPCMessage,
     JSONRPCResponse, ModelListParams, ModelListResponse, PermissionsRequestApprovalResponse,
-    RequestId, ReviewStartParams, ReviewStartResponse, ThreadArchiveParams, ThreadArchiveResponse,
-    ThreadCompactStartParams, ThreadCompactStartResponse, ThreadForkParams, ThreadForkResponse,
-    ThreadListParams, ThreadListResponse, ThreadReadParams, ThreadReadResponse, ThreadResumeParams,
+    PluginListParams, PluginListResponse, RequestId, ReviewStartParams, ReviewStartResponse,
+    ThreadArchiveParams, ThreadArchiveResponse, ThreadCompactStartParams,
+    ThreadCompactStartResponse, ThreadForkParams, ThreadForkResponse, ThreadListParams,
+    ThreadListResponse, ThreadReadParams, ThreadReadResponse, ThreadResumeParams,
     ThreadResumeResponse, ThreadRollbackParams, ThreadRollbackResponse, ThreadSetNameParams,
     ThreadSetNameResponse, ThreadStartParams, ThreadStartResponse, ThreadUnarchiveParams,
     ThreadUnarchiveResponse, ToolRequestUserInputResponse, TurnInterruptParams,
@@ -63,12 +64,14 @@ fn request_timeout(method_name: &str) -> Option<Duration> {
         "initialize" | "thread/start" | "thread/resume" | "thread/list" | "turn/start" => Some(
             configured_timeout(STARTUP_REQUEST_TIMEOUT_ENV, STARTUP_REQUEST_TIMEOUT),
         ),
-        "model/list" | "account/rateLimits/read" | "account/read" | "thread/read" => {
-            Some(configured_timeout(
-                STARTUP_METADATA_REQUEST_TIMEOUT_ENV,
-                STARTUP_METADATA_REQUEST_TIMEOUT,
-            ))
-        }
+        "model/list"
+        | "account/rateLimits/read"
+        | "account/read"
+        | "thread/read"
+        | "plugin/list" => Some(configured_timeout(
+            STARTUP_METADATA_REQUEST_TIMEOUT_ENV,
+            STARTUP_METADATA_REQUEST_TIMEOUT,
+        )),
         _ => None,
     }
 }
@@ -341,6 +344,18 @@ impl AppServerProcess {
             params,
         };
         self.request(request, request_id, "thread/read").await
+    }
+
+    pub async fn plugin_list(
+        &mut self,
+        params: PluginListParams,
+    ) -> Result<PluginListResponse, Error> {
+        let request_id = self.next_request_id();
+        let request = ClientRequest::PluginList {
+            request_id: request_id.clone(),
+            params,
+        };
+        self.request(request, request_id, "plugin/list").await
     }
 
     pub async fn thread_compact_start(

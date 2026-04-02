@@ -128,6 +128,12 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
+    if let Some(rest) = slash_command_rest(text, "/status") {
+        return Some(SessionCommand::Status {
+            args: (!rest.is_empty()).then(|| rest.to_string()),
+        });
+    }
+
     if let Some(rest) = text.strip_prefix("/archive") {
         let query = rest.trim();
         return Some(SessionCommand::Archive {
@@ -208,6 +214,30 @@ pub(super) async fn dispatch_session_command(
                 mode_kind: ModeKind::Default,
             })
         }
+        SessionCommand::Status { args } => {
+            if args.is_some() {
+                inner.client.send_agent_text("Usage: `/status`").await;
+                return Ok(CommandDispatchOutcome::Stop(StopReason::EndTurn));
+            }
+
+            inner
+                .client
+                .send_agent_text(crate::thread::session_config::full_status_report(
+                    &inner.workspace_cwd,
+                    &inner.account_status,
+                    inner.total_token_usage.as_ref(),
+                    inner.last_used_tokens,
+                    inner.context_window_size,
+                    inner.context_usage_source,
+                    inner.account_rate_limits.as_ref(),
+                    inner.compaction_in_progress,
+                    &inner.session_mcp_summary,
+                    &inner.session_skills_summary,
+                    &inner.session_plugins_summary,
+                ))
+                .await;
+            Ok(CommandDispatchOutcome::Stop(StopReason::EndTurn))
+        }
         SessionCommand::Threads => Ok(CommandDispatchOutcome::Stop(
             resume::listing::handle_threads_command(inner).await?,
         )),
@@ -269,6 +299,10 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
         AvailableCommand::new(
             "init",
             "Create an AGENTS.md file with instructions for Codex",
+        ),
+        AvailableCommand::new(
+            "status",
+            "Show session status, context, MCP, skills, plugins, and limits",
         ),
         AvailableCommand::new(
             "review",

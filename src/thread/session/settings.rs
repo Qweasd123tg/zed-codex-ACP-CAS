@@ -2,9 +2,9 @@
 
 use super::session_config::{
     CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
-    SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, combined_limits_reset_message,
-    context_usage_message, find_model_for_current, normalize_reasoning_effort_for_model,
-    parse_reasoning_effort, reasoning_effort_value, session_status_message,
+    PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, combined_limits_reset_message,
+    context_usage_message, find_model_for_current, full_status_report,
+    normalize_reasoning_effort_for_model, parse_reasoning_effort, reasoning_effort_value,
 };
 use super::{
     APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID,
@@ -111,11 +111,18 @@ impl Thread {
             SESSION_STATUS_VALUE => {
                 inner
                     .client
-                    .send_agent_text(session_status_message(
+                    .send_agent_text(full_status_report(
                         &inner.workspace_cwd,
                         &inner.account_status,
                         inner.total_token_usage.as_ref(),
+                        inner.last_used_tokens,
+                        inner.context_window_size,
+                        inner.context_usage_source,
                         inner.account_rate_limits.as_ref(),
+                        inner.compaction_in_progress,
+                        &inner.session_mcp_summary,
+                        &inner.session_skills_summary,
+                        &inner.session_plugins_summary,
                     ))
                     .await;
                 Ok(())
@@ -145,6 +152,13 @@ impl Thread {
                 inner
                     .client
                     .send_agent_text(inner.session_skills_summary.report.clone())
+                    .await;
+                Ok(())
+            }
+            PLUGINS_STATUS_VALUE => {
+                inner
+                    .client
+                    .send_agent_text(inner.session_plugins_summary.report.clone())
                     .await;
                 Ok(())
             }

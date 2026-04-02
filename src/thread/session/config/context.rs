@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use codex_app_server_protocol::{Account, RateLimitSnapshot, TokenUsageBreakdown};
+use codex_app_server_protocol::{
+    Account, PluginListResponse, PluginSource, RateLimitSnapshot, TokenUsageBreakdown,
+};
 use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
 use codex_core::skills::SkillLoadOutcome;
 use codex_protocol::account::PlanType;
@@ -16,6 +18,7 @@ pub(in crate::thread) const SESSION_STATUS_VALUE: &str = "session_status";
 pub(in crate::thread) const CONTEXT_STATUS_VALUE: &str = "context_status";
 pub(in crate::thread) const MCP_STATUS_VALUE: &str = "mcp_status";
 pub(in crate::thread) const SKILLS_STATUS_VALUE: &str = "skills_status";
+pub(in crate::thread) const PLUGINS_STATUS_VALUE: &str = "plugins_status";
 pub(in crate::thread) const CONTEXT_LIMITS_VALUE: &str = "limits_status";
 pub(in crate::thread) const CONTEXT_COMPACT_VALUE: &str = "compact_now";
 
@@ -54,6 +57,7 @@ pub(in crate::thread) fn context_control_options(
     compaction_in_progress: bool,
     mcp_summary: &ContextSelectorSummary,
     skills_summary: &ContextSelectorSummary,
+    plugins_summary: &ContextSelectorSummary,
 ) -> Vec<SessionConfigSelectOption> {
     let status_summary = session_status_summary(
         workspace_cwd,
@@ -74,6 +78,8 @@ pub(in crate::thread) fn context_control_options(
             .description(mcp_summary.description.clone()),
         SessionConfigSelectOption::new(SKILLS_STATUS_VALUE, &skills_summary.label)
             .description(skills_summary.description.clone()),
+        SessionConfigSelectOption::new(PLUGINS_STATUS_VALUE, &plugins_summary.label)
+            .description(plugins_summary.description.clone()),
         SessionConfigSelectOption::new(CONTEXT_LIMITS_VALUE, limits_status_label(rate_limits))
             .description(combined_limits_reset_message(rate_limits)),
         SessionConfigSelectOption::new(CONTEXT_COMPACT_VALUE, "Compact now")
@@ -93,6 +99,41 @@ pub(in crate::thread) fn session_status_message(
         account_detail(account_status, rate_limits),
         token_usage_summary_line(total_token_usage)
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::thread) fn full_status_report(
+    workspace_cwd: &Path,
+    account_status: &AccountStatus,
+    total_token_usage: Option<&TokenUsageBreakdown>,
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_source: Option<ContextUsageSource>,
+    rate_limits: Option<&RateLimitSnapshot>,
+    compaction_in_progress: bool,
+    mcp_summary: &ContextSelectorSummary,
+    skills_summary: &ContextSelectorSummary,
+    plugins_summary: &ContextSelectorSummary,
+) -> String {
+    let mut sections = vec![
+        session_status_message(
+            workspace_cwd,
+            account_status,
+            total_token_usage,
+            rate_limits,
+        ),
+        context_usage_message(used, size, usage_source),
+        combined_limits_reset_message(rate_limits),
+        mcp_summary.report.clone(),
+        skills_summary.report.clone(),
+        plugins_summary.report.clone(),
+    ];
+
+    if compaction_in_progress {
+        sections.push("Context compaction is currently running.".to_string());
+    }
+
+    sections.join("\n\n")
 }
 
 pub(in crate::thread) fn build_mcp_summary(
@@ -257,6 +298,153 @@ pub(in crate::thread) fn build_skills_summary(
     let mut label = format!("Skills · {enabled_count} on");
     if error_count > 0 {
         label.push_str(&format!(" · {error_count} err"));
+    }
+
+    ContextSelectorSummary {
+        label,
+        description: description_lines.join("\n"),
+        report: report_lines.join("\n"),
+    }
+}
+
+pub(in crate::thread) fn build_plugins_summary(
+    response: &PluginListResponse,
+) -> ContextSelectorSummary {
+    let mut installed_entries = Vec::new();
+    let mut available_entries = Vec::new();
+    let mut total_plugins = 0usize;
+
+    for marketplace in &response.marketplaces {
+        for plugin in &marketplace.plugins {
+            total_plugins = total_plugins.saturating_add(1);
+            let display_name = plugin
+                .interface
+                .as_ref()
+                .and_then(|interface| interface.display_name.clone())
+                .unwrap_or_else(|| plugin.name.clone());
+            let summary = plugin
+                .interface
+                .as_ref()
+                .and_then(|interface| interface.short_description.clone())
+                .or_else(|| {
+                    plugin
+                        .interface
+                        .as_ref()
+                        .and_then(|interface| interface.long_description.clone())
+                })
+                .or_else(|| {
+                    plugin
+                        .interface
+                        .as_ref()
+                        .and_then(|interface| interface.category.clone())
+                })
+                .unwrap_or_else(|| "No description provided.".to_string());
+
+            if plugin.installed {
+                installed_entries.push((
+                    display_name.clone(),
+                    summary.clone(),
+                    format_plugin_report_entry(&marketplace.name, plugin, &display_name, &summary),
+                    plugin.enabled,
+                ));
+            } else {
+                available_entries.push((display_name, summary));
+            }
+        }
+    }
+
+    installed_entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+    available_entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+
+    let marketplace_count = response.marketplaces.len();
+    let installed_count = installed_entries.len();
+    let enabled_count = installed_entries.iter().filter(|entry| entry.3).count();
+    let disabled_count = installed_count.saturating_sub(enabled_count);
+
+    if total_plugins == 0 && response.remote_sync_error.is_none() {
+        return ContextSelectorSummary {
+            label: "Plugins · none".to_string(),
+            description: "No plugins were discovered for this session.".to_string(),
+            report: "No plugins were discovered for this session.".to_string(),
+        };
+    }
+
+    let mut description_lines = if installed_count > 0 {
+        vec![format!(
+            "{enabled_count}/{installed_count} installed plugin(s) enabled across {marketplace_count} marketplace(s)."
+        )]
+    } else {
+        vec![format!(
+            "No plugins are installed for this session yet ({total_plugins} visible across {marketplace_count} marketplace(s))."
+        )]
+    };
+
+    if installed_count > 0 {
+        description_lines.extend(installed_entries.iter().take(3).map(
+            |(name, summary, _, enabled)| {
+                format!("{name} · {}", if *enabled { summary } else { "disabled" })
+            },
+        ));
+        if disabled_count > 0 {
+            description_lines.push(format!("{disabled_count} disabled"));
+        }
+    } else {
+        description_lines.extend(
+            available_entries
+                .iter()
+                .take(3)
+                .map(|(name, summary)| format!("{name} · {summary}")),
+        );
+        if total_plugins > 3 {
+            description_lines.push(format!("+{} more", total_plugins - 3));
+        }
+    }
+
+    if response.remote_sync_error.is_some() {
+        description_lines.push("remote sync unavailable".to_string());
+    }
+
+    let mut report_lines = vec![format!(
+        "Plugins visible to this session: {total_plugins} across {marketplace_count} marketplace(s)."
+    )];
+    if installed_count == 0 {
+        report_lines.push("Installed plugins: none.".to_string());
+    } else {
+        report_lines.push(format!(
+            "Installed: {installed_count} ({enabled_count} enabled, {disabled_count} disabled)."
+        ));
+        for (_, _, report, _) in installed_entries {
+            report_lines.push(String::new());
+            report_lines.push(report);
+        }
+    }
+
+    if !available_entries.is_empty() {
+        report_lines.push(String::new());
+        report_lines.push("Available but not installed:".to_string());
+        for (name, summary) in available_entries.iter().take(10) {
+            report_lines.push(format!("- {name} · {summary}"));
+        }
+        if available_entries.len() > 10 {
+            report_lines.push(format!("- +{} more", available_entries.len() - 10));
+        }
+    }
+
+    if let Some(error) = &response.remote_sync_error {
+        report_lines.push(String::new());
+        report_lines.push(format!("Remote sync error: {error}"));
+    }
+
+    let mut label = if installed_count == 0 {
+        "Plugins · none".to_string()
+    } else {
+        format!("Plugins · {enabled_count} on")
+    };
+    if disabled_count > 0 {
+        label.push_str(&format!(" · {disabled_count} off"));
+    }
+    if response.remote_sync_error.is_some() {
+        label.push_str(" · sync err");
     }
 
     ContextSelectorSummary {
@@ -560,6 +748,49 @@ fn format_skill_report_entry(skill: &codex_core::skills::SkillMetadata, enabled:
     lines.join("\n")
 }
 
+fn format_plugin_report_entry(
+    marketplace_name: &str,
+    plugin: &codex_app_server_protocol::PluginSummary,
+    display_name: &str,
+    summary: &str,
+) -> String {
+    let mut lines = vec![format!(
+        "- {} [{}{}]",
+        display_name,
+        marketplace_name,
+        if plugin.enabled {
+            ", enabled"
+        } else {
+            ", disabled"
+        }
+    )];
+    if display_name != plugin.name {
+        lines.push(format!("  name: {}", plugin.name));
+    }
+    lines.push(format!("  id: {}", plugin.id));
+    lines.push(format!("  summary: {summary}"));
+    if let Some(interface) = &plugin.interface {
+        if let Some(developer_name) = &interface.developer_name {
+            lines.push(format!("  developer: {developer_name}"));
+        }
+        if let Some(category) = &interface.category {
+            lines.push(format!("  category: {category}"));
+        }
+        if !interface.capabilities.is_empty() {
+            lines.push(format!(
+                "  capabilities: {}",
+                interface.capabilities.join(", ")
+            ));
+        }
+    }
+    match &plugin.source {
+        PluginSource::Local { .. } => {
+            lines.push("  source: local".to_string());
+        }
+    }
+    lines.join("\n")
+}
+
 fn skill_scope_label(scope: SkillScope) -> &'static str {
     match scope {
         SkillScope::User => "user",
@@ -596,17 +827,21 @@ fn truncate_middle(value: &str, max_chars: usize) -> String {
 mod tests {
     use super::{
         AccountStatus, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
-        MCP_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, build_mcp_summary,
-        build_skills_summary, context_control_options, context_usage_message,
-        session_status_message,
+        MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
+        build_mcp_summary, build_plugins_summary, build_skills_summary, context_control_options,
+        context_usage_message, full_status_report, session_status_message,
     };
     use crate::thread::ContextUsageSource;
-    use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow, TokenUsageBreakdown};
+    use codex_app_server_protocol::{
+        PluginInterface, PluginListResponse, PluginMarketplaceEntry, PluginSource, PluginSummary,
+        RateLimitSnapshot, RateLimitWindow, TokenUsageBreakdown,
+    };
     use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
     use codex_core::skills::{SkillLoadOutcome, SkillMetadata};
     use codex_protocol::account::PlanType;
     use codex_protocol::protocol::SkillScope;
     use std::collections::{HashMap, HashSet};
+    use std::convert::TryInto;
     use std::path::PathBuf;
 
     #[test]
@@ -636,13 +871,15 @@ mod tests {
             false,
             &empty_summary,
             &empty_summary,
+            &empty_summary,
         );
         assert_eq!(options[0].value.0.as_ref(), CONTEXT_STATUS_VALUE);
         assert_eq!(options[1].value.0.as_ref(), SESSION_STATUS_VALUE);
         assert_eq!(options[2].value.0.as_ref(), MCP_STATUS_VALUE);
         assert_eq!(options[3].value.0.as_ref(), SKILLS_STATUS_VALUE);
-        assert_eq!(options[4].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
-        assert_eq!(options[5].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
+        assert_eq!(options[4].value.0.as_ref(), PLUGINS_STATUS_VALUE);
+        assert_eq!(options[5].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
+        assert_eq!(options[6].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
     }
 
     #[test]
@@ -664,10 +901,11 @@ mod tests {
             false,
             &empty_summary,
             &empty_summary,
+            &empty_summary,
         );
         assert_eq!(options[0].name, "ctx ---");
-        assert_eq!(options[4].name, "Limits · 5h -- · wk --");
-        assert_eq!(options[5].name, "Compact now");
+        assert_eq!(options[5].name, "Limits · 5h -- · wk --");
+        assert_eq!(options[6].name, "Compact now");
     }
 
     #[test]
@@ -687,6 +925,7 @@ mod tests {
             Some(ContextUsageSource::Cached),
             None,
             false,
+            &empty_summary,
             &empty_summary,
             &empty_summary,
         );
@@ -733,8 +972,9 @@ mod tests {
             false,
             &empty_summary,
             &empty_summary,
+            &empty_summary,
         );
-        assert_eq!(options[4].name, "Limits · 5h 80% · wk 94%");
+        assert_eq!(options[5].name, "Limits · 5h 80% · wk 94%");
     }
 
     #[test]
@@ -759,6 +999,7 @@ mod tests {
             Some(ContextUsageSource::Live),
             None,
             false,
+            &super::ContextSelectorSummary::default(),
             &super::ContextSelectorSummary::default(),
             &super::ContextSelectorSummary::default(),
         );
@@ -853,5 +1094,153 @@ mod tests {
         assert!(summary.description.contains("1/1 skill(s) enabled"));
         assert!(summary.report.contains("frontend-skill"));
         assert!(summary.report.contains("invalid frontmatter"));
+    }
+
+    #[test]
+    fn plugins_summary_counts_enabled_and_available_plugins() {
+        let response = PluginListResponse {
+            marketplaces: vec![PluginMarketplaceEntry {
+                name: "openai-curated".to_string(),
+                path: PathBuf::from("/tmp/plugins/marketplace.json")
+                    .try_into()
+                    .expect("absolute marketplace path"),
+                plugins: vec![
+                    PluginSummary {
+                        id: "github".to_string(),
+                        name: "github".to_string(),
+                        source: PluginSource::Local {
+                            path: PathBuf::from("/tmp/plugins/github")
+                                .try_into()
+                                .expect("absolute plugin path"),
+                        },
+                        installed: true,
+                        enabled: true,
+                        interface: Some(PluginInterface {
+                            display_name: Some("GitHub".to_string()),
+                            short_description: Some("Issues and pull requests".to_string()),
+                            long_description: None,
+                            developer_name: Some("OpenAI".to_string()),
+                            category: Some("Engineering".to_string()),
+                            capabilities: vec!["skills".to_string(), "github-mcp".to_string()],
+                            website_url: None,
+                            privacy_policy_url: None,
+                            terms_of_service_url: None,
+                            default_prompt: None,
+                            brand_color: None,
+                            composer_icon: None,
+                            logo: None,
+                            screenshots: vec![],
+                        }),
+                    },
+                    PluginSummary {
+                        id: "slack".to_string(),
+                        name: "slack".to_string(),
+                        source: PluginSource::Local {
+                            path: PathBuf::from("/tmp/plugins/slack")
+                                .try_into()
+                                .expect("absolute plugin path"),
+                        },
+                        installed: true,
+                        enabled: false,
+                        interface: Some(PluginInterface {
+                            display_name: Some("Slack".to_string()),
+                            short_description: Some("Workspace messaging".to_string()),
+                            long_description: None,
+                            developer_name: None,
+                            category: Some("Communication".to_string()),
+                            capabilities: vec!["connector".to_string()],
+                            website_url: None,
+                            privacy_policy_url: None,
+                            terms_of_service_url: None,
+                            default_prompt: None,
+                            brand_color: None,
+                            composer_icon: None,
+                            logo: None,
+                            screenshots: vec![],
+                        }),
+                    },
+                    PluginSummary {
+                        id: "figma".to_string(),
+                        name: "figma".to_string(),
+                        source: PluginSource::Local {
+                            path: PathBuf::from("/tmp/plugins/figma")
+                                .try_into()
+                                .expect("absolute plugin path"),
+                        },
+                        installed: false,
+                        enabled: false,
+                        interface: Some(PluginInterface {
+                            display_name: Some("Figma".to_string()),
+                            short_description: Some("Design workflows".to_string()),
+                            long_description: None,
+                            developer_name: None,
+                            category: Some("Design".to_string()),
+                            capabilities: vec!["skills".to_string()],
+                            website_url: None,
+                            privacy_policy_url: None,
+                            terms_of_service_url: None,
+                            default_prompt: None,
+                            brand_color: None,
+                            composer_icon: None,
+                            logo: None,
+                            screenshots: vec![],
+                        }),
+                    },
+                ],
+            }],
+            remote_sync_error: Some("network unavailable".to_string()),
+        };
+
+        let summary = build_plugins_summary(&response);
+        assert_eq!(summary.label, "Plugins · 1 on · 1 off · sync err");
+        assert!(
+            summary
+                .description
+                .contains("1/2 installed plugin(s) enabled")
+        );
+        assert!(summary.description.contains("remote sync unavailable"));
+        assert!(summary.report.contains("GitHub"));
+        assert!(summary.report.contains("Available but not installed"));
+        assert!(
+            summary
+                .report
+                .contains("Remote sync error: network unavailable")
+        );
+    }
+
+    #[test]
+    fn full_status_report_includes_plugins_and_compaction() {
+        let report = full_status_report(
+            PathBuf::from("/tmp/workspace").as_path(),
+            &AccountStatus::default(),
+            None,
+            Some(1_000),
+            Some(2_000),
+            Some(ContextUsageSource::Live),
+            None,
+            true,
+            &super::ContextSelectorSummary {
+                label: "MCP · 1 srv".to_string(),
+                description: "one".to_string(),
+                report: "MCP report".to_string(),
+            },
+            &super::ContextSelectorSummary {
+                label: "Skills · 1 on".to_string(),
+                description: "one".to_string(),
+                report: "Skills report".to_string(),
+            },
+            &super::ContextSelectorSummary {
+                label: "Plugins · none".to_string(),
+                description: "none".to_string(),
+                report: "Plugins report".to_string(),
+            },
+        );
+
+        assert!(report.contains("Chat status"));
+        assert!(report.contains("Context usage: 1000/2000 tokens."));
+        assert!(report.contains("MCP report"));
+        assert!(report.contains("Skills report"));
+        assert!(report.contains("Plugins report"));
+        assert!(report.contains("Context compaction is currently running."));
     }
 }

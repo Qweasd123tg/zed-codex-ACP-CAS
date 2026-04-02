@@ -271,6 +271,26 @@ fn does_not_parse_init_prefix_as_command() {
 }
 
 #[test]
+fn parses_status_command_without_args() {
+    let prompt: Vec<ContentBlock> = vec!["/status".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Status { args: None })
+    );
+}
+
+#[test]
+fn parses_status_command_with_args_for_usage_handling() {
+    let prompt: Vec<ContentBlock> = vec!["/status verbose".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Status {
+            args: Some("verbose".to_string()),
+        })
+    );
+}
+
+#[test]
 fn parses_review_command_without_instructions() {
     let prompt: Vec<ContentBlock> = vec!["/review".into()];
     assert_eq!(
@@ -382,6 +402,7 @@ fn builtin_commands_include_review_and_fork() {
         .collect::<Vec<_>>();
 
     assert!(names.contains(&"init".to_string()));
+    assert!(names.contains(&"status".to_string()));
     assert!(names.contains(&"review".to_string()));
     assert!(names.contains(&"fork".to_string()));
 }

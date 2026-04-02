@@ -59,6 +59,14 @@ fn pending_skills_summary() -> ContextSelectorSummary {
     }
 }
 
+fn pending_plugins_summary() -> ContextSelectorSummary {
+    ContextSelectorSummary {
+        label: "Plugins · loading".to_string(),
+        description: "Discovering plugin marketplaces for this session.".to_string(),
+        report: "Plugin marketplaces are still being discovered for this session.".to_string(),
+    }
+}
+
 pub(crate) fn build_session_mcp_setup(
     base_mcp_servers: &HashMap<String, McpServerConfig>,
     cwd: &Path,
@@ -440,6 +448,7 @@ impl Thread {
                 session_mcp_config_overrides,
                 session_mcp_summary,
                 session_skills_summary: pending_skills_summary(),
+                session_plugins_summary: pending_plugins_summary(),
                 account_status: AccountStatus::default(),
                 workspace_cwd: resumed_workspace_cwd,
                 client: SessionClient::new(session_id, client_capabilities),
@@ -530,6 +539,7 @@ impl Thread {
                 session_mcp_config_overrides,
                 session_mcp_summary,
                 session_skills_summary,
+                session_plugins_summary: pending_plugins_summary(),
                 account_status,
                 workspace_cwd: cwd,
                 client: SessionClient::new(session_id, client_capabilities),

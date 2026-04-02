@@ -9,9 +9,12 @@ use super::{
     SessionConfigOption, SessionUpdate, Thread, session_config, turn_notify,
 };
 use crate::thread::{
-    features::collab, prompt_commands, replay, session_config::build_account_status,
+    features::collab,
+    prompt_commands, replay,
+    session_config::{build_account_status, build_plugins_summary},
     session_lifecycle::load_session_skills_summary_for_cwd,
 };
+use codex_app_server_protocol::PluginListParams;
 
 impl Thread {
     pub async fn mark_history_replay_pending(&self) {
@@ -133,7 +136,9 @@ impl Thread {
         )
         .await;
 
-        let (account_rate_limits, account_status) = {
+        let plugin_cwds = workspace_cwd.clone().try_into().ok().map(|cwd| vec![cwd]);
+
+        let (account_rate_limits, account_status, session_plugins_summary) = {
             let mut app = app.lock().await;
             let account_rate_limits = match app.get_account_rate_limits().await {
                 Ok(response) => Some(response.rate_limits),
@@ -157,7 +162,30 @@ impl Thread {
                     Default::default()
                 }
             };
-            (account_rate_limits, account_status)
+            let session_plugins_summary = match app
+                .plugin_list(PluginListParams {
+                    cwds: plugin_cwds,
+                    force_remote_sync: false,
+                })
+                .await
+            {
+                Ok(response) => build_plugins_summary(&response),
+                Err(error) => {
+                    warn!(
+                        error = %error,
+                        thread_id,
+                        "Failed to read plugins during deferred startup metadata refresh"
+                    );
+                    session_config::ContextSelectorSummary {
+                        label: "Plugins · unavailable".to_string(),
+                        description: "Failed to read plugin status for this session.".to_string(),
+                        report: format!(
+                            "Failed to read plugin status for this session.\n\nError: {error}"
+                        ),
+                    }
+                }
+            };
+            (account_rate_limits, account_status, session_plugins_summary)
         };
 
         let mut inner = self.inner.lock().await;
@@ -165,6 +193,7 @@ impl Thread {
         inner.account_status = account_status;
         if inner.workspace_cwd == workspace_cwd {
             inner.session_skills_summary = session_skills_summary;
+            inner.session_plugins_summary = session_plugins_summary;
         }
         turn_notify::notify_config_update(&inner).await;
 
