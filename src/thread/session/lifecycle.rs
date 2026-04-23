@@ -21,7 +21,7 @@ use super::session_config::{
 use super::{
     AppServerProcess, ClientCapabilities, Config, ContextUsageSource, EditApprovalMode, Error,
     ListSessionsResponse, ModeKind, SessionClient, SessionId, Thread, ThreadInner,
-    ThreadListParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
+    ThreadListParams, ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
 };
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
@@ -264,11 +264,68 @@ pub(in crate::thread) async fn thread_resume_with_startup_retry(
                 ))
                 .await;
             }
+            Err(error) if is_missing_rollout_thread_error(&error) => {
+                return retry_thread_resume_with_discovered_path(app, params, error).await;
+            }
             Err(error) => return Err(error),
         }
     }
 
     unreachable!("retry loop must return on success or final error")
+}
+
+async fn retry_thread_resume_with_discovered_path(
+    app: &mut AppServerProcess,
+    params: ThreadResumeParams,
+    original_error: Error,
+) -> Result<codex_app_server_protocol::ThreadResumeResponse, Error> {
+    let thread_id = params.thread_id.clone();
+    let read = match app
+        .thread_read(ThreadReadParams {
+            thread_id: thread_id.clone(),
+            include_turns: false,
+        })
+        .await
+    {
+        Ok(read) => read,
+        Err(read_error) => {
+            warn!(
+                thread_id,
+                error = %read_error,
+                "thread/resume by id failed and thread/read could not locate a fallback path"
+            );
+            return Err(original_error);
+        }
+    };
+
+    let Some(path) = read.thread.path else {
+        warn!(
+            thread_id,
+            "thread/resume by id failed and thread/read returned no rollout path"
+        );
+        return Err(original_error);
+    };
+
+    let mut retry_params = params;
+    retry_params.path = Some(path.clone());
+    warn!(
+        thread_id,
+        path = %path.display(),
+        "thread/resume by id failed; retrying with rollout path discovered by thread/read"
+    );
+
+    match app.thread_resume(retry_params).await {
+        Ok(response) => Ok(response),
+        Err(path_error) => {
+            warn!(
+                thread_id,
+                path = %path.display(),
+                error = %path_error,
+                "thread/resume by discovered rollout path failed"
+            );
+            Err(original_error)
+        }
+    }
 }
 
 async fn spawn_initialized_app(session_id: Option<&SessionId>) -> Result<AppServerProcess, Error> {
@@ -426,12 +483,19 @@ impl Thread {
         let reasoning_effort =
             resolve_reasoning_effort(&models, &resume.model, resume.reasoning_effort);
         let context_usage_cache_path = context_usage_cache_path(&config.codex_home);
+        let replay_turn_count = resume.thread.turns.len();
         let cached_context_usage = restore_cached_context_usage(
             &context_usage_cache_path,
             &resume.thread.id,
             &resume.thread.turns,
         );
         let resumed_workspace_cwd = resume.thread.cwd.clone();
+        info!(
+            session_id = %session_id,
+            thread_id = %resume.thread.id,
+            replay_turn_count,
+            "Resolved resumed ACP session history"
+        );
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
         let mut agent_labels = HashMap::new();
         remember_agent_label(
@@ -698,17 +762,11 @@ impl Thread {
             Err(error) if is_missing_rollout_thread_error(&error) => {
                 warn!(
                     requested_thread_id = resume_params.thread_id,
-                    "resume source is unavailable or not materialized; starting a fresh backend thread for this ACP session"
+                    "resume source is unavailable or not materialized"
                 );
-                return Self::start_session_for_existing_session_id(
-                    session_id,
-                    config,
-                    cwd,
-                    client_capabilities,
-                    session_mcp_config_overrides,
-                    session_mcp_summary,
-                )
-                .await;
+                return Err(Error::invalid_params().data(
+                    "Session history is not available yet. The Codex rollout may be archived, missing, or not materialized before the first user message.",
+                ));
             }
             Err(error) => return Err(error),
         };

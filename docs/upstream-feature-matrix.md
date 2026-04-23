@@ -1,6 +1,6 @@
 # Матрица Фич И Сравнение С Upstream
 
-Актуально на `2026-04-24` после прогона `bash script/update_references.sh`, обновления reference symlink'ов до среза `2026-04-23` UTC и добавления локального Fast Mode selector поверх `service_tier`.
+Актуально на `2026-04-24` после прогона `bash script/update_references.sh`, обновления reference symlink'ов до среза `2026-04-23` UTC, добавления локального Fast Mode selector поверх `service_tier` и аудита нового Zed/app-server history flow.
 
 ## Снимок References
 
@@ -25,7 +25,7 @@
 - По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `10/15` полных совпадений, `0/15` частичных совпадений и `5/15` явных пробелов.
 - Основные пробелы относительно официального адаптера: `close_session`, `/logout` и отдельные client-native UX-ветки, которые в текущем Zed ACP пока не дают достаточной отдачи.
 - Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/plan`, app-server-ориентированный flow восстановления тредов, нижний `Context` control, `Fast Mode` service-tier selector и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
-- Дополнительно форк теперь быстрее отдает первый ready-thread в `Zed`: skills/account/rate-limit metadata догружаются сразу после session response отдельным config update, а не держат весь `new_session` / `load_session` / `resume_session` в startup-loading.
+- Дополнительно форк теперь быстрее отдает первый ready-thread в `Zed`: skills/account/rate-limit metadata догружаются сразу после session response отдельным config update, а не держат весь `new_session` / `load_session` / `resume_session` в startup-loading. После аудита свежего Zed history UI адаптер также перестал подменять failed resume пустой свежей сессией: при `no rollout found` он сначала пробует найти rollout через `thread/read` и повторить `thread/resume` по path, а если история реально недоступна, возвращает явную ошибку.
 
 ## 1. Parity С Официальным `zed codex acp`
 
@@ -64,9 +64,9 @@
 | `Fast Mode` session config selector | `codex` `service_tier` + форк | `service_tier` в app-server protocol есть в срезе `2026-04-23`; локально `2026-04-24` | `[ ]` | `[x]` | У форка есть отдельный `fast_mode` selector в `src/thread/session/config/fast_mode.rs` и handler в `src/thread/session/settings.rs`. Selector держит `standard`, `fast` и `flex`, чтобы валидные service-tier значения не становились недостижимыми из UI. Значение хранится в `ThreadInner.service_tier`, синхронизируется через `thread/start`, `thread/resume`, `thread/fork`, in-place `/resume`/`/fork` и уходит в `turn/start` для новых turns. Это не новый `ModeKind`: `Plan`/`Default` остаются отдельным collaboration-mode контрактом. |
 | Collab tool-call UI | форк | `2026-02-24`, `45c084ee` | `[ ]` | `[x]` | Отдельный доменный срез в `src/thread/features/collab/*`. |
 
-## 3. Свежие Возможности `codex app-server`, Которые Пока Не Подняты В Форке
+## 3. Свежие Возможности `codex app-server`, Которые Пока Не Полностью Подняты В Форке
 
-Эти пункты уже видны в обновленном `references/codex`, но пока не отражены в ACP-обвязке форка.
+Эти пункты уже видны в обновленном `references/codex`. Большая часть пока не отражена в ACP-обвязке форка; отдельные элементы используются точечно как compatibility/fallback path.
 
 | Возможность | Источник | Дата | Статус форка | Комментарий |
 | --- | --- | --- | --- | --- |
@@ -76,6 +76,7 @@
 | `initialize` возвращает `codex_home` | `codex` | `2026-03-24`, `24c4ecaaa` | `[ ]` | В нашем мосте это сейчас не surfaced наружу. |
 | ChatGPT device-code login в app-server | `codex` | `2026-03-27`, `47a9e2e08` | `[ ]` | У форка авторизация пока завязана на существующий login flow, без нового server-side device-code пути. |
 | `thread/turns/list` | `codex` app-server protocol | видно в срезе `2026-04-23` | `[ ]` | Можно использовать для read-only turn preview или более дешевого восстановления деталей треда, но отдельного ACP UX в форке пока нет. |
+| `thread/read` как fallback для failed `thread/resume` | `codex` app-server protocol + форк | аудит `2026-04-24` | `[x]` | Свежий app-server лучше умеет читать persisted/archived thread metadata через `thread/read`, чем старый resume-by-id path. Форк использует это как восстановительный fallback: если `thread/resume` по id отвечает `no rollout found`, адаптер читает `thread.path` через `thread/read` и повторяет `thread/resume` по path. Если path тоже не помогает, Zed получает ошибку вместо пустого fake-thread без истории. |
 | Marketplace / plugin management (`marketplace/add`, `remove`, `upgrade`) | `codex` app-server protocol + TUI | видно в срезе `2026-04-23` | `[ ]` | У форка сейчас есть read-only `plugins` summary в `Context`, но нет ACP flow для установки/обновления marketplaces/plugins. |
 | Guardian approval review и verification notifications | `codex` app-server protocol + TUI | видно в срезе `2026-04-23` | `[ ]` | В протоколе есть `item/autoApprovalReview/*`, `guardianWarning`, `model/verification` и `thread/approveGuardianDeniedAction`. В форке пока surfaced только старые warning-ветки (`ConfigWarning`, `DeprecationNotice`, Windows warning). |
 | Model speed-tier metadata (`additional_speed_tiers`) | `codex` app-server protocol + TUI | видно в срезе `2026-04-23` | `[~]` | `Fast Mode` selector уже есть, но текущий pinned protocol/API форка не дает полноценного model-level gating как в свежем TUI. Поэтому selector намеренно не скрывается по модели. |

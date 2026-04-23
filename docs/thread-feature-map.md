@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-04-24` (`session/fork` surfaced in `CodexAgent`, app-server transport waits moved onto a dedicated reader/inbox path, and `Fast Mode` now flows through `service_tier` session config).
+Обновлено: `2026-04-24` (`session/fork` surfaced in `CodexAgent`, app-server transport waits moved onto a dedicated reader/inbox path, `Fast Mode` now flows through `service_tier` session config, and failed resume-by-id can recover through `thread/read` path discovery).
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -104,6 +104,7 @@ flowchart LR
 Picker и `/threads` при этом предпочитают `thread.name`, если тред был явно переименован через `/rename`, и только потом показывают `preview`.
 После успешного `/resume` текущая ACP-сессия теперь сразу получает `SessionInfoUpdate` с `title` и `updated_at`, чтобы клиентский заголовок не застревал на последнем slash-prompt, а history/recent списки не деградировали в `Unknown`.
 При этом live `ThreadNameUpdated` во время активного turn теперь не форсит ACP `title` мгновенно: автообновление имени буферизуется и публикуется уже после завершения turn, чтобы не сбивать client-side provisional-title / generating UX в `Zed`.
+При восстановлении history из Zed `load_session` / `resume_session` больше не подменяют `no rollout found` пустым fresh backend-thread. `src/thread/session/lifecycle.rs` сначала делает startup retry, затем пробует `thread/read(include_turns=false)` как path-discovery fallback и повторяет `thread/resume` по найденному rollout path. Если история реально отсутствует или тред ещё не materialized до первого user message, клиент получает явную ошибку вместо визуально открытой пустой сессии.
 Для `load_session` и `/undo` history replay теперь дополнительно fenced через `history_replay_in_progress`: pending-состояние выставляется заранее в `src/codex_agent.rs` / `src/thread/session/view.rs`, а `src/thread/prompt/flow.rs` не пускает новый prompt или session command, пока `src/thread/core/replay.rs` ещё восстанавливает историю.
 Это же позволяет не держать `ThreadInner` mutex во время тяжёлого `/undo` replay: `thread_rollback`, label-cache warmup и snapshot нужных полей остаются под lock, а сам `replay::replay_turns(...)` идёт уже после выхода из критической секции.
 Тот же паттерн теперь применён и к `/resume --history`: selector остаётся тонким, а `src/thread/features/resume/apply.rs` под lock делает transport scrub, `thread_resume`, runtime state sync и snapshot replay-данных, после чего history replay идёт уже вне общего mutex под тем же `history_replay_in_progress` fence.
