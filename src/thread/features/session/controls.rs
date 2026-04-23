@@ -13,7 +13,10 @@ use crate::thread::features::session::{
     session_info_title_update_from_unix, session_info_title_update_now,
 };
 use crate::thread::session_lifecycle::is_missing_rollout_thread_error;
-use crate::thread::{Thread as SessionThread, ThreadInner, turn_notify::notify_config_update};
+use crate::thread::{
+    Thread as SessionThread, ThreadInner, session_config::service_tier_override_from_session,
+    turn_notify::notify_config_update,
+};
 use agent_client_protocol::{
     Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
     SelectedPermissionOutcome, SessionUpdate, StopReason, ToolCallId, ToolCallStatus,
@@ -34,6 +37,7 @@ struct ThreadSwitchState {
     sandbox_policy: AppSandboxPolicy,
     model: String,
     model_provider: String,
+    service_tier: Option<codex_protocol::config_types::ServiceTier>,
     reasoning_effort: Option<ReasoningEffort>,
 }
 
@@ -134,6 +138,7 @@ impl SessionThread {
                     thread_id: inner.thread_id.clone(),
                     model: Some(inner.current_model.clone()),
                     model_provider: Some(inner.current_model_provider.clone()),
+                    service_tier: service_tier_override_from_session(inner.service_tier),
                     cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
                     approval_policy: Some(inner.approval_policy),
                     sandbox: Some(inner.sandbox_mode),
@@ -164,6 +169,7 @@ impl SessionThread {
                 sandbox_policy: fork.sandbox,
                 model: fork.model,
                 model_provider: fork.model_provider,
+                service_tier: fork.service_tier,
                 reasoning_effort: fork.reasoning_effort,
             },
             "handle_fork_command_ext",
@@ -185,6 +191,7 @@ impl SessionThread {
                 ThreadStartParams {
                     model: Some(inner.current_model.clone()),
                     model_provider: Some(inner.current_model_provider.clone()),
+                    service_tier: service_tier_override_from_session(inner.service_tier),
                     cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
                     approval_policy: Some(inner.approval_policy),
                     sandbox: Some(inner.sandbox_mode),
@@ -202,6 +209,7 @@ impl SessionThread {
                 sandbox_policy: start.sandbox,
                 model: start.model,
                 model_provider: start.model_provider,
+                service_tier: start.service_tier,
                 reasoning_effort: start.reasoning_effort,
             },
             "start_replacement_thread_ext",
@@ -343,6 +351,7 @@ async fn apply_thread_switch(
     inner.sync_sandbox_mode_from_policy(sync_reason);
     inner.current_model = state.model;
     inner.current_model_provider = state.model_provider;
+    inner.service_tier = state.service_tier;
     inner.compaction_in_progress = false;
     inner.last_used_tokens = None;
     inner.total_token_usage = None;

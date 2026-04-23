@@ -9,6 +9,7 @@ use super::{
     PermissionOptionKind, RequestPermissionOutcome, SelectedPermissionOutcome, StopReason, Thread,
     ThreadInner, ToolCallId, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     TurnInterruptParams, TurnStartParams, UserInput, features::plan, notification_dispatch,
+    session_config,
 };
 use codex_app_server_protocol::{
     JSONRPCMessage, ReviewDelivery, ReviewStartParams, ReviewTarget, ServerNotification,
@@ -176,6 +177,7 @@ impl Thread {
             inner.sync_sandbox_mode_from_policy("run_single_turn");
             let thread_id = inner.thread_id.clone();
             let model = inner.current_model.clone();
+            let service_tier = inner.service_tier;
             let effort = inner.reasoning_effort;
             let approval_policy = inner.approval_policy;
             let sandbox_policy = inner.sandbox_policy.clone();
@@ -189,6 +191,7 @@ impl Thread {
                     thread_id,
                     input,
                     model: Some(model),
+                    service_tier: session_config::service_tier_override_from_session(service_tier),
                     effort: Some(effort),
                     approval_policy: Some(approval_policy),
                     sandbox_policy: Some(sandbox_policy),

@@ -46,6 +46,9 @@ impl Thread {
                     thread_id: thread_id.to_string(),
                     model: Some(inner.current_model.clone()),
                     model_provider: Some(inner.current_model_provider.clone()),
+                    service_tier: session_config::service_tier_override_from_session(
+                        inner.service_tier,
+                    ),
                     cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
                     approval_policy: Some(inner.approval_policy),
                     sandbox: Some(inner.sandbox_mode),
@@ -91,6 +94,7 @@ impl Thread {
             inner.sync_sandbox_mode_from_policy("resume_thread_ext");
             inner.current_model = resume.model;
             inner.current_model_provider = resume.model_provider;
+            inner.service_tier = resume.service_tier;
             inner.compaction_in_progress = false;
             inner.total_token_usage = None;
             let cached_context_usage = restore_cached_context_usage(

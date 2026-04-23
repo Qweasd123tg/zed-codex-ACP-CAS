@@ -23,7 +23,7 @@ use codex_app_server_protocol::{
     TurnInterruptParams, TurnStartParams, UserInput,
 };
 use codex_core::config::Config;
-use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::{ModeKind, ServiceTier};
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::{AskForApproval, SandboxPolicy};
 use codex_utils_approval_presets::{ApprovalPreset, builtin_approval_presets};
@@ -141,6 +141,7 @@ struct ThreadInner {
     collaboration_mode_kind: ModeKind,
     current_model: String,
     current_model_provider: String,
+    service_tier: Option<ServiceTier>,
     reasoning_effort: ReasoningEffort,
     agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
     compaction_in_progress: bool,

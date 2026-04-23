@@ -2,12 +2,14 @@
 
 use crate::thread::{
     AppAskForApproval, AppModel, AppSandboxMode, ContextUsageSource, EditApprovalMode, ModeKind,
-    ReasoningEffort, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
-    ThreadInner,
+    ReasoningEffort, ServiceTier, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigSelectOption, ThreadInner,
 };
 
 #[path = "context.rs"]
 mod context;
+#[path = "fast_mode.rs"]
+mod fast_mode;
 #[path = "limits.rs"]
 mod limits;
 #[path = "modes.rs"]
@@ -26,6 +28,7 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) workspace_cwd: &'a std::path::Path,
     pub(in crate::thread) models: &'a [AppModel],
     pub(in crate::thread) current_model: &'a str,
+    pub(in crate::thread) current_service_tier: Option<ServiceTier>,
     pub(in crate::thread) current_reasoning_effort: ReasoningEffort,
     pub(in crate::thread) current_used_tokens: Option<u64>,
     pub(in crate::thread) current_context_window_size: Option<u64>,
@@ -51,6 +54,7 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         workspace_cwd: &inner.workspace_cwd,
         models: &inner.models,
         current_model: &inner.current_model,
+        current_service_tier: inner.service_tier,
         current_reasoning_effort: inner.reasoning_effort,
         current_used_tokens: inner.last_used_tokens,
         current_context_window_size: inner.context_window_size,
@@ -75,6 +79,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         workspace_cwd,
         models,
         current_model,
+        current_service_tier,
         current_reasoning_effort,
         current_used_tokens,
         current_context_window_size,
@@ -102,7 +107,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
     let current_effort_value = reasoning_effort_value(current_reasoning_effort);
     let current_effort_label = reasoning::reasoning_effort_option_label(current_reasoning_effort);
 
-    let mut options = Vec::with_capacity(5);
+    let mut options = Vec::with_capacity(6);
     let mut mode_options = Vec::with_capacity(mode_state.available_modes.len());
     for mode in mode_state.available_modes {
         mode_options.push(
@@ -155,6 +160,17 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         SessionConfigOption::select("model", "Model", current_model_id.clone(), model_options)
             .category(SessionConfigOptionCategory::Model)
             .description("Choose which model Codex should use"),
+    );
+
+    options.push(
+        SessionConfigOption::select(
+            "fast_mode",
+            "Fast Mode",
+            fast_mode::fast_mode_value(current_service_tier),
+            fast_mode::fast_mode_options(current_service_tier),
+        )
+        .category(SessionConfigOptionCategory::Model)
+        .description("Choose whether Codex should request the Fast service tier for new turns"),
     );
 
     let mut reasoning_options = Vec::new();
@@ -227,6 +243,9 @@ pub(super) use context::{
     ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE,
     SKILLS_STATUS_VALUE, build_account_status, build_mcp_summary, build_plugins_summary,
     build_skills_summary, context_usage_message, full_status_report,
+};
+pub(super) use fast_mode::{
+    parse_fast_mode_value, service_tier_override_from_config, service_tier_override_from_session,
 };
 pub(super) use limits::combined_limits_reset_message;
 pub(super) use reasoning::{

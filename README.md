@@ -90,6 +90,7 @@ Sub-agent and collaboration tool-call rendering:
 - Tool call cards for command, MCP, web, image, file, and collab branches
 - Clearer status surfacing through `/status` and the existing `Context` selector
 - `Context` selector summaries for session status, context usage, MCP, skills, plugins, limits, and compaction
+- `Fast Mode` session config selector backed by Codex app-server `service_tier`, with `fast` as the primary surfaced value
 - Practical plan mode support
 - Better default-mode fallback plan progress for long step lists: visible checkpoints now advance across the list instead of only snapping at the very end of work
 - Better startup and reconnect diagnostics
@@ -146,6 +147,7 @@ Current strengths of this fork:
 - Practical plan mode support
 - Canonical session status surfacing through `/status` plus the `Context` selector
 - `plugins` now sit alongside `status`, `MCP`, `skills`, and limits in the selector UX
+- `Fast Mode` is surfaced as session config over Codex `service_tier` and carried through start, resume, fork, and future turns
 - More complete collab and sub-agent UI mapping
 
 Current gaps:
@@ -164,6 +166,7 @@ Current gaps:
 - MCP passthrough supports `stdio` and `http` today
 - MCP `sse` passthrough is not supported yet
 - `item/tool/call` / `DynamicToolCall` requests are rejected as unsupported
+- `Fast Mode` is available through the adapter `Fast Mode` session config selector. It primarily exposes `service_tier=fast`, with `flex` available as the alternate Codex service tier. Zed's native toolbar fast-mode button is currently native-thread/staff/model-gated and is not a generic custom ACP control, so custom ACP users should use the adapter selector instead.
 - `/undo` itself works, and the adapter also exposes rollback via ACP ext methods, but the visual rewind/edit button and the pencil-style edit UX in current `Zed` still depend on a client-side ACP fix: the external-agent ACP bridge does not wire `truncate()` / rollback ext-methods for this flow yet. In practice that means patching or rebuilding `Zed` if you want the native button UX
 - The selected-agent / `New Thread` trigger in current `Zed` can show a visibly odd pulsing state that appears only while the pointer is moving. In practice this looks like a client-side repaint/animation quirk, not an ACP startup stall in the adapter
 - While history replay is restoring after `load_session` or replaying `/undo`, new prompts and session commands are intentionally fenced until replay finishes; this avoids overlapping turn/replay state in one ACP session

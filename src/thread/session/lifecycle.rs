@@ -15,7 +15,8 @@ use serde_json::Value as JsonValue;
 
 use super::session_config::{
     AccountStatus, ContextSelectorSummary, build_mcp_summary, build_skills_summary, policy_to_mode,
-    resolve_reasoning_effort, to_app_approval, to_app_sandbox_mode,
+    resolve_reasoning_effort, service_tier_override_from_config,
+    service_tier_override_from_session, to_app_approval, to_app_sandbox_mode,
 };
 use super::{
     AppServerProcess, ClientCapabilities, Config, ContextUsageSource, EditApprovalMode, Error,
@@ -301,6 +302,7 @@ async fn start_backend_thread(
         .thread_start(ThreadStartParams {
             model: config.model.clone(),
             model_provider: Some(config.model_provider_id.clone()),
+            service_tier: service_tier_override_from_config(config.service_tier),
             cwd: Some(cwd.to_string_lossy().to_string()),
             approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
             sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
@@ -333,6 +335,7 @@ impl Thread {
             let source_thread_id = inner.thread_id.clone();
             let source_model = inner.current_model.clone();
             let source_model_provider = inner.current_model_provider.clone();
+            let source_service_tier = inner.service_tier;
             let source_approval_policy = inner.approval_policy;
             let source_sandbox_mode = inner.sandbox_mode;
             let session_mcp_config_overrides = if requested_mcp_override_present {
@@ -353,6 +356,7 @@ impl Thread {
                     thread_id: source_thread_id.clone(),
                     model: Some(source_model),
                     model_provider: Some(source_model_provider),
+                    service_tier: service_tier_override_from_session(source_service_tier),
                     cwd: Some(cwd.to_string_lossy().to_string()),
                     approval_policy: Some(source_approval_policy),
                     sandbox: Some(source_sandbox_mode),
@@ -459,6 +463,7 @@ impl Thread {
                 collaboration_mode_kind: ModeKind::Default,
                 current_model: resume.model,
                 current_model_provider: resume.model_provider,
+                service_tier: resume.service_tier,
                 reasoning_effort,
                 agent_labels,
                 compaction_in_progress: false,
@@ -550,6 +555,7 @@ impl Thread {
                 collaboration_mode_kind: ModeKind::Default,
                 current_model: start.model,
                 current_model_provider: start.model_provider,
+                service_tier: start.service_tier,
                 reasoning_effort,
                 agent_labels,
                 compaction_in_progress: false,
@@ -679,6 +685,7 @@ impl Thread {
             thread_id: session_id.0.to_string(),
             model: config.model.clone(),
             model_provider: Some(config.model_provider_id.clone()),
+            service_tier: service_tier_override_from_config(config.service_tier),
             cwd: Some(cwd.to_string_lossy().to_string()),
             approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
             sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),

@@ -4,7 +4,8 @@ use super::session_config::{
     CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
     PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, combined_limits_reset_message,
     context_usage_message, find_model_for_current, full_status_report,
-    normalize_reasoning_effort_for_model, parse_reasoning_effort, reasoning_effort_value,
+    normalize_reasoning_effort_for_model, parse_fast_mode_value, parse_reasoning_effort,
+    reasoning_effort_value,
 };
 use super::{
     APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID,
@@ -102,6 +103,15 @@ impl Thread {
         Ok(())
     }
 
+    pub async fn set_fast_mode(
+        &self,
+        service_tier: Option<codex_protocol::config_types::ServiceTier>,
+    ) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+        inner.service_tier = service_tier;
+        Ok(())
+    }
+
     pub async fn set_context_control(
         &self,
         value: agent_client_protocol::SessionConfigValueId,
@@ -189,6 +199,11 @@ impl Thread {
             "mode" => self.set_mode(SessionModeId::new(value.0)).await,
             "permissions" => self.set_permission_mode(SessionModeId::new(value.0)).await,
             "model" => self.set_model(ModelId::new(value.0)).await,
+            "fast_mode" => {
+                let service_tier = parse_fast_mode_value(&value.0)
+                    .ok_or_else(|| Error::invalid_params().data("Unsupported fast mode value"))?;
+                self.set_fast_mode(service_tier).await
+            }
             "reasoning_effort" => {
                 let effort = parse_reasoning_effort(&value.0)
                     .ok_or_else(|| Error::invalid_params().data("Unsupported reasoning effort"))?;

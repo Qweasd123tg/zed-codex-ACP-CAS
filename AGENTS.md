@@ -74,7 +74,7 @@ bash script/build_local_release.sh
 2. Доменную логику держать в `features/*`, не возвращать ее в корневой `thread.rs`.
 3. Для новых lifecycle-веток соблюдать симметрию: `started -> completed -> replay`.
 4. Для turn-зависимых веток сохранять guard по `expected_turn_id`.
-5. После изменений mode/config отправлять `notify_config_update` или `notify_mode_and_config_update`.
+5. После изменений mode/config/service_tier отправлять `notify_config_update` или `notify_mode_and_config_update`, если изменение происходит вне обычного `set_config_option` response path.
 
 ## Правила изменений в `collab/subagents`
 Текущий контракт в коде завязан на `ThreadItem::CollabAgentToolCall` и enum-ы из `codex-app-server-protocol`.

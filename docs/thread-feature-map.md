@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-04-02` (`session/fork` surfaced in `CodexAgent`, then app-server transport waits moved onto a dedicated reader/inbox path).
+Обновлено: `2026-04-24` (`session/fork` surfaced in `CodexAgent`, app-server transport waits moved onto a dedicated reader/inbox path, and `Fast Mode` now flows through `service_tier` session config).
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -184,6 +184,7 @@ flowchart LR
 6. Изменение session/config, archive и thread title:
 - `src/thread/session/config/mod.rs`
 - `src/thread/session/config/context.rs`
+- `src/thread/session/config/fast_mode.rs`
 - `src/thread/session/config/limits.rs`
 - `src/thread/session/config/modes.rs`
 - `src/thread/session/config/reasoning.rs`
@@ -199,6 +200,8 @@ flowchart LR
   и должны переживать replacement-thread внутри той же ACP-сессии.
 - Тот же lifecycle-набор теперь обслуживает и стандартный ACP `session/fork`: `src/codex_agent.rs` публикует capability и handler,
   а `src/thread/session/lifecycle.rs` использует существующий `thread/fork` backend, после чего поднимает forked ACP session как отдельный `Thread`.
+- `Fast Mode` относится к этому же lifecycle-набору: выбранный `service_tier` хранится в `ThreadInner`, попадает в `thread/start` / `thread/resume` / `thread/fork`,
+  синхронизируется после in-place `/resume` и `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
 
 6. Изменение collab/subagents контракта:
 - `src/thread/features/collab/render.rs`
@@ -220,6 +223,7 @@ flowchart LR
 - `src/thread/features/notification/events/turn.rs`
 
 Риск: сломать переходы `Plan -> Default` и fallback при неполных plan-update.
+Отдельно: `Fast Mode` не является `ModeKind` и не должен смешиваться с `Plan`/`Default`. Это session/config `service_tier`; если менять его plumbing, нужно сохранять состояние в `ThreadInner` и подавать явный `service_tier` в следующий `TurnStartParams`.
 
 ### Маршрутизация сообщений
 - `src/thread/notification/dispatch.rs`

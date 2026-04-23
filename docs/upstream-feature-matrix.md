@@ -1,17 +1,17 @@
 # Матрица Фич И Сравнение С Upstream
 
-Актуально на `2026-04-02` после прогона `bash script/update_references.sh`, RFC3339-фикса для `session/list.updated_at`, повторной сверки Zed history UI и локальной оптимизации startup path.
+Актуально на `2026-04-24` после прогона `bash script/update_references.sh`, обновления reference symlink'ов до среза `2026-04-23` UTC и добавления локального Fast Mode selector поверх `service_tier`.
 
 ## Снимок References
 
 | Reference | Состояние | Дата / commit | Примечание |
 | --- | --- | --- | --- |
-| `agent-client-protocol` | обновлен | `2026-04-01`, `f21d317` | Локальная ссылка теперь указывает на `v0.11.4-24-gf21d317`. |
-| `codex-acp-upstream` | обновлен | `2026-03-31`, `c3e95ca` | Локальная ссылка теперь указывает на `v0.11.1`. Это основной источник для сравнения с официальным `zed codex acp`. |
-| `codex` | обновлен | `2026-04-01`, `dc263f592` | Локальная ссылка теперь указывает на `rusty-v8-v146.4.0-313-gdc263f592`. |
-| `zed` | обновлен | `2026-04-01`, `5a9c763d9a` | Локальная ссылка теперь указывает на `nightly` (`references/zed@nightly`). |
+| `agent-client-protocol` | обновлен | `2026-04-23`, `6f4ef31` | Локальная ссылка теперь указывает на `v0.12.2-2-g6f4ef31`. |
+| `codex-acp-upstream` | обновлен | `2026-04-23`, `132c0bd` | Локальная ссылка теперь указывает на `v0.11.1-2-g132c0bd`. Это основной источник для сравнения с официальным `zed codex acp`. |
+| `codex` | обновлен | `2026-04-23`, `2e228969b` | Локальная ссылка теперь указывает на `rusty-v8-v146.4.0-1066-g2e228969b`. |
+| `zed` | обновлен | `2026-04-23`, `8cd2d599ae` | Локальная ссылка теперь указывает на `nightly-1-g8cd2d599ae`. |
 
-Сравнение ниже опирается прежде всего на `references/codex-acp-upstream@v0.11.1` и `references/codex@rusty-v8-v146.4.0-313-gdc263f592`. `zed`-референс здесь вторичен.
+Сравнение ниже опирается прежде всего на `references/codex-acp-upstream@v0.11.1-2-g132c0bd` и `references/codex@rusty-v8-v146.4.0-1066-g2e228969b`. `zed`-референс здесь вторичен, но важен для client-side Fast Mode UI caveat.
 
 ## Легенда
 
@@ -24,7 +24,7 @@
 
 - По выбранному набору parity-фич с официальным `zed codex acp` у форка сейчас `10/15` полных совпадений, `0/15` частичных совпадений и `5/15` явных пробелов.
 - Основные пробелы относительно официального адаптера: `close_session`, `/logout` и отдельные client-native UX-ветки, которые в текущем Zed ACP пока не дают достаточной отдачи.
-- Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/plan`, app-server-ориентированный flow восстановления тредов, нижний `Context` control и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
+- Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/plan`, app-server-ориентированный flow восстановления тредов, нижний `Context` control, `Fast Mode` service-tier selector и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
 - Дополнительно форк теперь быстрее отдает первый ready-thread в `Zed`: skills/account/rate-limit metadata догружаются сразу после session response отдельным config update, а не держат весь `new_session` / `load_session` / `resume_session` в startup-loading.
 
 ## 1. Parity С Официальным `zed codex acp`
@@ -35,7 +35,7 @@
 | `list_sessions` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У upstream список идет из rollout storage, у нас из `thread/list` app-server в `src/thread/session/lifecycle.rs`. С `2026-04-01` адаптер форматирует `updated_at` как RFC3339 и в `session/list`, и в live `SessionInfoUpdate`, чтобы Zed history не падал в `Unknown`. |
 | `close_session` | `codex-acp-upstream` | `2026-03-13`, `be20828` | `[x]` | `[ ]` | В нашем `src/codex_agent.rs` capability `close` и handler `close_session` не реализованы. |
 | Usage update / контекстное окно | `codex-acp-upstream`, `codex` | `2026-02-27`, `34dc10c`; протокол виден в `codex` на `2026-03-03`, `8da7e4bda` | `[x]` | `[x]` | У нас есть `ThreadTokenUsageUpdated` в `src/thread/features/notification/mod.rs` и `send_usage_update` в `src/thread/session/client.rs`. |
-| Session config: `mode`, `permissions`, `model`, `reasoning_effort`, `context_control` | `codex-acp-upstream` + форк | `<= 2026-02-18`, `c0b82cc`; `permissions` и `context_control` локально, selector enrich `2026-03-31` | `[x]` | `[x]` | У нас это разнесено по `src/thread/session/config/*` и `src/thread/session/settings.rs`; `mode` и `permissions` теперь отдельные selectors, а `context_control` показывает `status`, `ctx %`, `MCP`, `skills`, account limits (`5h`/`wk`) и умеет запускать compaction. `status` в short label держит суммарный `used`, а detail/report — workspace, account и `used / in / out`. |
+| Session config: `mode`, `permissions`, `model`, `reasoning_effort`, `context_control` | `codex-acp-upstream` + форк | `<= 2026-02-18`, `c0b82cc`; `permissions` и `context_control` локально, selector enrich `2026-03-31` | `[x]` | `[x]` | У нас это разнесено по `src/thread/session/config/*` и `src/thread/session/settings.rs`; `mode` и `permissions` теперь отдельные selectors, а `context_control` показывает `status`, `ctx %`, `MCP`, `skills`, `plugins`, account limits (`5h`/`wk`) и умеет запускать compaction. `status` в short label держит суммарный `used`, а detail/report — workspace, account и `used / in / out`. Новый `fast_mode` вынесен отдельной строкой ниже, потому что это уже `service_tier`, а не обычный reasoning/mode selector. |
 | `/compact` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У нас команда реализована в `src/thread/features/session/controls.rs`. |
 | `/undo` | `codex-acp-upstream` | `<= 2026-02-18`, `c0b82cc` | `[x]` | `[x]` | У нас `undo` тоже вынесен в `src/thread/features/session/controls.rs`, а адаптер дополнительно понимает rollback через ACP ext methods (`zed.dev/codex/thread/rollback`, `session/rollback` и т.д.). Сам rollback-flow работает, но visual edit/rewind button и pencil-style edit UX в текущем `Zed` по-прежнему зависят от client-side ACP fix: внешний ACP bridge `Zed` пока не wire-ит `truncate()` / ext rollback path для этого UX. |
 | `/review` | `codex-acp-upstream` + `codex` (`review/start`) | `<= 2026-02-18`, `c0b82cc`; локально `2026-03-31` | `[x]` | `[x]` | У форка теперь есть user-facing inline review-flow через один основной entrypoint `/review`. Bare команда открывает ACP picker для uncommitted/base-branch/commit/custom сценариев, а кастомные инструкции задаются через `/review <text>`. |
@@ -61,6 +61,7 @@
 | `/rename <name>` | `codex` (`set_thread_name`) + форк | нативный op есть в `codex`; ACP-ветка форка добавлена локально `2026-03-29` | `[ ]` | `[x]` | Использует `thread/name/set`, сразу обновляет `SessionInfoUpdate` в ACP и поднимает `thread.name` в `/threads` и `/resume`. |
 | `ACP_DISABLE_AUTO_RESTORE=1` для чистого старта без потери ручного history-open | форк | `2026-03-29`, локально; startup-window guard `2026-04-01`, локально | `[ ]` | `[x]` | Capability `load_session/resume_session` остаются видимыми для Zed. Внутри `src/codex_agent.rs` подавляется только самый ранний startup-driven restore сразу после старта агента; поздние явные открытия из history снова идут через обычный restore-path. |
 | `/plan` mode и one-shot planning | форк | базовая ветка `2026-02-25`, `30e0d57a`; поведение стабилизировано `2026-02-26`, `f537f1d5` | `[ ]` | `[x]` | Логика в `src/thread/features/plan/*`, prompt-flow в `src/thread/prompt/flow.rs`. |
+| `Fast Mode` session config selector | `codex` `service_tier` + форк | `service_tier` в app-server protocol есть в срезе `2026-04-23`; локально `2026-04-24` | `[ ]` | `[x]` | У форка есть отдельный `fast_mode` selector в `src/thread/session/config/fast_mode.rs` и handler в `src/thread/session/settings.rs`. Selector держит `standard`, `fast` и `flex`, чтобы валидные service-tier значения не становились недостижимыми из UI. Значение хранится в `ThreadInner.service_tier`, синхронизируется через `thread/start`, `thread/resume`, `thread/fork`, in-place `/resume`/`/fork` и уходит в `turn/start` для новых turns. Это не новый `ModeKind`: `Plan`/`Default` остаются отдельным collaboration-mode контрактом. |
 | Collab tool-call UI | форк | `2026-02-24`, `45c084ee` | `[ ]` | `[x]` | Отдельный доменный срез в `src/thread/features/collab/*`. |
 
 ## 3. Свежие Возможности `codex app-server`, Которые Пока Не Подняты В Форке
@@ -74,6 +75,12 @@
 | Override feature flags method | `codex` | `2026-03-24`, `0b08d8930` | `[ ]` | Пока форк не умеет управлять фичефлагами app-server извне. |
 | `initialize` возвращает `codex_home` | `codex` | `2026-03-24`, `24c4ecaaa` | `[ ]` | В нашем мосте это сейчас не surfaced наружу. |
 | ChatGPT device-code login в app-server | `codex` | `2026-03-27`, `47a9e2e08` | `[ ]` | У форка авторизация пока завязана на существующий login flow, без нового server-side device-code пути. |
+| `thread/turns/list` | `codex` app-server protocol | видно в срезе `2026-04-23` | `[ ]` | Можно использовать для read-only turn preview или более дешевого восстановления деталей треда, но отдельного ACP UX в форке пока нет. |
+| Marketplace / plugin management (`marketplace/add`, `remove`, `upgrade`) | `codex` app-server protocol + TUI | видно в срезе `2026-04-23` | `[ ]` | У форка сейчас есть read-only `plugins` summary в `Context`, но нет ACP flow для установки/обновления marketplaces/plugins. |
+| Guardian approval review и verification notifications | `codex` app-server protocol + TUI | видно в срезе `2026-04-23` | `[ ]` | В протоколе есть `item/autoApprovalReview/*`, `guardianWarning`, `model/verification` и `thread/approveGuardianDeniedAction`. В форке пока surfaced только старые warning-ветки (`ConfigWarning`, `DeprecationNotice`, Windows warning). |
+| Model speed-tier metadata (`additional_speed_tiers`) | `codex` app-server protocol + TUI | видно в срезе `2026-04-23` | `[~]` | `Fast Mode` selector уже есть, но текущий pinned protocol/API форка не дает полноценного model-level gating как в свежем TUI. Поэтому selector намеренно не скрывается по модели. |
+| Thread memory mode и item injection (`thread/memoryMode/set`, `thread/inject_items`) | `codex` app-server protocol | видно в срезе `2026-04-23` | `[ ]` | В ACP-слой форка пока не поднято; не стоит добавлять полумертвый runtime path без ясного Zed UX. |
+| External agent config migration / import | `codex` TUI | видно в срезе `2026-04-23` | `[ ]` | В TUI появился startup migration flow для внешних agent configs/plugins. Для ACP CAS это отдельный продуктовый сценарий, не простой transport passthrough. |
 
 ## 4. Что Стоит Подумать Всерьез
 
@@ -97,6 +104,7 @@
 - Если разбивать approval body на несколько ACP content-item'ов, `Zed` рисует между ними разделители. Для code block это выглядит плохо, поэтому command approval body у нас теперь отдается одним markdown-блоком.
 - Верхний label `Run Command` тоже рисует сам клиент по `ToolKind::Execute`; адаптер может менять только вторичный title и содержимое body.
 - Selected-agent / `New Thread` trigger в текущем `Zed` может визуально пульсировать только пока движется указатель мыши. По фактическому поведению это больше похоже на client-side repaint/animation quirk, чем на отдельную задержку ACP startup path.
+- Нативная toolbar-кнопка Fast Mode в свежем `Zed` завязана на native-thread/staff/model gating и `supports_fast_mode()`. Для custom ACP CAS она не является универсальным внешним контролом, поэтому форк поднимает Fast Mode через обычный ACP session config selector без патча клиента.
 - Для ACP session history `updated_at` реально показывается только в полном history-view и во встроенном блоке `Recent` внутри чата. Toolbar/dropdown `Recently Updated` в `Zed` рендерит только `title`, без времени, `cwd` и `meta`.
 - `cwd` и `meta` в `AgentSessionInfo` до клиента доезжают, но текущие history/render пути `Zed` их не рисуют. Это уже client-side ограничение, а не баг адаптера.
 
@@ -114,4 +122,5 @@
 - override feature flags
 - `codex_home` из `initialize`
 - remote auth through client
+- Нативный Zed toolbar Fast Mode button для custom ACP CAS: текущий практичный путь уже закрыт adapter-side `Fast Mode` selector, а полное toolbar parity требует client-side UX контракта.
 - `DynamicToolCall`: потенциал есть как у моста к client-side/native UX, но для текущего Zed нет достаточно сильной surfaced-поверхности, чтобы держать даже partial runtime-support в основном коде. Возвращаться к нему имеет смысл только если появится конкретный Zed-side use case: например client-native picker, structured editor context или другой интерактивный UI, который нельзя нормально закрыть текущими ACP primitives. Для такого возврата сохранен backup-конспект в `docs/drafts/dynamic-tool-call-backup.md`.
