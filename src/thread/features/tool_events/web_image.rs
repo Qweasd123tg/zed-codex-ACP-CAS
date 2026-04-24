@@ -42,7 +42,6 @@ pub(in crate::thread) async fn emit_image_view_started(
     id: String,
     path: String,
 ) {
-    inner.started_tool_calls.insert(id.clone());
     inner
         .client
         .send_tool_call(

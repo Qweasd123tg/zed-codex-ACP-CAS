@@ -1,10 +1,10 @@
 {
   "title": "Thread Feature Map (Curated)",
   "source": "docs/thread-feature-map.md",
-  "generated_at": "2026-04-23T22:15:06.216999+00:00",
+  "generated_at": "2026-04-24T17:57:17.706504+00:00",
   "stats": {
-    "nodes": 48,
-    "edges": 50
+    "nodes": 50,
+    "edges": 52
   },
   "nodes": [
     {
@@ -12,6 +12,18 @@
       "label": "src/app_server.rs",
       "kind": "file",
       "path": "src/app_server.rs"
+    },
+    {
+      "id": "AppServerPolicy",
+      "label": "src/app_server/request_policy.rs",
+      "kind": "file",
+      "path": "src/app_server/request_policy.rs"
+    },
+    {
+      "id": "AppServerReader",
+      "label": "src/app_server/reader.rs",
+      "kind": "file",
+      "path": "src/app_server/reader.rs"
     },
     {
       "id": "ApprovalsCommand",
@@ -451,6 +463,14 @@
     {
       "from": "TurnExecution",
       "to": "ReconnectGuard"
+    },
+    {
+      "from": "AppServer",
+      "to": "AppServerReader"
+    },
+    {
+      "from": "AppServer",
+      "to": "AppServerPolicy"
     },
     {
       "from": "ResumeSelector",

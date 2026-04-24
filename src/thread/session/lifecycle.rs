@@ -19,14 +19,17 @@ use super::session_config::{
     service_tier_override_from_session, to_app_approval, to_app_sandbox_mode,
 };
 use super::{
-    AppServerProcess, ClientCapabilities, Config, ContextUsageSource, EditApprovalMode, Error,
-    ListSessionsResponse, ModeKind, SessionClient, SessionId, Thread, ThreadInner,
-    ThreadListParams, ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
+    AppAskForApproval, AppModel, AppSandboxPolicy, AppServerProcess, ClientCapabilities, Config,
+    ContextUsageSource, EditApprovalMode, Error, ListSessionsResponse, ModeKind, ReasoningEffort,
+    ServiceTier, SessionClient, SessionId, Thread, ThreadInner, ThreadListParams, ThreadReadParams,
+    ThreadResumeParams, ThreadSortKey, ThreadStartParams,
 };
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::session_usage_cache::{context_usage_cache_path, restore_cached_context_usage};
-use codex_app_server_protocol::{ThreadForkParams, ThreadResumeResponse, ThreadStartResponse};
+use codex_app_server_protocol::{
+    Thread as AppThread, ThreadForkParams, ThreadResumeResponse, ThreadStartResponse,
+};
 use tracing::{info, warn};
 
 const RESUME_STARTUP_RETRY_ATTEMPTS: usize = 6;
@@ -40,6 +43,16 @@ pub(crate) struct SessionMcpSetup {
 struct StartedBackendThread {
     app: AppServerProcess,
     start: ThreadStartResponse,
+}
+
+struct BackendThreadBootstrap {
+    thread: AppThread,
+    approval_policy: AppAskForApproval,
+    sandbox: AppSandboxPolicy,
+    model: String,
+    model_provider: String,
+    service_tier: Option<ServiceTier>,
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 fn startup_error(stage: &str, error: Error) -> Error {
@@ -242,6 +255,22 @@ pub(in crate::thread) fn is_missing_rollout_thread_error(error: &Error) -> bool 
     message.contains("no rollout found for thread id")
 }
 
+fn resume_path_discovery_read_params(thread_id: &str) -> ThreadReadParams {
+    ThreadReadParams {
+        thread_id: thread_id.to_string(),
+        include_turns: false,
+    }
+}
+
+fn resume_params_with_discovered_path(
+    mut params: ThreadResumeParams,
+    path: Option<PathBuf>,
+) -> Option<(ThreadResumeParams, PathBuf)> {
+    let path = path?;
+    params.path = Some(path.clone());
+    Some((params, path))
+}
+
 pub(in crate::thread) async fn thread_resume_with_startup_retry(
     app: &mut AppServerProcess,
     params: ThreadResumeParams,
@@ -281,10 +310,7 @@ async fn retry_thread_resume_with_discovered_path(
 ) -> Result<codex_app_server_protocol::ThreadResumeResponse, Error> {
     let thread_id = params.thread_id.clone();
     let read = match app
-        .thread_read(ThreadReadParams {
-            thread_id: thread_id.clone(),
-            include_turns: false,
-        })
+        .thread_read(resume_path_discovery_read_params(&thread_id))
         .await
     {
         Ok(read) => read,
@@ -298,16 +324,15 @@ async fn retry_thread_resume_with_discovered_path(
         }
     };
 
-    let Some(path) = read.thread.path else {
+    let Some((retry_params, path)) =
+        resume_params_with_discovered_path(params, read.thread.path.clone())
+    else {
         warn!(
             thread_id,
             "thread/resume by id failed and thread/read returned no rollout path"
         );
         return Err(original_error);
     };
-
-    let mut retry_params = params;
-    retry_params.path = Some(path.clone());
     warn!(
         thread_id,
         path = %path.display(),
@@ -372,6 +397,95 @@ async fn start_backend_thread(
 }
 
 impl Thread {
+    #[allow(clippy::too_many_arguments)]
+    fn build_thread_from_bootstrap(
+        session_id: SessionId,
+        codex_home: PathBuf,
+        bundled_skills_enabled: bool,
+        workspace_cwd: PathBuf,
+        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
+        session_mcp_summary: ContextSelectorSummary,
+        session_skills_summary: ContextSelectorSummary,
+        session_plugins_summary: ContextSelectorSummary,
+        account_status: AccountStatus,
+        app: AppServerProcess,
+        bootstrap: BackendThreadBootstrap,
+        models: Vec<AppModel>,
+        cached_context_usage: Option<(u64, u64)>,
+    ) -> Self {
+        let reasoning_effort =
+            resolve_reasoning_effort(&models, &bootstrap.model, bootstrap.reasoning_effort);
+        let thread = bootstrap.thread;
+        let thread_id = thread.id;
+        let mut agent_labels = HashMap::new();
+        remember_agent_label(
+            &mut agent_labels,
+            thread_id.clone(),
+            thread.agent_nickname,
+            thread.agent_role,
+        );
+
+        let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
+        Thread {
+            inner: tokio::sync::Mutex::new(ThreadInner {
+                session_id: session_id.clone(),
+                app: Arc::new(tokio::sync::Mutex::new(app)),
+                codex_home: codex_home.clone(),
+                bundled_skills_enabled,
+                thread_id,
+                context_usage_cache_path: context_usage_cache_path(&codex_home),
+                session_mcp_config_overrides,
+                session_mcp_summary,
+                session_skills_summary,
+                session_plugins_summary,
+                account_status,
+                workspace_cwd,
+                client: SessionClient::new(session_id, client_capabilities),
+                approval_policy: bootstrap.approval_policy,
+                sandbox_policy: bootstrap.sandbox.clone(),
+                sandbox_mode: policy_to_mode(&bootstrap.sandbox),
+                edit_approval_mode: EditApprovalMode::AutoApprove,
+                collaboration_mode_kind: ModeKind::Default,
+                current_model: bootstrap.model,
+                current_model_provider: bootstrap.model_provider,
+                service_tier: bootstrap.service_tier,
+                reasoning_effort,
+                agent_labels,
+                compaction_in_progress: false,
+                last_used_tokens: cached_context_usage.map(|(used, _)| used),
+                total_token_usage: None,
+                context_window_size: cached_context_usage.map(|(_, size)| size),
+                context_usage_source: cached_context_usage.map(|_| ContextUsageSource::Cached),
+                account_rate_limits: None,
+                models,
+                active_turn_id: None,
+                active_turn_mode_kind: None,
+                active_turn_saw_plan_item: false,
+                active_turn_saw_plan_delta: false,
+                started_tool_calls: HashSet::new(),
+                completed_turn_ids: HashSet::new(),
+                turn_plan_updates_seen: HashSet::new(),
+                fallback_plan: None,
+                file_change_locations: HashMap::new(),
+                file_change_started_changes: HashMap::new(),
+                file_change_before_contents: HashMap::new(),
+                latest_turn_diff: None,
+                file_change_paths_this_turn: HashSet::new(),
+                synced_paths_this_turn: HashSet::new(),
+                last_plan_steps: Vec::new(),
+                carryover_plan_steps: None,
+                pending_thread_title_update: None,
+                replay_turns: thread.turns,
+                history_replay_in_progress: false,
+                turn_last_progress_at: std::time::Instant::now(),
+                turn_reconnect_warning_count: 0,
+                turn_reconnect_retry_limit_hit: false,
+            }),
+            cancel_tx,
+        }
+    }
+
     async fn fork_as_new_session(
         &self,
         config: &Config,
@@ -480,8 +594,6 @@ impl Thread {
                 Vec::new()
             }
         };
-        let reasoning_effort =
-            resolve_reasoning_effort(&models, &resume.model, resume.reasoning_effort);
         let context_usage_cache_path = context_usage_cache_path(&config.codex_home);
         let replay_turn_count = resume.thread.turns.len();
         let cached_context_usage = restore_cached_context_usage(
@@ -496,72 +608,30 @@ impl Thread {
             replay_turn_count,
             "Resolved resumed ACP session history"
         );
-        let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
-        let mut agent_labels = HashMap::new();
-        remember_agent_label(
-            &mut agent_labels,
-            resume.thread.id.clone(),
-            resume.thread.agent_nickname.clone(),
-            resume.thread.agent_role.clone(),
-        );
-
-        Thread {
-            inner: tokio::sync::Mutex::new(ThreadInner {
-                session_id: session_id.clone(),
-                app: Arc::new(tokio::sync::Mutex::new(app)),
-                codex_home: config.codex_home.clone(),
-                bundled_skills_enabled: config.bundled_skills_enabled(),
-                thread_id: resume.thread.id,
-                context_usage_cache_path,
-                session_mcp_config_overrides,
-                session_mcp_summary,
-                session_skills_summary: pending_skills_summary(),
-                session_plugins_summary: pending_plugins_summary(),
-                account_status: AccountStatus::default(),
-                workspace_cwd: resumed_workspace_cwd,
-                client: SessionClient::new(session_id, client_capabilities),
+        Self::build_thread_from_bootstrap(
+            session_id,
+            config.codex_home.clone(),
+            config.bundled_skills_enabled(),
+            resumed_workspace_cwd,
+            client_capabilities,
+            session_mcp_config_overrides,
+            session_mcp_summary,
+            pending_skills_summary(),
+            pending_plugins_summary(),
+            AccountStatus::default(),
+            app,
+            BackendThreadBootstrap {
+                thread: resume.thread,
                 approval_policy: resume.approval_policy,
-                sandbox_policy: resume.sandbox.clone(),
-                sandbox_mode: policy_to_mode(&resume.sandbox),
-                edit_approval_mode: EditApprovalMode::AutoApprove,
-                collaboration_mode_kind: ModeKind::Default,
-                current_model: resume.model,
-                current_model_provider: resume.model_provider,
+                sandbox: resume.sandbox,
+                model: resume.model,
+                model_provider: resume.model_provider,
                 service_tier: resume.service_tier,
-                reasoning_effort,
-                agent_labels,
-                compaction_in_progress: false,
-                last_used_tokens: cached_context_usage.map(|(used, _)| used),
-                total_token_usage: None,
-                context_window_size: cached_context_usage.map(|(_, size)| size),
-                context_usage_source: cached_context_usage.map(|_| ContextUsageSource::Cached),
-                account_rate_limits: None,
-                models,
-                active_turn_id: None,
-                active_turn_mode_kind: None,
-                active_turn_saw_plan_item: false,
-                active_turn_saw_plan_delta: false,
-                started_tool_calls: HashSet::new(),
-                completed_turn_ids: HashSet::new(),
-                turn_plan_updates_seen: HashSet::new(),
-                fallback_plan: None,
-                file_change_locations: HashMap::new(),
-                file_change_started_changes: HashMap::new(),
-                file_change_before_contents: HashMap::new(),
-                latest_turn_diff: None,
-                file_change_paths_this_turn: HashSet::new(),
-                synced_paths_this_turn: HashSet::new(),
-                last_plan_steps: Vec::new(),
-                carryover_plan_steps: None,
-                pending_thread_title_update: None,
-                replay_turns: resume.thread.turns,
-                history_replay_in_progress: false,
-                turn_last_progress_at: std::time::Instant::now(),
-                turn_reconnect_warning_count: 0,
-                turn_reconnect_retry_limit_hit: false,
-            }),
-            cancel_tx,
-        }
+                reasoning_effort: resume.reasoning_effort,
+            },
+            models,
+            cached_context_usage,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -585,75 +655,30 @@ impl Thread {
                 Vec::new()
             }
         };
-        let reasoning_effort =
-            resolve_reasoning_effort(&models, &start.model, start.reasoning_effort);
-
-        let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
-        let mut agent_labels = HashMap::new();
-        remember_agent_label(
-            &mut agent_labels,
-            start.thread.id.clone(),
-            start.thread.agent_nickname.clone(),
-            start.thread.agent_role.clone(),
-        );
-
-        Thread {
-            inner: tokio::sync::Mutex::new(ThreadInner {
-                session_id: session_id.clone(),
-                app: Arc::new(tokio::sync::Mutex::new(app)),
-                codex_home: codex_home.clone(),
-                bundled_skills_enabled,
-                thread_id: start.thread.id,
-                context_usage_cache_path: context_usage_cache_path(&codex_home),
-                session_mcp_config_overrides,
-                session_mcp_summary,
-                session_skills_summary,
-                session_plugins_summary: pending_plugins_summary(),
-                account_status,
-                workspace_cwd: cwd,
-                client: SessionClient::new(session_id, client_capabilities),
+        Self::build_thread_from_bootstrap(
+            session_id,
+            codex_home,
+            bundled_skills_enabled,
+            cwd,
+            client_capabilities,
+            session_mcp_config_overrides,
+            session_mcp_summary,
+            session_skills_summary,
+            pending_plugins_summary(),
+            account_status,
+            app,
+            BackendThreadBootstrap {
+                thread: start.thread,
                 approval_policy: start.approval_policy,
-                sandbox_policy: start.sandbox.clone(),
-                sandbox_mode: policy_to_mode(&start.sandbox),
-                edit_approval_mode: EditApprovalMode::AutoApprove,
-                collaboration_mode_kind: ModeKind::Default,
-                current_model: start.model,
-                current_model_provider: start.model_provider,
+                sandbox: start.sandbox,
+                model: start.model,
+                model_provider: start.model_provider,
                 service_tier: start.service_tier,
-                reasoning_effort,
-                agent_labels,
-                compaction_in_progress: false,
-                last_used_tokens: None,
-                total_token_usage: None,
-                context_window_size: None,
-                context_usage_source: None,
-                account_rate_limits: None,
-                models,
-                active_turn_id: None,
-                active_turn_mode_kind: None,
-                active_turn_saw_plan_item: false,
-                active_turn_saw_plan_delta: false,
-                started_tool_calls: HashSet::new(),
-                completed_turn_ids: HashSet::new(),
-                turn_plan_updates_seen: HashSet::new(),
-                fallback_plan: None,
-                file_change_locations: HashMap::new(),
-                file_change_started_changes: HashMap::new(),
-                file_change_before_contents: HashMap::new(),
-                latest_turn_diff: None,
-                file_change_paths_this_turn: HashSet::new(),
-                synced_paths_this_turn: HashSet::new(),
-                last_plan_steps: Vec::new(),
-                carryover_plan_steps: None,
-                pending_thread_title_update: None,
-                replay_turns: vec![],
-                history_replay_in_progress: false,
-                turn_last_progress_at: std::time::Instant::now(),
-                turn_reconnect_warning_count: 0,
-                turn_reconnect_retry_limit_hit: false,
-            }),
-            cancel_tx,
-        }
+                reasoning_effort: start.reasoning_effort,
+            },
+            models,
+            None,
+        )
     }
 
     pub(crate) async fn start_session_for_existing_session_id(
@@ -737,13 +762,7 @@ impl Thread {
             cwd = %cwd.display(),
             "Bootstrapping resumed ACP session"
         );
-        let mut app = AppServerProcess::spawn("codex")
-            .await
-            .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
-        info!(session_id = %session_id, "Initializing codex app-server");
-        app.initialize("codex-acp-cas", "Codex ACP CAS")
-            .await
-            .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
+        let mut app = spawn_initialized_app(Some(&session_id)).await?;
 
         let resume_params = ThreadResumeParams {
             thread_id: session_id.0.to_string(),
@@ -816,13 +835,7 @@ impl Thread {
                 .unwrap_or_else(|| "<none>".to_string()),
             "Listing ACP sessions via codex app-server"
         );
-        let mut app = AppServerProcess::spawn("codex")
-            .await
-            .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
-        info!("Initializing codex app-server for session list");
-        app.initialize("codex-acp-cas", "Codex ACP CAS")
-            .await
-            .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
+        let mut app = spawn_initialized_app(None).await?;
 
         let response = app
             .thread_list(ThreadListParams {
@@ -859,9 +872,11 @@ impl Thread {
 mod tests {
     use super::{
         build_session_mcp_config_overrides, format_session_updated_at,
-        is_missing_rollout_thread_error,
+        is_missing_rollout_thread_error, resume_params_with_discovered_path,
+        resume_path_discovery_read_params,
     };
     use agent_client_protocol::{Error, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
+    use codex_app_server_protocol::ThreadResumeParams;
     use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -884,6 +899,56 @@ mod tests {
         let error = Error::internal_error()
             .data("Internal error: \"no rollout found for thread id 019-test\"");
         assert!(is_missing_rollout_thread_error(&error));
+    }
+
+    #[test]
+    fn builds_path_discovery_read_params_without_turns() {
+        let params = resume_path_discovery_read_params("019-test");
+
+        assert_eq!(params.thread_id, "019-test");
+        assert!(
+            !params.include_turns,
+            "path discovery should not load full turns before resume retry"
+        );
+    }
+
+    #[test]
+    fn applies_discovered_path_to_resume_params_and_preserves_overrides() {
+        let mut config = HashMap::new();
+        config.insert("foo".to_string(), serde_json::json!("bar"));
+        let params = ThreadResumeParams {
+            thread_id: "019-test".to_string(),
+            model: Some("gpt-5.5".to_string()),
+            model_provider: Some("openai".to_string()),
+            service_tier: Some(None),
+            cwd: Some("/tmp/project".to_string()),
+            config: Some(config.clone()),
+            ..ThreadResumeParams::default()
+        };
+        let path = PathBuf::from("/tmp/codex/history/019-test.jsonl");
+
+        let (retry_params, discovered_path) =
+            resume_params_with_discovered_path(params, Some(path.clone()))
+                .expect("discovered rollout path should produce retry params");
+
+        assert_eq!(discovered_path, path);
+        assert_eq!(retry_params.thread_id, "019-test");
+        assert_eq!(retry_params.path, Some(path));
+        assert_eq!(retry_params.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(retry_params.model_provider.as_deref(), Some("openai"));
+        assert_eq!(retry_params.service_tier, Some(None));
+        assert_eq!(retry_params.cwd.as_deref(), Some("/tmp/project"));
+        assert_eq!(retry_params.config, Some(config));
+    }
+
+    #[test]
+    fn does_not_retry_resume_without_discovered_path() {
+        let params = ThreadResumeParams {
+            thread_id: "019-test".to_string(),
+            ..ThreadResumeParams::default()
+        };
+
+        assert!(resume_params_with_discovered_path(params, None).is_none());
     }
 
     #[test]

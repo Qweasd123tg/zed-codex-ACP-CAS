@@ -8,9 +8,21 @@ Paste this file into https://markmap.js.org/repl
 
 ## AppServer - src/app_server.rs
 - Depends on
+  - AppServerPolicy - src/app_server/request_policy.rs
+  - AppServerReader - src/app_server/reader.rs
   - NotificationDispatch - src/thread/notification/dispatch.rs
 - Used by
   - TurnExecution - src/thread/turn/execution.rs
+
+## AppServerPolicy - src/app_server/request_policy.rs
+- Depends on: none
+- Used by
+  - AppServer - src/app_server.rs
+
+## AppServerReader - src/app_server/reader.rs
+- Depends on: none
+- Used by
+  - AppServer - src/app_server.rs
 
 ## ApprovalsCommand - src/thread/features/approvals/command.rs
 - Depends on: none

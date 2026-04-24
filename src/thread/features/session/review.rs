@@ -1,6 +1,5 @@
 //! User-facing review slash-команды и ACP picker-flows поверх `review/start`.
 
-use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -246,76 +245,72 @@ async fn show_review_branch_picker(
     current_branch: &str,
     branches: Vec<String>,
 ) -> Result<Option<String>, Error> {
-    let title = format!("Select a base branch ({} match(es))", branches.len());
-    let mut options = Vec::new();
-    let mut branch_by_option = HashMap::new();
-    for (index, branch) in branches.iter().enumerate() {
-        let option_id = format!("review-base-branch-{}", index + 1);
-        options.push(PermissionOption::new(
-            option_id.clone(),
-            format!("{current_branch} -> {branch}"),
-            PermissionOptionKind::AllowOnce,
-        ));
-        branch_by_option.insert(option_id, branch.clone());
-    }
-    options.push(PermissionOption::new(
-        REVIEW_CANCEL_OPTION_ID,
-        "Cancel",
-        PermissionOptionKind::RejectOnce,
-    ));
+    let raw_input = review_branch_picker_raw_input(current_branch, &branches);
+    let count = branches.len();
+    let choices = branches
+        .into_iter()
+        .map(|branch| (format!("{current_branch} -> {branch}"), branch))
+        .collect::<Vec<_>>();
 
-    let outcome = inner
-        .client
-        .request_permission(
-            ToolCallUpdate::new(
-                ToolCallId::new(next_review_tool_call_id("review-base-branch")),
-                ToolCallUpdateFields::new()
-                    .title(title)
-                    .kind(ToolKind::Think)
-                    .status(ToolCallStatus::Pending)
-                    .content(vec![
-                        "Search in the picker list. Open View Raw Input for the full branch list."
-                            .into(),
-                    ])
-                    .raw_input(review_branch_picker_raw_input(current_branch, &branches)),
-            ),
-            options,
-        )
-        .await?;
-
-    let Some(selected_option_id) = selected_option_id(outcome)? else {
-        return Ok(None);
-    };
-    let Some(branch) = branch_by_option.get(&selected_option_id).cloned() else {
-        warn!(
-            selected_option_id,
-            "review branch picker returned unknown option id"
-        );
-        inner
-            .client
-            .send_agent_text("Could not resolve the selected branch. Run `/review` again.")
-            .await;
-        return Ok(None);
-    };
-    Ok(Some(branch))
+    show_review_choice_picker(
+        inner,
+        "review-base-branch",
+        format!("Select a base branch ({count} match(es))"),
+        "Search in the picker list. Open View Raw Input for the full branch list.",
+        raw_input,
+        choices,
+        "review branch picker returned unknown option id",
+        "Could not resolve the selected branch. Run `/review` again.",
+    )
+    .await
 }
 
 async fn show_review_commit_picker(
     inner: &mut ThreadInner,
     commits: Vec<ReviewCommitEntry>,
 ) -> Result<Option<ReviewCommitEntry>, Error> {
-    let title = format!("Select a commit to review ({} match(es))", commits.len());
+    let raw_input = review_commit_picker_raw_input(&commits);
+    let count = commits.len();
+    let choices = commits
+        .into_iter()
+        .map(|commit| {
+            let short_sha: String = commit.sha.chars().take(7).collect();
+            (format!("{short_sha} · {}", commit.subject), commit)
+        })
+        .collect::<Vec<_>>();
+
+    show_review_choice_picker(
+        inner,
+        "review-select-commit",
+        format!("Select a commit to review ({count} match(es))"),
+        "Search in the picker list. Open View Raw Input for full SHAs and subjects.",
+        raw_input,
+        choices,
+        "review commit picker returned unknown option id",
+        "Could not resolve the selected commit. Run `/review` again.",
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn show_review_choice_picker<T>(
+    inner: &mut ThreadInner,
+    id_prefix: &str,
+    title: String,
+    content: &'static str,
+    raw_input: serde_json::Value,
+    choices: Vec<(String, T)>,
+    unknown_log: &'static str,
+    unknown_message: &'static str,
+) -> Result<Option<T>, Error> {
     let mut options = Vec::new();
-    let mut commit_by_option = HashMap::new();
-    for (index, commit) in commits.iter().enumerate() {
-        let option_id = format!("review-select-commit-{}", index + 1);
-        let short_sha: String = commit.sha.chars().take(7).collect();
+    for (index, (label, _)) in choices.iter().enumerate() {
+        let option_id = format!("{id_prefix}-{}", index + 1);
         options.push(PermissionOption::new(
             option_id.clone(),
-            format!("{short_sha} · {}", commit.subject),
+            label.clone(),
             PermissionOptionKind::AllowOnce,
         ));
-        commit_by_option.insert(option_id, commit.clone());
     }
     options.push(PermissionOption::new(
         REVIEW_CANCEL_OPTION_ID,
@@ -327,16 +322,13 @@ async fn show_review_commit_picker(
         .client
         .request_permission(
             ToolCallUpdate::new(
-                ToolCallId::new(next_review_tool_call_id("review-select-commit")),
+                ToolCallId::new(next_review_tool_call_id(id_prefix)),
                 ToolCallUpdateFields::new()
                     .title(title)
                     .kind(ToolKind::Think)
                     .status(ToolCallStatus::Pending)
-                    .content(vec![
-                        "Search in the picker list. Open View Raw Input for full SHAs and subjects."
-                            .into(),
-                    ])
-                    .raw_input(review_commit_picker_raw_input(&commits)),
+                    .content(vec![content.into()])
+                    .raw_input(raw_input),
             ),
             options,
         )
@@ -345,18 +337,16 @@ async fn show_review_commit_picker(
     let Some(selected_option_id) = selected_option_id(outcome)? else {
         return Ok(None);
     };
-    let Some(commit) = commit_by_option.get(&selected_option_id).cloned() else {
-        warn!(
-            selected_option_id,
-            "review commit picker returned unknown option id"
-        );
-        inner
-            .client
-            .send_agent_text("Could not resolve the selected commit. Run `/review` again.")
-            .await;
+    let selected_index = selected_option_id
+        .strip_prefix(&format!("{id_prefix}-"))
+        .and_then(|suffix| suffix.parse::<usize>().ok())
+        .and_then(|index| index.checked_sub(1));
+    let Some((_, value)) = selected_index.and_then(|index| choices.into_iter().nth(index)) else {
+        warn!(selected_option_id, "{}", unknown_log);
+        inner.client.send_agent_text(unknown_message).await;
         return Ok(None);
     };
-    Ok(Some(commit))
+    Ok(Some(value))
 }
 
 fn selected_option_id(outcome: RequestPermissionOutcome) -> Result<Option<String>, Error> {

@@ -1,6 +1,6 @@
 [package]
 name = "codex-acp"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2024"
 authors = ["Qweasd123tg"]
 license = "Apache-2.0"
@@ -22,7 +22,6 @@ anyhow = "1"
 async-trait = "0.1"
 chrono = "0.4"
 clap = "4"
-codex-apply-patch = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-app-server-protocol = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-arg0 = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-core = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
@@ -31,7 +30,6 @@ codex-protocol = { git = "https://github.com/zed-industries/codex", rev = "ab7a5
 codex-login = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-utils-approval-presets = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-utils-cli = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
-itertools = "0.14.0"
 regex-lite = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -40,12 +38,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-
 tokio-util = { version = "0.7", features = ["compat"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-heck = "0.5.0"
-unicode-segmentation = "1.11.0"
 uuid = { version = "1", features = ["v4"] }
-
-[dev-dependencies]
-codex-core = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 
 [package.metadata.deb]
 maintainer = "Qweasd123tg"

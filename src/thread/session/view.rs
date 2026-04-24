@@ -207,11 +207,12 @@ impl Thread {
     pub async fn replay_loaded_history(&self) {
         let replay = {
             let mut inner = self.inner.lock().await;
-            let turns = std::mem::take(&mut inner.replay_turns);
-            if turns.is_empty() {
-                inner.history_replay_in_progress = false;
+            if inner.replay_turns.is_empty() {
+                // A duplicate replay task can arrive while the first one is still
+                // streaming history. Keep the guard up until the owning task finishes.
                 return;
             }
+            let turns = std::mem::take(&mut inner.replay_turns);
             inner.history_replay_in_progress = true;
             collab::warm_agent_labels_for_turns(&mut inner, &turns).await;
             Some((

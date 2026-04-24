@@ -1,18 +1,23 @@
 //! Context/status selector helper-ы для session_config.
 
-use std::collections::HashMap;
 use std::path::Path;
 
-use codex_app_server_protocol::{
-    Account, PluginListResponse, PluginSource, RateLimitSnapshot, TokenUsageBreakdown,
-};
-use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
-use codex_core::skills::SkillLoadOutcome;
+use codex_app_server_protocol::{Account, RateLimitSnapshot, TokenUsageBreakdown};
 use codex_protocol::account::PlanType;
-use codex_protocol::protocol::SkillScope;
 
 use super::limits::{combined_limits_reset_message, combined_limits_status_label};
 use crate::thread::{ContextUsageSource, SessionConfigSelectOption};
+
+#[path = "context/mcp.rs"]
+mod mcp;
+#[path = "context/plugins.rs"]
+mod plugins;
+#[path = "context/skills.rs"]
+mod skills;
+
+pub(in crate::thread) use mcp::build_mcp_summary;
+pub(in crate::thread) use plugins::build_plugins_summary;
+pub(in crate::thread) use skills::build_skills_summary;
 
 pub(in crate::thread) const SESSION_STATUS_VALUE: &str = "session_status";
 pub(in crate::thread) const CONTEXT_STATUS_VALUE: &str = "context_status";
@@ -134,324 +139,6 @@ pub(in crate::thread) fn full_status_report(
     }
 
     sections.join("\n\n")
-}
-
-pub(in crate::thread) fn build_mcp_summary(
-    effective_mcp_servers: &HashMap<String, McpServerConfig>,
-) -> ContextSelectorSummary {
-    let mut entries = effective_mcp_servers
-        .iter()
-        .map(|(name, config)| {
-            let (transport_label, target, extra) = match &config.transport {
-                McpServerTransportConfig::Stdio { command, cwd, .. } => (
-                    "stdio",
-                    command.clone(),
-                    cwd.as_ref()
-                        .map(|path| format!("cwd {}", path.display()))
-                        .unwrap_or_default(),
-                ),
-                McpServerTransportConfig::StreamableHttp { url, .. } => {
-                    ("http", url.clone(), String::new())
-                }
-            };
-            (
-                name.clone(),
-                format!(
-                    "{} · {}{}",
-                    transport_label,
-                    truncate_middle(&target, 48),
-                    if extra.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" · {extra}")
-                    }
-                ),
-                format_mcp_report_entry(name, config),
-                matches!(config.transport, McpServerTransportConfig::Stdio { .. }),
-            )
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
-
-    if entries.is_empty() {
-        return ContextSelectorSummary {
-            label: "MCP · none".to_string(),
-            description: "No MCP servers are configured for this session.".to_string(),
-            report: "No MCP servers are configured for this session.".to_string(),
-        };
-    }
-
-    let total = entries.len();
-    let stdio_count = entries.iter().filter(|entry| entry.3).count();
-    let http_count = total.saturating_sub(stdio_count);
-
-    let mut description_lines = vec![format!(
-        "{total} MCP server(s) configured for this session ({stdio_count} stdio, {http_count} http)."
-    )];
-    description_lines.extend(
-        entries
-            .iter()
-            .take(3)
-            .map(|(name, preview, _, _)| format!("{name} · {preview}")),
-    );
-    if total > 3 {
-        description_lines.push(format!("+{} more", total - 3));
-    }
-
-    let mut report_lines = vec![format!(
-        "MCP servers configured for this session: {total} ({stdio_count} stdio, {http_count} http)."
-    )];
-    for (_, _, report, _) in entries {
-        report_lines.push(String::new());
-        report_lines.push(report);
-    }
-
-    ContextSelectorSummary {
-        label: format!("MCP · {total} srv"),
-        description: description_lines.join("\n"),
-        report: report_lines.join("\n"),
-    }
-}
-
-pub(in crate::thread) fn build_skills_summary(
-    outcome: &SkillLoadOutcome,
-) -> ContextSelectorSummary {
-    let mut entries = outcome
-        .skills_with_enabled()
-        .map(|(skill, enabled)| {
-            let display_name = skill
-                .interface
-                .as_ref()
-                .and_then(|interface| interface.display_name.clone())
-                .unwrap_or_else(|| skill.name.clone());
-            let summary = skill
-                .interface
-                .as_ref()
-                .and_then(|interface| interface.short_description.clone())
-                .or_else(|| skill.short_description.clone())
-                .unwrap_or_else(|| skill.description.clone());
-
-            (
-                display_name,
-                summary,
-                format_skill_report_entry(skill, enabled),
-                enabled,
-                skill.scope,
-            )
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
-
-    let total = entries.len();
-    let enabled_count = entries.iter().filter(|entry| entry.3).count();
-    let disabled_count = total.saturating_sub(enabled_count);
-    let error_count = outcome.errors.len();
-
-    if total == 0 && error_count == 0 {
-        return ContextSelectorSummary {
-            label: "Skills · none".to_string(),
-            description: "No skills were discovered for the current workspace.".to_string(),
-            report: "No skills were discovered for the current workspace.".to_string(),
-        };
-    }
-
-    let mut description_lines = vec![format!(
-        "{enabled_count}/{total} skill(s) enabled for this workspace."
-    )];
-    description_lines.extend(
-        entries
-            .iter()
-            .take(3)
-            .map(|(name, summary, _, enabled, scope)| {
-                format!(
-                    "{} · {} · {}",
-                    name,
-                    skill_scope_label(*scope),
-                    if *enabled { summary } else { "disabled" }
-                )
-            }),
-    );
-    if disabled_count > 0 {
-        description_lines.push(format!("{disabled_count} disabled"));
-    }
-    if error_count > 0 {
-        description_lines.push(format!("{error_count} load error(s)"));
-    }
-
-    let mut report_lines = vec![format!(
-        "Skills for current workspace: {enabled_count}/{total} enabled."
-    )];
-    if disabled_count > 0 {
-        report_lines.push(format!("Disabled: {disabled_count}."));
-    }
-    if error_count > 0 {
-        report_lines.push(format!("Load errors: {error_count}."));
-        for error in &outcome.errors {
-            report_lines.push(format!("- {}: {}", error.path.display(), error.message));
-        }
-    }
-    for (_, _, report, _, _) in entries {
-        report_lines.push(String::new());
-        report_lines.push(report);
-    }
-
-    let mut label = format!("Skills · {enabled_count} on");
-    if error_count > 0 {
-        label.push_str(&format!(" · {error_count} err"));
-    }
-
-    ContextSelectorSummary {
-        label,
-        description: description_lines.join("\n"),
-        report: report_lines.join("\n"),
-    }
-}
-
-pub(in crate::thread) fn build_plugins_summary(
-    response: &PluginListResponse,
-) -> ContextSelectorSummary {
-    let mut installed_entries = Vec::new();
-    let mut available_entries = Vec::new();
-    let mut total_plugins = 0usize;
-
-    for marketplace in &response.marketplaces {
-        for plugin in &marketplace.plugins {
-            total_plugins = total_plugins.saturating_add(1);
-            let display_name = plugin
-                .interface
-                .as_ref()
-                .and_then(|interface| interface.display_name.clone())
-                .unwrap_or_else(|| plugin.name.clone());
-            let summary = plugin
-                .interface
-                .as_ref()
-                .and_then(|interface| interface.short_description.clone())
-                .or_else(|| {
-                    plugin
-                        .interface
-                        .as_ref()
-                        .and_then(|interface| interface.long_description.clone())
-                })
-                .or_else(|| {
-                    plugin
-                        .interface
-                        .as_ref()
-                        .and_then(|interface| interface.category.clone())
-                })
-                .unwrap_or_else(|| "No description provided.".to_string());
-
-            if plugin.installed {
-                installed_entries.push((
-                    display_name.clone(),
-                    summary.clone(),
-                    format_plugin_report_entry(&marketplace.name, plugin, &display_name, &summary),
-                    plugin.enabled,
-                ));
-            } else {
-                available_entries.push((display_name, summary));
-            }
-        }
-    }
-
-    installed_entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
-    available_entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
-
-    let marketplace_count = response.marketplaces.len();
-    let installed_count = installed_entries.len();
-    let enabled_count = installed_entries.iter().filter(|entry| entry.3).count();
-    let disabled_count = installed_count.saturating_sub(enabled_count);
-
-    if total_plugins == 0 && response.remote_sync_error.is_none() {
-        return ContextSelectorSummary {
-            label: "Plugins · none".to_string(),
-            description: "No plugins were discovered for this session.".to_string(),
-            report: "No plugins were discovered for this session.".to_string(),
-        };
-    }
-
-    let mut description_lines = if installed_count > 0 {
-        vec![format!(
-            "{enabled_count}/{installed_count} installed plugin(s) enabled across {marketplace_count} marketplace(s)."
-        )]
-    } else {
-        vec![format!(
-            "No plugins are installed for this session yet ({total_plugins} visible across {marketplace_count} marketplace(s))."
-        )]
-    };
-
-    if installed_count > 0 {
-        description_lines.extend(installed_entries.iter().take(3).map(
-            |(name, summary, _, enabled)| {
-                format!("{name} · {}", if *enabled { summary } else { "disabled" })
-            },
-        ));
-        if disabled_count > 0 {
-            description_lines.push(format!("{disabled_count} disabled"));
-        }
-    } else {
-        description_lines.extend(
-            available_entries
-                .iter()
-                .take(3)
-                .map(|(name, summary)| format!("{name} · {summary}")),
-        );
-        if total_plugins > 3 {
-            description_lines.push(format!("+{} more", total_plugins - 3));
-        }
-    }
-
-    if response.remote_sync_error.is_some() {
-        description_lines.push("remote sync unavailable".to_string());
-    }
-
-    let mut report_lines = vec![format!(
-        "Plugins visible to this session: {total_plugins} across {marketplace_count} marketplace(s)."
-    )];
-    if installed_count == 0 {
-        report_lines.push("Installed plugins: none.".to_string());
-    } else {
-        report_lines.push(format!(
-            "Installed: {installed_count} ({enabled_count} enabled, {disabled_count} disabled)."
-        ));
-        for (_, _, report, _) in installed_entries {
-            report_lines.push(String::new());
-            report_lines.push(report);
-        }
-    }
-
-    if !available_entries.is_empty() {
-        report_lines.push(String::new());
-        report_lines.push("Available but not installed:".to_string());
-        for (name, summary) in available_entries.iter().take(10) {
-            report_lines.push(format!("- {name} · {summary}"));
-        }
-        if available_entries.len() > 10 {
-            report_lines.push(format!("- +{} more", available_entries.len() - 10));
-        }
-    }
-
-    if let Some(error) = &response.remote_sync_error {
-        report_lines.push(String::new());
-        report_lines.push(format!("Remote sync error: {error}"));
-    }
-
-    let mut label = if installed_count == 0 {
-        "Plugins · none".to_string()
-    } else {
-        format!("Plugins · {enabled_count} on")
-    };
-    if disabled_count > 0 {
-        label.push_str(&format!(" · {disabled_count} off"));
-    }
-    if response.remote_sync_error.is_some() {
-        label.push_str(" · sync err");
-    }
-
-    ContextSelectorSummary {
-        label,
-        description: description_lines.join("\n"),
-        report: report_lines.join("\n"),
-    }
 }
 
 pub(in crate::thread) fn build_account_status(account: Option<Account>) -> AccountStatus {
@@ -670,159 +357,6 @@ fn format_compact_with_suffix(value: f64, suffix: &str) -> String {
     format!("{trimmed}{suffix}")
 }
 
-fn format_mcp_report_entry(name: &str, config: &McpServerConfig) -> String {
-    let mut lines = vec![format!(
-        "- {name} [{}{}{}]",
-        match &config.transport {
-            McpServerTransportConfig::Stdio { .. } => "stdio",
-            McpServerTransportConfig::StreamableHttp { .. } => "http",
-        },
-        if config.enabled { "" } else { ", disabled" },
-        if config.required { ", required" } else { "" }
-    )];
-
-    match &config.transport {
-        McpServerTransportConfig::Stdio {
-            command, args, cwd, ..
-        } => {
-            lines.push(format!("  command: {}", truncate_middle(command, 120)));
-            if !args.is_empty() {
-                lines.push(format!("  args: {}", args.join(" ")));
-            }
-            if let Some(cwd) = cwd {
-                lines.push(format!("  cwd: {}", cwd.display()));
-            }
-        }
-        McpServerTransportConfig::StreamableHttp { url, .. } => {
-            lines.push(format!("  url: {}", truncate_middle(url, 120)));
-        }
-    }
-
-    lines.push(format!(
-        "  tools: {}",
-        config
-            .enabled_tools
-            .as_ref()
-            .map(|tools| tools.join(", "))
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "all".to_string())
-    ));
-    if let Some(disabled_tools) = &config.disabled_tools
-        && !disabled_tools.is_empty()
-    {
-        lines.push(format!("  disabled tools: {}", disabled_tools.join(", ")));
-    }
-
-    lines.join("\n")
-}
-
-fn format_skill_report_entry(skill: &codex_core::skills::SkillMetadata, enabled: bool) -> String {
-    let display_name = skill
-        .interface
-        .as_ref()
-        .and_then(|interface| interface.display_name.clone())
-        .unwrap_or_else(|| skill.name.clone());
-    let summary = skill
-        .interface
-        .as_ref()
-        .and_then(|interface| interface.short_description.clone())
-        .or_else(|| skill.short_description.clone())
-        .unwrap_or_else(|| skill.description.clone());
-
-    let mut lines = vec![format!(
-        "- {} [{}{}]",
-        display_name,
-        skill_scope_label(skill.scope),
-        if enabled { "" } else { ", disabled" }
-    )];
-    if display_name != skill.name {
-        lines.push(format!("  name: {}", skill.name));
-    }
-    lines.push(format!("  summary: {summary}"));
-    lines.push(format!("  path: {}", skill.path_to_skills_md.display()));
-    if let Some(dependencies) = &skill.dependencies
-        && !dependencies.tools.is_empty()
-    {
-        lines.push(format!("  tool deps: {}", dependencies.tools.len()));
-    }
-    lines.join("\n")
-}
-
-fn format_plugin_report_entry(
-    marketplace_name: &str,
-    plugin: &codex_app_server_protocol::PluginSummary,
-    display_name: &str,
-    summary: &str,
-) -> String {
-    let mut lines = vec![format!(
-        "- {} [{}{}]",
-        display_name,
-        marketplace_name,
-        if plugin.enabled {
-            ", enabled"
-        } else {
-            ", disabled"
-        }
-    )];
-    if display_name != plugin.name {
-        lines.push(format!("  name: {}", plugin.name));
-    }
-    lines.push(format!("  id: {}", plugin.id));
-    lines.push(format!("  summary: {summary}"));
-    if let Some(interface) = &plugin.interface {
-        if let Some(developer_name) = &interface.developer_name {
-            lines.push(format!("  developer: {developer_name}"));
-        }
-        if let Some(category) = &interface.category {
-            lines.push(format!("  category: {category}"));
-        }
-        if !interface.capabilities.is_empty() {
-            lines.push(format!(
-                "  capabilities: {}",
-                interface.capabilities.join(", ")
-            ));
-        }
-    }
-    match &plugin.source {
-        PluginSource::Local { .. } => {
-            lines.push("  source: local".to_string());
-        }
-    }
-    lines.join("\n")
-}
-
-fn skill_scope_label(scope: SkillScope) -> &'static str {
-    match scope {
-        SkillScope::User => "user",
-        SkillScope::Repo => "repo",
-        SkillScope::System => "system",
-        SkillScope::Admin => "admin",
-    }
-}
-
-fn truncate_middle(value: &str, max_chars: usize) -> String {
-    let chars = value.chars().collect::<Vec<_>>();
-    if chars.len() <= max_chars {
-        return value.to_string();
-    }
-    if max_chars <= 3 {
-        return chars.iter().take(max_chars).collect();
-    }
-
-    let head_len = max_chars / 2;
-    let tail_len = max_chars.saturating_sub(head_len + 3);
-    let head = chars.iter().take(head_len).collect::<String>();
-    let tail = chars
-        .iter()
-        .rev()
-        .take(tail_len)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    format!("{head}...{tail}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -844,6 +378,18 @@ mod tests {
     use std::convert::TryInto;
     use std::path::PathBuf;
 
+    fn summary(label: &str, description: &str, report: &str) -> super::ContextSelectorSummary {
+        super::ContextSelectorSummary {
+            label: label.to_string(),
+            description: description.to_string(),
+            report: report.to_string(),
+        }
+    }
+
+    fn empty_summary(label: &str) -> super::ContextSelectorSummary {
+        summary(label, "none", "none")
+    }
+
     #[test]
     fn context_messages_include_usage() {
         assert_eq!(
@@ -854,11 +400,7 @@ mod tests {
 
     #[test]
     fn context_options_include_status_actions_and_compact() {
-        let empty_summary = super::ContextSelectorSummary {
-            label: "none".to_string(),
-            description: "none".to_string(),
-            report: "none".to_string(),
-        };
+        let empty_summary = empty_summary("none");
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
             &AccountStatus::default(),
@@ -884,11 +426,7 @@ mod tests {
 
     #[test]
     fn context_options_use_dashes_when_usage_is_unknown() {
-        let empty_summary = super::ContextSelectorSummary {
-            label: "MCP · none".to_string(),
-            description: "none".to_string(),
-            report: "none".to_string(),
-        };
+        let empty_summary = empty_summary("MCP · none");
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
             &AccountStatus::default(),
@@ -910,11 +448,7 @@ mod tests {
 
     #[test]
     fn context_status_shows_percentage_only() {
-        let empty_summary = super::ContextSelectorSummary {
-            label: "none".to_string(),
-            description: "none".to_string(),
-            report: "none".to_string(),
-        };
+        let empty_summary = empty_summary("none");
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
             &AccountStatus::default(),
@@ -955,11 +489,7 @@ mod tests {
             plan_type: Some(PlanType::Plus),
         };
 
-        let empty_summary = super::ContextSelectorSummary {
-            label: "none".to_string(),
-            description: "none".to_string(),
-            report: "none".to_string(),
-        };
+        let empty_summary = empty_summary("none");
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
             &AccountStatus::default(),
@@ -1219,21 +749,9 @@ mod tests {
             Some(ContextUsageSource::Live),
             None,
             true,
-            &super::ContextSelectorSummary {
-                label: "MCP · 1 srv".to_string(),
-                description: "one".to_string(),
-                report: "MCP report".to_string(),
-            },
-            &super::ContextSelectorSummary {
-                label: "Skills · 1 on".to_string(),
-                description: "one".to_string(),
-                report: "Skills report".to_string(),
-            },
-            &super::ContextSelectorSummary {
-                label: "Plugins · none".to_string(),
-                description: "none".to_string(),
-                report: "Plugins report".to_string(),
-            },
+            &summary("MCP · 1 srv", "one", "MCP report"),
+            &summary("Skills · 1 on", "one", "Skills report"),
+            &summary("Plugins · none", "none", "Plugins report"),
         );
 
         assert!(report.contains("Chat status"));
