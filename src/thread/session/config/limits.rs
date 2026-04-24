@@ -3,6 +3,14 @@
 use crate::thread::features::resume::common::format_relative_timestamp;
 use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
 
+const RATE_LIMIT_WARNING_THRESHOLDS: [i32; 4] = [75, 90, 95, 100];
+
+#[derive(Clone, Debug, Default)]
+pub(in crate::thread) struct RateLimitWarningState {
+    primary_index: usize,
+    secondary_index: usize,
+}
+
 pub(in crate::thread) fn combined_limits_status_label(
     snapshot: Option<&RateLimitSnapshot>,
 ) -> String {
@@ -51,10 +59,61 @@ pub(in crate::thread) fn weekly_reset_message(snapshot: Option<&RateLimitSnapsho
     }
 }
 
+pub(in crate::thread) fn take_rate_limit_warnings(
+    state: &mut RateLimitWarningState,
+    snapshot: &RateLimitSnapshot,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if let Some(warning) = take_window_warning(
+        &mut state.secondary_index,
+        snapshot.secondary.as_ref(),
+        "weekly",
+    ) {
+        warnings.push(warning);
+    }
+    if let Some(warning) = take_window_warning(
+        &mut state.primary_index,
+        snapshot.primary.as_ref(),
+        "5-hour",
+    ) {
+        warnings.push(warning);
+    }
+    warnings
+}
+
 fn short_window_remaining(window: Option<&RateLimitWindow>) -> String {
     window
         .map(|window| format!("{}%", remaining_percent(window.used_percent)))
         .unwrap_or_else(|| "--".to_string())
+}
+
+fn take_window_warning(
+    warning_index: &mut usize,
+    window: Option<&RateLimitWindow>,
+    fallback_label: &str,
+) -> Option<String> {
+    let window = window?;
+    let used_percent = clamp_percent(window.used_percent);
+    let mut highest_threshold = None;
+    while *warning_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+        && used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[*warning_index]
+    {
+        highest_threshold = Some(RATE_LIMIT_WARNING_THRESHOLDS[*warning_index]);
+        *warning_index += 1;
+    }
+
+    let threshold = highest_threshold?;
+    let label = limit_duration_label(window).unwrap_or_else(|| fallback_label.to_string());
+    if threshold >= 100 {
+        return Some(format!(
+            "Your {label} limit is exhausted. Run `/status` for reset details."
+        ));
+    }
+
+    let remaining_percent = 100 - threshold;
+    Some(format!(
+        "Heads up, you have less than {remaining_percent}% of your {label} limit left. Run `/status` for a breakdown."
+    ))
 }
 
 fn format_reset_line(label: &str, window: Option<&RateLimitWindow>) -> String {
@@ -69,6 +128,29 @@ fn format_reset_line(label: &str, window: Option<&RateLimitWindow>) -> String {
     format!("{label}: resets {reset}")
 }
 
+fn limit_duration_label(window: &RateLimitWindow) -> Option<String> {
+    let minutes = window.window_duration_mins?;
+    if minutes <= 0 {
+        return None;
+    }
+
+    const MINUTES_PER_HOUR: i64 = 60;
+    const MINUTES_PER_DAY: i64 = 24 * MINUTES_PER_HOUR;
+    const MINUTES_PER_WEEK: i64 = 7 * MINUTES_PER_DAY;
+    const ROUNDING_BIAS_MINUTES: i64 = 3;
+
+    if minutes <= MINUTES_PER_DAY.saturating_add(ROUNDING_BIAS_MINUTES) {
+        let hours = ((minutes + MINUTES_PER_HOUR / 2) / MINUTES_PER_HOUR).max(1);
+        return Some(format!("{hours}h"));
+    }
+    if (minutes - MINUTES_PER_WEEK).abs() <= ROUNDING_BIAS_MINUTES {
+        return Some("weekly".to_string());
+    }
+
+    let days = ((minutes + MINUTES_PER_DAY / 2) / MINUTES_PER_DAY).max(1);
+    Some(format!("{days}d"))
+}
+
 fn remaining_percent(used_percent: i32) -> i32 {
     100 - clamp_percent(used_percent)
 }
@@ -80,8 +162,9 @@ fn clamp_percent(value: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        combined_limits_reset_message, combined_limits_status_label, five_hour_reset_message,
-        five_hour_status_label, weekly_reset_message, weekly_status_label,
+        RateLimitWarningState, combined_limits_reset_message, combined_limits_status_label,
+        five_hour_reset_message, five_hour_status_label, take_rate_limit_warnings,
+        weekly_reset_message, weekly_status_label,
     };
     use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
     use codex_protocol::account::PlanType;
@@ -136,5 +219,40 @@ mod tests {
             combined_limits_status_label(Some(&snapshot)),
             "5h 58% · wk 95%"
         );
+    }
+
+    #[test]
+    fn rate_limit_warnings_fire_once_per_threshold() {
+        let mut state = RateLimitWarningState::default();
+        let mut snapshot = RateLimitSnapshot {
+            limit_id: Some("codex".to_string()),
+            limit_name: None,
+            primary: Some(RateLimitWindow {
+                used_percent: 74,
+                window_duration_mins: Some(300),
+                resets_at: Some(4_102_444_800),
+            }),
+            secondary: Some(RateLimitWindow {
+                used_percent: 10,
+                window_duration_mins: Some(10_080),
+                resets_at: Some(4_102_531_200),
+            }),
+            credits: None,
+            plan_type: Some(PlanType::Plus),
+        };
+
+        assert!(take_rate_limit_warnings(&mut state, &snapshot).is_empty());
+
+        snapshot.primary.as_mut().unwrap().used_percent = 91;
+        let warnings = take_rate_limit_warnings(&mut state, &snapshot);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("less than 10%"));
+
+        assert!(take_rate_limit_warnings(&mut state, &snapshot).is_empty());
+
+        snapshot.primary.as_mut().unwrap().used_percent = 100;
+        let warnings = take_rate_limit_warnings(&mut state, &snapshot);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("limit is exhausted"));
     }
 }

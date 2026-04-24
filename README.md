@@ -90,6 +90,7 @@ Sub-agent and collaboration tool-call rendering:
 - Tool call cards for command, MCP, web, image, file, and collab branches
 - Clearer status surfacing through `/status` and the existing `Context` selector
 - `Context` selector summaries for session status, context usage, MCP, skills, plugins, limits, and compaction
+- Chat warnings when account limits cross 75%, 90%, 95%, and exhausted thresholds
 - `Fast Mode` session config selector backed by Codex app-server `service_tier`, with `fast` as the primary surfaced value
 - Practical plan mode support
 - Better default-mode fallback plan progress for long step lists: visible checkpoints now advance across the list instead of only snapping at the very end of work
@@ -107,6 +108,7 @@ Sub-agent and collaboration tool-call rendering:
 - Less reconnect spam: reconnect warnings now collapse into one normalized status line while reconnect-assisted stalled turns still abort cleanly
 - Less brittle transport cleanup: background drain and thread-switch flush now wait for the queue to go quiet instead of assuming `64` messages or one tiny timeout is enough
 - Less turn-completion lock contention: turn diff ACP writeback now runs outside the main session mutex and skips paths already reserved by file-change lifecycle
+- Less sparse completed tool cards: no-output commands, MCP results, and completed collab/sub-agent calls now keep a short visible summary while retaining raw details
 - Less transport serialization during quiet backend periods: app-server stdout now has a dedicated reader/inbox, so cancel, interrupt, post-turn drain, and thread-switch cleanup do not sit behind one long `next_message()` mutex wait
 
 ## Why Use This Fork

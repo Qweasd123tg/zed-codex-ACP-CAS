@@ -79,10 +79,15 @@ pub(in crate::thread) async fn emit_command_execution_completed(
     aggregated_output: Option<String>,
     exit_code_raw_output: Option<Value>,
 ) {
-    let mut fields =
-        ToolCallUpdateFields::new().status(status_mapping::map_command_status(status, false));
-    if let Some(output) = aggregated_output {
-        fields = fields.content(vec![format!("```sh\n{}\n```", output.trim_end()).into()]);
+    let mut fields = ToolCallUpdateFields::new()
+        .status(status_mapping::map_command_status(status.clone(), false));
+    match aggregated_output {
+        Some(output) => {
+            fields = fields.content(vec![format!("```sh\n{}\n```", output.trim_end()).into()]);
+        }
+        None => {
+            fields = fields.content(vec![command_completion_summary(status).into()]);
+        }
     }
     if let Some(raw_output) = exit_code_raw_output {
         fields = fields.raw_output(raw_output);
@@ -124,10 +129,15 @@ pub(in crate::thread) async fn replay_command_execution(
         )
         .await;
 
-    let mut fields =
-        ToolCallUpdateFields::new().status(status_mapping::map_command_status(status, false));
-    if let Some(output) = aggregated_output {
-        fields = fields.content(vec![format!("```sh\n{}\n```", output.trim_end()).into()]);
+    let mut fields = ToolCallUpdateFields::new()
+        .status(status_mapping::map_command_status(status.clone(), false));
+    match aggregated_output {
+        Some(output) => {
+            fields = fields.content(vec![format!("```sh\n{}\n```", output.trim_end()).into()]);
+        }
+        None => {
+            fields = fields.content(vec![command_completion_summary(status).into()]);
+        }
     }
     if let Some(raw_output) = exit_code_raw_output {
         fields = fields.raw_output(raw_output);
@@ -135,4 +145,13 @@ pub(in crate::thread) async fn replay_command_execution(
     client
         .send_tool_call_update(ToolCallUpdate::new(ToolCallId::new(id), fields))
         .await;
+}
+
+fn command_completion_summary(status: CommandExecutionStatus) -> &'static str {
+    match status {
+        CommandExecutionStatus::Completed => "Command completed without output.",
+        CommandExecutionStatus::Failed => "Command failed without output.",
+        CommandExecutionStatus::Declined => "Command was declined.",
+        CommandExecutionStatus::InProgress => "Command is still running.",
+    }
 }

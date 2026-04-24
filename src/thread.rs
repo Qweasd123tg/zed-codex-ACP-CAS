@@ -150,6 +150,7 @@ struct ThreadInner {
     context_window_size: Option<u64>,
     context_usage_source: Option<ContextUsageSource>,
     account_rate_limits: Option<AppRateLimitSnapshot>,
+    rate_limit_warning_state: session_config::RateLimitWarningState,
     models: Vec<AppModel>,
     active_turn_id: Option<String>,
     active_turn_mode_kind: Option<ModeKind>,

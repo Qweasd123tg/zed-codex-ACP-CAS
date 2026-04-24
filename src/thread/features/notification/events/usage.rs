@@ -3,8 +3,10 @@
 use codex_app_server_protocol::{RateLimitSnapshot, ThreadTokenUsage};
 
 use crate::thread::{
-    ContextUsageSource, ThreadInner, session_config::i64_to_u64_saturating,
-    session_usage_cache::persist_context_usage, turn_notify::notify_config_update,
+    ContextUsageSource, ThreadInner,
+    session_config::{i64_to_u64_saturating, take_rate_limit_warnings},
+    session_usage_cache::persist_context_usage,
+    turn_notify::notify_config_update,
 };
 
 // Синхронизируем usage-конфиг при очередном token-usage update для активного thread.
@@ -60,6 +62,10 @@ pub(in crate::thread) async fn emit_account_rate_limits_updated(
     inner: &mut ThreadInner,
     rate_limits: RateLimitSnapshot,
 ) {
+    let warnings = take_rate_limit_warnings(&mut inner.rate_limit_warning_state, &rate_limits);
     inner.account_rate_limits = Some(rate_limits);
     notify_config_update(inner).await;
+    for warning in warnings {
+        inner.client.send_agent_text(warning).await;
+    }
 }

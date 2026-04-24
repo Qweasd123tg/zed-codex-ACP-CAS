@@ -14,9 +14,10 @@ use codex_core::skills::SkillsManager;
 use serde_json::Value as JsonValue;
 
 use super::session_config::{
-    AccountStatus, ContextSelectorSummary, build_mcp_summary, build_skills_summary, policy_to_mode,
-    resolve_reasoning_effort, service_tier_override_from_config,
-    service_tier_override_from_session, to_app_approval, to_app_sandbox_mode,
+    AccountStatus, ContextSelectorSummary, RateLimitWarningState, build_mcp_summary,
+    build_skills_summary, policy_to_mode, resolve_reasoning_effort,
+    service_tier_override_from_config, service_tier_override_from_session, to_app_approval,
+    to_app_sandbox_mode,
 };
 use super::{
     AppAskForApproval, AppModel, AppSandboxPolicy, AppServerProcess, ClientCapabilities, Config,
@@ -458,6 +459,7 @@ impl Thread {
                 context_window_size: cached_context_usage.map(|(_, size)| size),
                 context_usage_source: cached_context_usage.map(|_| ContextUsageSource::Cached),
                 account_rate_limits: None,
+                rate_limit_warning_state: RateLimitWarningState::default(),
                 models,
                 active_turn_id: None,
                 active_turn_mode_kind: None,

@@ -181,7 +181,7 @@ pub(in crate::thread) async fn emit_collab_tool_call_completed(
                     &receiver_thread_ids,
                     prompt.as_deref(),
                     &agents_states,
-                    false,
+                    completed,
                 )),
         ))
         .await;
@@ -236,7 +236,7 @@ pub(in crate::thread) async fn replay_collab_tool_call(
                 &receiver_thread_ids,
                 prompt.as_deref(),
                 &agents_states,
-                false,
+                completed,
             )),
         )
         .await;

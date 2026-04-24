@@ -247,7 +247,9 @@ pub(super) use context::{
 pub(super) use fast_mode::{
     parse_fast_mode_value, service_tier_override_from_config, service_tier_override_from_session,
 };
-pub(super) use limits::combined_limits_reset_message;
+pub(super) use limits::{
+    RateLimitWarningState, combined_limits_reset_message, take_rate_limit_warnings,
+};
 pub(super) use reasoning::{
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
     reasoning_effort_value, resolve_reasoning_effort,

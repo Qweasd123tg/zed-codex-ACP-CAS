@@ -210,6 +210,8 @@ flowchart LR
   синхронизируется после in-place `/resume` и `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
 - Нижний selector `Context` использует тот же session/config lifecycle и остается read-only surfaced control поверх backend `context_control`:
   короткий label держится на `ctx`, а опции selector-а описываются как `status`, `ctx %`, `MCP`, `skills`, `plugins`, `Limits`, `Compact`.
+- Account rate limits дополнительно дают одноразовые chat-advisory при переходе через 75/90/95/100% использованного окна; состояние порогов хранится в `ThreadInner`,
+  а форматирование находится в `src/thread/session/config/limits.rs`, чтобы `Context` selector и warning-текст не расходились.
 - `ThreadTokenUsageUpdated` остается adapter-side forwarding в ACP `UsageUpdate`, но нативный context circle в текущем `Zed` для external ACP не подтвержден:
   если нужен именно этот UI, сначала нужен Zed-side patch/контракт, а не новая runtime-ветка в адаптере.
 
