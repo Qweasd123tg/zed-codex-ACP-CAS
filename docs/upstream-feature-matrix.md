@@ -1,17 +1,17 @@
 # Матрица Фич И Сравнение С Upstream
 
-Актуально на `2026-04-24` после прогона `bash script/update_references.sh`, обновления reference symlink'ов до среза `2026-04-23` UTC, добавления локального Fast Mode selector поверх `service_tier` и аудита нового Zed/app-server history flow.
+Актуально на `2026-04-24` после повторного прогона `bash script/update_references.sh` и глубокого аудита месячного отставания по `ACP`, официальному `zed-industries/codex-acp`, `openai/codex` app-server и `Zed` ACP-клиенту.
 
 ## Снимок References
 
 | Reference | Состояние | Дата / commit | Примечание |
 | --- | --- | --- | --- |
-| `agent-client-protocol` | обновлен | `2026-04-23`, `6f4ef31` | Локальная ссылка теперь указывает на `v0.12.2-2-g6f4ef31`. |
-| `codex-acp-upstream` | обновлен | `2026-04-23`, `132c0bd` | Локальная ссылка теперь указывает на `v0.11.1-2-g132c0bd`. Это основной источник для сравнения с официальным `zed codex acp`. |
-| `codex` | обновлен | `2026-04-23`, `2e228969b` | Локальная ссылка теперь указывает на `rusty-v8-v146.4.0-1066-g2e228969b`. |
-| `zed` | обновлен | `2026-04-23`, `8cd2d599ae` | Локальная ссылка теперь указывает на `nightly-1-g8cd2d599ae`. |
+| `agent-client-protocol` | обновлен | `2026-04-24`, `7d7dac5` | Локальная ссылка теперь указывает на `v0.12.2-9-g7d7dac5`. |
+| `codex-acp-upstream` | обновлен | `2026-04-24`, `ee9418a` | Локальная ссылка теперь указывает на `v0.12.0`. Это основной источник для сравнения с официальным `zed codex acp`. |
+| `codex` | обновлен | `2026-04-24`, `f802f0a39` | Локальная ссылка теперь указывает на `rusty-v8-v146.4.0-1093-gf802f0a39`. |
+| `zed` | обновлен | `2026-04-24`, `1c1b03c3d6` | Локальная ссылка теперь указывает на `nightly-2-g1c1b03c3d6`. |
 
-Сравнение ниже опирается прежде всего на `references/codex-acp-upstream@v0.11.1-2-g132c0bd` и `references/codex@rusty-v8-v146.4.0-1066-g2e228969b`. `zed`-референс здесь вторичен, но важен для client-side Fast Mode UI caveat.
+Сравнение ниже опирается прежде всего на `references/codex-acp-upstream@v0.12.0` и `references/codex@rusty-v8-v146.4.0-1093-gf802f0a39`. `zed`-референс важен для оценки реального client-side поведения ACP history/debug/session UI.
 
 ## Легенда
 
@@ -26,6 +26,23 @@
 - Основные пробелы относительно официального адаптера: `close_session`, `/logout` и отдельные client-native UX-ветки, которые в текущем Zed ACP пока не дают достаточной отдачи.
 - Основные сильные стороны форка: отдельный `resume_session`, workspace-scoped `/resume`, `/threads`, `/plan`, app-server-ориентированный flow восстановления тредов, нижний `Context` control, `Fast Mode` service-tier selector и отдельный режим ручного restore через `ACP_DISABLE_AUTO_RESTORE=1` + `/resume`.
 - Дополнительно форк теперь быстрее отдает первый ready-thread в `Zed`: skills/account/rate-limit metadata догружаются сразу после session response отдельным config update, а не держат весь `new_session` / `load_session` / `resume_session` в startup-loading. После аудита свежего Zed history UI адаптер также перестал подменять failed resume пустой свежей сессией: при `no rollout found` он сначала пробует найти rollout через `thread/read` и повторить `thread/resume` по path, а если история реально недоступна, возвращает явную ошибку.
+
+## 0.1 Что Реально Поменялось За Месяц
+
+| Слой | Что изменилось | Дата / источник | Что это значит для форка |
+| --- | --- | --- | --- |
+| ACP protocol | `session/resume` стабилизирован, больше не просто unstable draft. | `2026-04-23`, `ac04ca2` / ACP `#1051`; changelog `v0.12.2`. | Наша идея с отдельным `resume_session` теперь совпадает с направлением протокола. Но dependency слой отстал: текущий `Cargo.toml` все еще держит `agent-client-protocol = 0.9.4`, тогда как официальный `codex-acp v0.12.0` уже на `0.11.1`. |
+| ACP protocol | `session/close` стабилизирован. | `2026-04-23`, `efda480` / ACP `#1062`. | Функция стала официальной, но практическая ценность для нашего текущего Zed UX низкая. Не приоритет, пока нет задачи clean-close session lifecycle. |
+| ACP protocol | Описан `additionalDirectories` контракт для `new/load/resume/list`. | RFD в `agent-client-protocol`, актуально в `v0.12.x`. | У нас сейчас фокус на single `cwd` + app-server thread state. Для полноценного multi-root continuity надо отдельно маппить `additional_directories` в app-server config/session list. |
+| Official `codex-acp` | Релиз `v0.12.0`: переход на новый ACP Rust SDK shape и `codex rust-v0.124.0`. | `2026-04-24`, `74244b8`, `ee9418a`. | Главный технический долг: не отдельная команда, а API drift. Upstream `Agent` methods теперь получают `ConnectionTo<Client>`, thread state держится на `Arc`, а `local_spawner.rs` / `prompt_args.rs` удалены. |
+| Official `codex-acp` | Добавлен ACP auth/logout capability, не только slash `/logout`. | `2026-03-31`, `a9e1075`, затем `v0.12.0` код. | У нас есть auth, но нет ACP `auth.logout` capability и нет handler `logout`. Это небольшой parity-gap, если нужен чистый account-switch UX. |
+| Official `codex-acp` | MCP approval flow стал богаче: поддержан MCP elicitation как permission popup с persist modes. | `2026-03-31`, `c3e95ca`. | У нас есть ACP MCP passthrough и permission approvals, но именно upstream-style MCP elicitation approval стоит проверить отдельно, если используем MCP apps/connectors. |
+| `codex app-server` | Permission model заметно усложнился: permission profiles, filesystem entries, strict auto-review, command permission profiles. | `2026-04-21` - `2026-04-23`, серия `#1827x`, `#19050`, `#19086`, `#19231`. | Это важнее `DynamicToolCall`: наши approvals должны следить за новой семантикой permission profiles, иначе UI может выглядеть работающим, но отвечать не тем профилем. |
+| `codex app-server` | Появились sticky / turn-scoped environments и remote thread config endpoint. | `2026-04-21` - `2026-04-23`, `ddbe2536b`, `1d4cc494c`, `f11583b8f`. | Пока можно не трогать, но это будущий слой для managed environments. В ACP UI его сейчас лучше не поднимать без понятного UX. |
+| `codex app-server` | `thread/resume` и `thread/fork` получили `excludeTurns`; thread state сильнее завязан на `ThreadStore`. | `2026-04-23`, `3d3028a5a`, `f1061d9d0`, `f1923a38b`. | Для нашего resume/replay это потенциально полезно: можно оптимизировать сценарии, где нам нужен context без полного history payload. Но надо сверить с текущим `ThreadResumeParams` pinned rev. |
+| `codex app-server` | Укреплены device key / remote auth / Unix socket / remote plugin flows. | `2026-04-21` - `2026-04-23`, `69c3d1227`, `8a0ab3fc1`, `0d6a90cd6`. | Не приоритет для локального Zed workflow, но важно для будущего remote app-server сценария. |
+| Zed ACP client | Новый ACP SDK, ACP debug view, session registration before load replay, usage UI fixes. | `2026-04-22` - `2026-04-24`, `58e2b7ecdd`, `2ca94a6032`, `1c1b03c3d6`. | Это прямой сигнал: Zed-side стал лучше для диагностики и load replay. Наш адаптер теперь надо тестировать против fresh Zed, а не только старого поведения history panel. |
+| Zed Agent Panel / external agents | Очередь сообщений для external agents не отправляется на tool-call boundary. | Проверено по Zed docs и `zed-industries/zed#49601` от `2026-02-19`; актуально для `v0.224.6` и обсуждалось на nightly `v0.227.0`. | Для native `Zed Agent` queued messages могут уходить на следующей границе turn/tool-call, но для external ACP agents текущий клиент держит queued prompt до конца generation. У pinned `codex app-server` есть `turn/steer`, однако адаптер не сможет дать CLI-style steering до следующего tool call без Zed-side forwarding/extension method. |
 
 ## 1. Parity С Официальным `zed codex acp`
 
@@ -80,14 +97,21 @@
 | Marketplace / plugin management (`marketplace/add`, `remove`, `upgrade`) | `codex` app-server protocol + TUI | видно в срезе `2026-04-23` | `[ ]` | У форка сейчас есть read-only `plugins` summary в `Context`, но нет ACP flow для установки/обновления marketplaces/plugins. |
 | Guardian approval review и verification notifications | `codex` app-server protocol + TUI | видно в срезе `2026-04-23` | `[ ]` | В протоколе есть `item/autoApprovalReview/*`, `guardianWarning`, `model/verification` и `thread/approveGuardianDeniedAction`. В форке пока surfaced только старые warning-ветки (`ConfigWarning`, `DeprecationNotice`, Windows warning). |
 | Model speed-tier metadata (`additional_speed_tiers`) | `codex` app-server protocol + TUI | видно в срезе `2026-04-23` | `[~]` | `Fast Mode` selector уже есть, но текущий pinned protocol/API форка не дает полноценного model-level gating как в свежем TUI. Поэтому selector намеренно не скрывается по модели. |
+| `turn/steer` / mid-turn queued input | `codex` app-server protocol + Zed Agent Panel | `codex` protocol уже содержит `turn/steer`; Zed external-agent limitation задокументирован в `zed-industries/zed#49601` | `[ ]` | Backend может принять input в active turn через `expected_turn_id`, но текущий Zed external-agent UI не прокидывает queued prompt на boundary. Добавлять adapter-side runtime path имеет смысл только после проверки, что свежий Zed реально шлет второй `session/prompt` до завершения первого turn, или после появления явного ACP/Zed extension method для steering. |
 | Thread memory mode и item injection (`thread/memoryMode/set`, `thread/inject_items`) | `codex` app-server protocol | видно в срезе `2026-04-23` | `[ ]` | В ACP-слой форка пока не поднято; не стоит добавлять полумертвый runtime path без ясного Zed UX. |
 | External agent config migration / import | `codex` TUI | видно в срезе `2026-04-23` | `[ ]` | В TUI появился startup migration flow для внешних agent configs/plugins. Для ACP CAS это отдельный продуктовый сценарий, не простой transport passthrough. |
+| Permission profile enforcement model | `codex` core/app-server protocol | `2026-04-21` - `2026-04-23` | `[~]` | У форка есть permissions approval UI, но свежий `codex` уже различает canonical active profiles, command overlays, filesystem entries и strict auto-review. Это нужно проверять при обновлении pinned `codex` rev, иначе можно потерять точность approval-response. |
+| `excludeTurns` на `thread/resume` / `thread/fork` | `codex` app-server protocol | `2026-04-23`, `3d3028a5a` | `[ ]` | Потенциально полезно для чистого context-switch без тяжелого payload history. Сейчас форк решает это своим `include_history` / replay layer, но после dependency bump стоит сверить, можно ли заменить часть логики нативным параметром. |
+| Sticky / turn-scoped environments | `codex` app-server protocol | `2026-04-21` - `2026-04-23` | `[ ]` | Не нужен для текущего локального Zed workflow, но это будущий слой managed execution environment. Без Zed UX лучше не поднимать. |
+| Unix socket transport | `codex` app-server | `2026-04-23`, `8a0ab3fc1` | `[ ]` | Может быть полезно для надежного local app-server transport, но текущий adapter bridge уже работает через stdio process. |
 
 ## 4. Что Стоит Подумать Всерьез
 
 На текущем этапе для форка под `Zed` разумно держать такой shortlist:
 
-1. `thread/read` preview как read-only surfaced flow без немедленного `resume`: transport уже есть, а практическая ценность для ежедневной навигации выше, чем у ещё одной параллельной status-команды.
+1. Обновить dependency/API слой: `agent-client-protocol 0.9.4 -> 0.11.x/0.12.x` и pinned `zed-industries/codex` rev -> актуальный `openai/codex rust-v0.124.0` или осознанный свежий commit. Это не косметика: upstream `Agent` API, auth capabilities, permission profiles и app-server protocol shape уже разошлись с нашим базовым контрактом.
+2. После dependency bump отдельно прогнать audit approval-flow: command/file/user-input permissions, `RequestPermissions`, MCP elicitation approvals, strict auto-review. Это зона с самым высоким риском тихих семантических регрессий.
+3. `thread/read` preview как read-only surfaced flow без немедленного `resume`: transport уже есть, а практическая ценность для ежедневной навигации выше, чем у ещё одной параллельной status-команды.
 
 Отдельное UX-направление, которое стоит держать рядом с этим shortlist:
 

@@ -168,6 +168,7 @@ Current gaps:
 - `item/tool/call` / `DynamicToolCall` requests are rejected as unsupported
 - `Fast Mode` is available through the adapter `Fast Mode` session config selector. It primarily exposes `service_tier=fast`, with `flex` available as the alternate Codex service tier. Zed's native toolbar fast-mode button is currently native-thread/staff/model-gated and is not a generic custom ACP control, so custom ACP users should use the adapter selector instead.
 - `/undo` itself works, and the adapter also exposes rollback via ACP ext methods, but the visual rewind/edit button and the pencil-style edit UX in current `Zed` still depend on a client-side ACP fix: the external-agent ACP bridge does not wire `truncate()` / rollback ext-methods for this flow yet. In practice that means patching or rebuilding `Zed` if you want the native button UX
+- Zed Agent Panel message queueing is asymmetric today: native `Zed Agent` can send queued messages at turn/tool-call boundaries, but external ACP agents receive queued messages only after the current generation finishes. The pinned Codex app-server has `turn/steer`, so the backend can accept mid-turn steering, but this adapter cannot expose a real CLI-style "send before the next tool call" UX until `Zed` forwards queued external-agent prompts before generation completion.
 - The selected-agent / `New Thread` trigger in current `Zed` can show a visibly odd pulsing state that appears only while the pointer is moving. In practice this looks like a client-side repaint/animation quirk, not an ACP startup stall in the adapter
 - While history replay is restoring after `load_session` or replaying `/undo`, new prompts and session commands are intentionally fenced until replay finishes; this avoids overlapping turn/replay state in one ACP session
 - Linux is the most tested platform right now
@@ -179,20 +180,18 @@ Current gaps:
 
 Download the artifact for your platform from the releases page.
 
-Planned release artifacts:
+Current release artifacts are plain binaries plus `.sha256` files:
 
-- `.tar.gz` for Linux
-- `.tar.gz` for macOS Apple Silicon
-- `.zip` for Windows
+- `codex-acp-cas-<version>-x86_64-unknown-linux-gnu`
+- `codex-acp-cas-<version>-<target>.sha256`
 
-Extract the archive, place `codex-acp` somewhere on your `PATH`, and point Zed at that binary.
+Place the binary somewhere on your `PATH`, mark it executable, and point Zed at that binary.
 
 Example:
 
 ```bash
 mkdir -p "$HOME/.local/bin"
-tar -xzf codex-acp-cas-<version>-x86_64-unknown-linux-gnu.tar.gz
-mv codex-acp "$HOME/.local/bin/codex-acp"
+mv codex-acp-cas-<version>-x86_64-unknown-linux-gnu "$HOME/.local/bin/codex-acp"
 chmod +x "$HOME/.local/bin/codex-acp"
 ```
 
@@ -288,13 +287,13 @@ Useful environment variables:
 
 - `RUST_LOG=codex_acp=debug`
 - `RUST_BACKTRACE=1`
-- `ACP_DISABLE_AUTO_RESTORE=1`
 - `CODEX_ACP_STARTUP_TIMEOUT_MS=<milliseconds>`
 - `CODEX_ACP_STARTUP_METADATA_TIMEOUT_MS=<milliseconds>`
+- `ACP_DISABLE_AUTO_RESTORE=1` for emergency startup debugging only
 
 `CODEX_ACP_STARTUP_TIMEOUT_MS` now also bounds the `turn/start` handshake, so an app-server that stops responding before it returns a `turn_id` does not leave the ACP UI spinning forever.
 
-`ACP_DISABLE_AUTO_RESTORE=1` suppresses only the earliest startup-driven backend restore right after the agent boots. Later explicit opens from Zed history continue to use the normal restore path. If you want a clean startup and still keep manual history opens working, this is the intended mode.
+Do not keep `ACP_DISABLE_AUTO_RESTORE=1` in your normal Zed configuration. It suppresses the earliest startup-driven backend restore right after the agent boots, which can make history entries appear in Zed while their chat content does not load. Use it only as a temporary diagnostic option if startup restore itself is hanging.
 
 ## Troubleshooting
 
