@@ -1191,7 +1191,7 @@ fn mode_state_uses_custom_auto_ask_edits_id() {
 }
 
 #[test]
-fn mode_state_hides_read_only_when_not_current() {
+fn mode_state_shows_read_only_when_not_current() {
     let auto_preset = APPROVAL_PRESETS
         .iter()
         .find(|preset| preset.id == AUTO_MODE_ID)
@@ -1202,7 +1202,7 @@ fn mode_state_hides_read_only_when_not_current() {
         EditApprovalMode::AutoApprove,
     );
 
-    assert!(modes.iter().all(|mode| mode.id.0.as_ref() != "read-only"));
+    assert!(modes.iter().any(|mode| mode.id.0.as_ref() == "read-only"));
 }
 
 #[test]
@@ -1224,6 +1224,31 @@ fn mode_state_keeps_read_only_when_current() {
 
     assert_eq!(current_mode_id.0.as_ref(), "read-only");
     assert!(modes.iter().any(|mode| mode.id.0.as_ref() == "read-only"));
+}
+
+#[test]
+fn permission_modes_explain_full_access_sandbox_behavior() {
+    let auto_preset = APPROVAL_PRESETS
+        .iter()
+        .find(|preset| preset.id == AUTO_MODE_ID)
+        .expect("auto preset should exist");
+    let modes = permission_modes(
+        to_app_approval(auto_preset.approval),
+        to_app_sandbox_mode(&auto_preset.sandbox),
+        EditApprovalMode::AutoApprove,
+    );
+
+    let full_access = modes
+        .iter()
+        .find(|mode| mode.id.0.as_ref() == "full-access")
+        .expect("full access mode should exist");
+    assert_eq!(full_access.name, "Full Access (no sandbox)");
+    assert_eq!(
+        full_access.description.as_deref(),
+        Some(
+            "No sandbox and no approval prompts for edits, commands, internet, or files outside this workspace."
+        )
+    );
 }
 
 #[test]

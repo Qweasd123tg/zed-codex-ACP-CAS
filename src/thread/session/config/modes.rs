@@ -79,20 +79,19 @@ pub(in crate::thread) fn current_permission_mode_id(
 }
 
 pub(in crate::thread) fn permission_modes(
-    approval: AppAskForApproval,
-    sandbox: AppSandboxMode,
-    edit_approval_mode: EditApprovalMode,
+    _approval: AppAskForApproval,
+    _sandbox: AppSandboxMode,
+    _edit_approval_mode: EditApprovalMode,
 ) -> Vec<SessionMode> {
-    let current_mode_id = current_permission_mode_id(approval, sandbox, edit_approval_mode);
     let mut available_modes = Vec::new();
-    if current_mode_id.0.as_ref() == "read-only"
-        && let Some(read_only_preset) = APPROVAL_PRESETS
-            .iter()
-            .find(|preset| preset.id == "read-only")
+    if let Some(read_only_preset) = APPROVAL_PRESETS
+        .iter()
+        .find(|preset| preset.id == "read-only")
     {
         available_modes.push(
-            SessionMode::new(read_only_preset.id, read_only_preset.label)
-                .description(read_only_preset.description),
+            SessionMode::new(read_only_preset.id, read_only_preset.label).description(
+                "Read-only sandbox. Codex must ask before edits, writes, or network access.",
+            ),
         );
     }
     if let Some(default_preset) = APPROVAL_PRESETS
@@ -101,11 +100,12 @@ pub(in crate::thread) fn permission_modes(
     {
         available_modes.push(
             SessionMode::new(AUTO_MODE_ID, default_preset.label)
-                .description("Default mode: file edits are auto-approved (Plan mode still asks)."),
+                .description("Workspace-write sandbox. Codex can edit this workspace; network and outside-workspace writes still ask."),
         );
         available_modes.push(
-            SessionMode::new(AUTO_ASK_EDITS_MODE_ID, "Default (Ask on edits)")
-                .description("Default mode with confirmation popup for every file edit."),
+            SessionMode::new(AUTO_ASK_EDITS_MODE_ID, "Default (Ask on edits)").description(
+                "Workspace-write sandbox with a confirmation popup for every file edit.",
+            ),
         );
     }
     if let Some(full_access_preset) = APPROVAL_PRESETS
@@ -113,8 +113,8 @@ pub(in crate::thread) fn permission_modes(
         .find(|preset| preset.id == "full-access")
     {
         available_modes.push(
-            SessionMode::new(full_access_preset.id, full_access_preset.label)
-                .description(full_access_preset.description),
+            SessionMode::new(full_access_preset.id, "Full Access (no sandbox)")
+                .description("No sandbox and no approval prompts for edits, commands, internet, or files outside this workspace."),
         );
     }
     available_modes

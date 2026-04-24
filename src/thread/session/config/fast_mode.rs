@@ -39,12 +39,12 @@ pub(in crate::thread) fn fast_mode_options(
     _current_service_tier: Option<ServiceTier>,
 ) -> Vec<SessionConfigSelectOption> {
     vec![
-        SessionConfigSelectOption::new(FAST_MODE_OFF_VALUE, "Off")
-            .description("Use the standard service tier."),
-        SessionConfigSelectOption::new(FAST_MODE_ON_VALUE, "On")
-            .description("Request the Fast service tier for new turns."),
+        SessionConfigSelectOption::new(FAST_MODE_OFF_VALUE, "Standard")
+            .description("Use the default service tier."),
+        SessionConfigSelectOption::new(FAST_MODE_ON_VALUE, "Fast")
+            .description("Request the Fast service tier for new turns when available."),
         SessionConfigSelectOption::new(FAST_MODE_FLEX_VALUE, "Flex")
-            .description("Request the Flex service tier for new turns."),
+            .description("Request the Flex service tier for new turns when available."),
     ]
 }
 
@@ -80,6 +80,15 @@ mod tests {
                 .collect();
             assert_eq!(values, vec!["standard", "fast", "flex"]);
         }
+    }
+
+    #[test]
+    fn fast_mode_options_use_speed_labels() {
+        let labels: Vec<_> = fast_mode_options(None)
+            .into_iter()
+            .map(|option| option.name)
+            .collect();
+        assert_eq!(labels, vec!["Standard", "Fast", "Flex"]);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-04-24` (`session/fork` surfaced in `CodexAgent`, app-server transport split into reader/request-policy modules, `Fast Mode` now flows through `service_tier` session config, and failed resume-by-id can recover through `thread/read` path discovery).
+Обновлено: `2026-04-24` (`session/fork` surfaced in `CodexAgent`, app-server transport split into reader/request-policy modules, `fast_mode` is surfaced as `Speed`, and failed resume-by-id can recover through `thread/read` path discovery).
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -206,8 +206,12 @@ flowchart LR
   и должны переживать replacement-thread внутри той же ACP-сессии.
 - Тот же lifecycle-набор теперь обслуживает и стандартный ACP `session/fork`: `src/codex_agent.rs` публикует capability и handler,
   а `src/thread/session/lifecycle.rs` использует существующий `thread/fork` backend, после чего поднимает forked ACP session как отдельный `Thread`.
-- `Fast Mode` относится к этому же lifecycle-набору: выбранный `service_tier` хранится в `ThreadInner`, попадает в `thread/start` / `thread/resume` / `thread/fork`,
+- UX `Speed` selector относится к этому же lifecycle-набору: backend-поле `service_tier` хранится в `ThreadInner`, попадает в `thread/start` / `thread/resume` / `thread/fork`,
   синхронизируется после in-place `/resume` и `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
+- Нижний selector `Context` использует тот же session/config lifecycle и остается read-only surfaced control поверх backend `context_control`:
+  короткий label держится на `ctx`, а опции selector-а описываются как `status`, `ctx %`, `MCP`, `skills`, `plugins`, `Limits`, `Compact`.
+- `ThreadTokenUsageUpdated` остается adapter-side forwarding в ACP `UsageUpdate`, но нативный context circle в текущем `Zed` для external ACP не подтвержден:
+  если нужен именно этот UI, сначала нужен Zed-side patch/контракт, а не новая runtime-ветка в адаптере.
 
 6. Изменение collab/subagents контракта:
 - `src/thread/features/collab/render.rs`
@@ -229,7 +233,7 @@ flowchart LR
 - `src/thread/features/notification/events/turn.rs`
 
 Риск: сломать переходы `Plan -> Default` и fallback при неполных plan-update.
-Отдельно: `Fast Mode` не является `ModeKind` и не должен смешиваться с `Plan`/`Default`. Это session/config `service_tier`; если менять его plumbing, нужно сохранять состояние в `ThreadInner` и подавать явный `service_tier` в следующий `TurnStartParams`.
+Отдельно: UX `Speed` selector не является `ModeKind` и не должен смешиваться с `Plan`/`Default`. Это session/config `service_tier`; если менять его plumbing, нужно сохранять состояние в `ThreadInner` и подавать явный `service_tier` в следующий `TurnStartParams`.
 
 ### Маршрутизация сообщений
 - `src/thread/notification/dispatch.rs`
@@ -312,7 +316,7 @@ flowchart LR
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
 | `src/thread/prompt/*` | Парсинг slash-команд, fixed prompt-turn override-ы (`/init`, `/plan <prompt>`), routing в review/session-turn flow |
 | `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread, transport scrub при переключении |
-| `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, hidden `/delete -> /archive` alias, archive/unarchive picker UI, ACP `session/fork` bootstrap helper, session replay события, `SessionInfoUpdate` (`title` + `updated_at`), history replay fencing и runtime handling нижних session selectors |
+| `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, hidden `/delete -> /archive` alias, archive/unarchive picker UI, ACP `session/fork` bootstrap helper, session replay события, `SessionInfoUpdate` (`title` + `updated_at`), history replay fencing и runtime handling нижних `Context` и `Speed` selectors |
 | `src/codex_agent.rs` + `src/thread/session/lifecycle.rs` | ACP `session/fork` capability и handler поверх существующего `thread/fork` backend |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
 | `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw payload |

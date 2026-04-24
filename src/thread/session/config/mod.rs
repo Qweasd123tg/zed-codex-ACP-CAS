@@ -165,12 +165,12 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
     options.push(
         SessionConfigOption::select(
             "fast_mode",
-            "Fast Mode",
+            "Speed",
             fast_mode::fast_mode_value(current_service_tier),
             fast_mode::fast_mode_options(current_service_tier),
         )
         .category(SessionConfigOptionCategory::Model)
-        .description("Choose whether Codex should request the Fast service tier for new turns"),
+        .description("Choose the service tier Codex should request for new turns"),
     );
 
     let mut reasoning_options = Vec::new();
