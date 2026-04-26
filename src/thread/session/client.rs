@@ -36,8 +36,9 @@ impl SessionClient {
             .unwrap_or(false)
     }
 
-    pub(super) fn supports_write_text_file(&self) -> bool {
-        self.client_capabilities.lock().unwrap().fs.write_text_file
+    pub(super) fn supports_buffer_writeback(&self) -> bool {
+        env_flag("CODEX_ACP_SYNC_EDIT_BUFFERS")
+            && self.client_capabilities.lock().unwrap().fs.write_text_file
     }
 
     pub(super) fn supports_read_text_file(&self) -> bool {

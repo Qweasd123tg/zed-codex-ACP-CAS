@@ -279,7 +279,7 @@ flowchart LR
 - `src/thread/turn/diff.rs`
 - `src/thread/turn/execution.rs`
 
-Риск: финальный `turn diff` historically держал `ThreadInner` mutex через `send_tool_call_update(...)`, `read_file_text(...)` и `write_text_file(...)`, а это уже на завершении turn ощущалось как лишний хвостовой фриз. Текущая безопасная граница здесь такая: `latest_turn_diff`, `started_tool_calls` и dedupe по `file_change_paths_this_turn` / `synced_paths_this_turn` снимаются в snapshot под lock, а сам ACP update + writeback идут уже после unlock через fast-path `TurnCompleted` в `src/thread/turn/execution.rs`. Отдельная инварианта: turn-diff writeback не должен повторно синкать пути, уже зарезервированные file-change lifecycle в том же turn.
+Риск: финальный `turn diff` historically держал `ThreadInner` mutex через `send_tool_call_update(...)`, `read_file_text(...)` и `write_text_file(...)`, а это уже на завершении turn ощущалось как лишний хвостовой фриз. Текущая безопасная граница здесь такая: `latest_turn_diff`, `started_tool_calls` и dedupe по `file_change_paths_this_turn` / `synced_paths_this_turn` снимаются в snapshot под lock, а сам ACP update идет уже после unlock через fast-path `TurnCompleted` в `src/thread/turn/execution.rs`. ACP buffer writeback по умолчанию выключен и доступен только через `CODEX_ACP_SYNC_EDIT_BUFFERS=1`, чтобы не гоняться с Zed file watcher на уже измененных файлах. Отдельная инварианта: turn-diff writeback не должен повторно синкать пути, уже зарезервированные file-change lifecycle в том же turn.
 
 ### File-change lifecycle
 - `src/thread/features/file/events.rs`
@@ -289,7 +289,7 @@ flowchart LR
 
 Риск: repeated disk I/O и ACP snapshot/writeback churn на одном и том же path. Даже до большого refactor здесь важно не читать, prime-ить и writeback-ить один и тот же файл по нескольку раз в рамках одного `FileChange` item, иначе multi-hunk edits начинают выглядеть как локальный фриз.
 Текущая безопасная граница для `started`-фазы такая: `started_changes`, `locations`, `file_change_paths_this_turn` и `before_contents` публикуются атомарно под lock, а `send_tool_call(...)` и `prime_file_snapshot(...)` идут уже после unlock по immutable snapshot.
-Для `completed`-фазы теперь используется тот же split: `before_contents` и per-item cleanup снимаются под lock, а финальный diff/update и `write_text_file(...)` идут уже после unlock через fast-path в `src/thread/turn/execution.rs`. Отдельная инварианта здесь: `file_change_paths_this_turn` остаётся turn-reservation до `reset_turn_transient_state()`, а поздний writeback не должен помечать `synced_paths_this_turn` уже в следующем turn, поэтому post-writeback relock обязан перепроверять `active_turn_id`.
+Для `completed`-фазы теперь используется тот же split: `before_contents` и per-item cleanup снимаются под lock, а финальный diff/update идет уже после unlock через fast-path в `src/thread/turn/execution.rs`. Если явно включен `CODEX_ACP_SYNC_EDIT_BUFFERS=1`, дополнительный `write_text_file(...)` тоже идет после unlock. Отдельная инварианта здесь: `file_change_paths_this_turn` остаётся turn-reservation до `reset_turn_transient_state()`, а поздний writeback не должен помечать `synced_paths_this_turn` уже в следующем turn, поэтому post-writeback relock обязан перепроверять `active_turn_id`.
 
 ### Approval wait paths
 - `src/thread/features/approvals/file_change.rs`

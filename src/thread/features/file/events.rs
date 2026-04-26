@@ -27,6 +27,8 @@ pub(in crate::thread) struct FileChangeCompletedSnapshot {
     pub(in crate::thread) client: SessionClient,
     pub(in crate::thread) id: String,
     pub(in crate::thread) status: PatchApplyStatus,
+    pub(in crate::thread) title: String,
+    pub(in crate::thread) locations: Vec<agent_client_protocol::ToolCallLocation>,
     pub(in crate::thread) workspace_cwd: PathBuf,
     pub(in crate::thread) changes: Vec<FileUpdateChange>,
     pub(in crate::thread) before_contents: HashMap<PathBuf, Option<String>>,
@@ -87,18 +89,7 @@ pub(in crate::thread) fn prepare_file_change_started_snapshot(
             ))
         })
         .collect::<Vec<_>>();
-    let title = if changes.is_empty() {
-        "Apply edits".to_string()
-    } else {
-        format!(
-            "Edit {}",
-            changes
-                .iter()
-                .map(|c| c.path.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
+    let title = file_change_tool_title(&inner.workspace_cwd, &changes);
 
     let mut prime_paths = Vec::new();
     if inner.client.supports_read_text_file() {
@@ -196,8 +187,13 @@ pub(in crate::thread) fn prepare_file_change_completed_snapshot(
     status: PatchApplyStatus,
 ) -> FileChangeCompletedSnapshot {
     let workspace_cwd = inner.workspace_cwd.clone();
+    let title = file_change_tool_title(&workspace_cwd, &changes);
+    let locations = changes
+        .iter()
+        .map(|change| super::changes::file_change_tool_location(&workspace_cwd, change))
+        .collect();
     let writeback_paths = if matches!(status, PatchApplyStatus::Completed)
-        && inner.client.supports_write_text_file()
+        && inner.client.supports_buffer_writeback()
     {
         collect_file_change_writeback_paths(&workspace_cwd, &changes)
     } else {
@@ -216,6 +212,8 @@ pub(in crate::thread) fn prepare_file_change_completed_snapshot(
         client: inner.client.clone(),
         id,
         status,
+        title,
+        locations,
         workspace_cwd,
         changes,
         before_contents,
@@ -243,12 +241,42 @@ pub(in crate::thread) fn build_file_change_completed_update(
     ToolCallUpdate::new(
         ToolCallId::new(snapshot.id.clone()),
         ToolCallUpdateFields::new()
+            .title(snapshot.title.clone())
             .status(status_mapping::map_patch_status(
                 snapshot.status.clone(),
                 false,
             ))
+            .locations(snapshot.locations.clone())
             .content(content),
     )
+}
+
+fn file_change_tool_title(workspace_cwd: &Path, changes: &[FileUpdateChange]) -> String {
+    let paths = unique_display_paths(workspace_cwd, changes);
+    match paths.as_slice() {
+        [] => "Apply edits".to_string(),
+        [path] => format!("Edit {path}"),
+        [first, second] => format!("Edit {first}, {second}"),
+        _ => format!("Edit {} files", paths.len()),
+    }
+}
+
+fn unique_display_paths(workspace_cwd: &Path, changes: &[FileUpdateChange]) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    for change in changes {
+        let path = super::changes::file_change_target_path(workspace_cwd, change);
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        paths.push(display_path(workspace_cwd, &path));
+    }
+    paths
+}
+
+fn display_path(workspace_cwd: &Path, path: &Path) -> String {
+    let display_path = path.strip_prefix(workspace_cwd).unwrap_or(path);
+    display_path.display().to_string()
 }
 
 pub(in crate::thread) fn collect_file_change_writeback_targets(
@@ -325,4 +353,53 @@ pub(in crate::thread) async fn replay_file_change(
                 .content(content),
         )
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use codex_app_server_protocol::{FileUpdateChange, PatchChangeKind};
+
+    use super::file_change_tool_title;
+
+    fn update(path: &str) -> FileUpdateChange {
+        FileUpdateChange {
+            path: path.to_string(),
+            kind: PatchChangeKind::Update { move_path: None },
+            diff: String::new(),
+        }
+    }
+
+    #[test]
+    fn file_change_title_uses_relative_paths_for_small_groups() {
+        let workspace = Path::new("/home/me/work");
+        let changes = vec![
+            update("/home/me/work/Cargo.toml"),
+            update("/home/me/work/README.md"),
+        ];
+
+        assert_eq!(
+            file_change_tool_title(workspace, &changes),
+            "Edit Cargo.toml, README.md"
+        );
+    }
+
+    #[test]
+    fn file_change_title_summarizes_large_groups() {
+        let workspace = Path::new("/home/me/work");
+        let changes = vec![
+            update("Cargo.toml"),
+            update("Cargo.lock"),
+            FileUpdateChange {
+                path: "src/old.rs".to_string(),
+                kind: PatchChangeKind::Update {
+                    move_path: Some(PathBuf::from("src/new.rs")),
+                },
+                diff: String::new(),
+            },
+        ];
+
+        assert_eq!(file_change_tool_title(workspace, &changes), "Edit 3 files");
+    }
 }

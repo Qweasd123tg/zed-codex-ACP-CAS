@@ -67,7 +67,8 @@ pub(super) fn prepare_finalized_turn_diff_snapshot(
     let mut sync_paths = Vec::new();
     for file in parsed_files {
         let path = resolve_turn_diff_path(&inner.workspace_cwd, repo_root.as_deref(), &file.path);
-        if !file.is_delete
+        if inner.client.supports_buffer_writeback()
+            && !file.is_delete
             && !inner.file_change_paths_this_turn.contains(&path)
             && !inner.synced_paths_this_turn.contains(path.as_path())
         {

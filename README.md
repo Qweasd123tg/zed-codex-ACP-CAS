@@ -100,14 +100,15 @@ Sub-agent and collaboration tool-call rendering:
 - Safer history replay fencing for `/undo` and auto-restored session history
 - Less UI freeze risk during `/resume --history` by replaying restored history outside the main session mutex
 - Less duplicate file-change I/O when one patch item touches the same path multiple times
+- More reliable file navigation from completed grouped file-change diff cards
 - Less mutex hold time while waiting for file-change approval prompts
 - Less chat stall while command approval prompts are pending
 - Faster file-change start cards with ACP snapshot priming moved out of the main session mutex
-- Less mutex hold time while final file-change diff and ACP writeback are published
+- Less mutex hold time while final file-change diff is published; ACP buffer writeback is opt-in via `CODEX_ACP_SYNC_EDIT_BUFFERS=1`
 - Safer transport drain: stale server requests are rejected during post-turn and pre-prompt cleanup instead of triggering late approvals
 - Less reconnect spam: reconnect warnings now collapse into one normalized status line while reconnect-assisted stalled turns still abort cleanly
 - Less brittle transport cleanup: background drain and thread-switch flush now wait for the queue to go quiet instead of assuming `64` messages or one tiny timeout is enough
-- Less turn-completion lock contention: turn diff ACP writeback now runs outside the main session mutex and skips paths already reserved by file-change lifecycle
+- Less turn-completion lock contention: turn diff rendering now runs outside the main session mutex and optional ACP buffer writeback skips paths already reserved by file-change lifecycle
 - Less sparse completed tool cards: no-output commands, MCP results, and completed collab/sub-agent calls now keep a short visible summary while retaining raw details
 - Less transport serialization during quiet backend periods: app-server stdout now has a dedicated reader/inbox, so cancel, interrupt, post-turn drain, and thread-switch cleanup do not sit behind one long `next_message()` mutex wait
 
