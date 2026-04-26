@@ -13,7 +13,7 @@ impl ThreadInner {
         self.active_turn_saw_plan_item = false;
         self.active_turn_saw_plan_delta = false;
         self.started_tool_calls.clear();
-        self.completed_turn_ids.clear();
+        self.last_completed_turn_id = None;
         self.turn_plan_updates_seen.clear();
         self.fallback_plan = None;
         self.file_change_locations.clear();

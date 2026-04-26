@@ -155,16 +155,28 @@ impl Thread {
             };
             (inner.app.clone(), inner.thread_id.clone(), active_turn_id)
         };
-        drop(
-            app.lock()
-                .await
-                .turn_interrupt(TurnInterruptParams {
-                    thread_id,
-                    turn_id: active_turn_id,
-                })
-                .await,
-        );
-        true
+        // Если backend отверг interrupt (unknown turn, уже завершён и т.д.), считать turn
+        // "прерванным" нельзя: cancel UI иначе застрянет в Cancelling, а turn продолжит жить.
+        match app
+            .lock()
+            .await
+            .turn_interrupt(TurnInterruptParams {
+                thread_id: thread_id.clone(),
+                turn_id: active_turn_id.clone(),
+            })
+            .await
+        {
+            Ok(_) => true,
+            Err(err) => {
+                warn!(
+                    thread_id = %thread_id,
+                    turn_id = %active_turn_id,
+                    error = %err,
+                    "turn/interrupt rejected; reporting turn as not interrupted"
+                );
+                false
+            }
+        }
     }
 
     pub(super) async fn run_single_turn_ext(
@@ -427,7 +439,7 @@ impl Thread {
             let (completion_disposition, diff_snapshot, client) = {
                 let mut inner = self.inner.lock().await;
                 let disposition = crate::thread::turn_state::register_turn_completion(
-                    &mut inner.completed_turn_ids,
+                    &mut inner.last_completed_turn_id,
                     turn_id,
                     &turn.id,
                 );

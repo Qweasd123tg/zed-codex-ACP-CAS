@@ -1,7 +1,7 @@
 //! Тонкая обёртка вокруг вызовов ACP-клиента, ограниченная одним session id и снимком capability.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use tracing::error;
 
@@ -15,7 +15,7 @@ impl SessionClient {
     // Фиксируем session id один раз, чтобы каждое исходящее событие было корректно привязано к сессии.
     pub(super) fn new(
         session_id: SessionId,
-        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        client_capabilities: Arc<RwLock<ClientCapabilities>>,
     ) -> Self {
         Self {
             session_id,
@@ -26,23 +26,22 @@ impl SessionClient {
     }
 
     pub(super) fn supports_terminal_output(&self) -> bool {
-        self.client_capabilities
-            .lock()
-            .unwrap()
-            .meta
-            .as_ref()
-            .and_then(|meta| meta.get("terminal_output"))
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false)
+        read_client_capabilities(&self.client_capabilities, |caps| {
+            caps.meta
+                .as_ref()
+                .and_then(|meta| meta.get("terminal_output"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+        })
     }
 
     pub(super) fn supports_buffer_writeback(&self) -> bool {
         env_flag("CODEX_ACP_SYNC_EDIT_BUFFERS")
-            && self.client_capabilities.lock().unwrap().fs.write_text_file
+            && read_client_capabilities(&self.client_capabilities, |caps| caps.fs.write_text_file)
     }
 
     pub(super) fn supports_read_text_file(&self) -> bool {
-        self.client_capabilities.lock().unwrap().fs.read_text_file
+        read_client_capabilities(&self.client_capabilities, |caps| caps.fs.read_text_file)
     }
 
     pub(super) async fn send_notification(&self, update: SessionUpdate) {
@@ -138,6 +137,18 @@ impl SessionClient {
             agent_client_protocol::UsageUpdate::new(used, size),
         ))
         .await;
+    }
+}
+
+// RwLock-читатель, устойчивый к poisoning: если writer panic-нул, мы всё равно отдаём
+// последний успешно записанный snapshot capabilities.
+fn read_client_capabilities<R>(
+    capabilities: &RwLock<ClientCapabilities>,
+    reader: impl FnOnce(&ClientCapabilities) -> R,
+) -> R {
+    match capabilities.read() {
+        Ok(guard) => reader(&guard),
+        Err(poison) => reader(&poison.into_inner()),
     }
 }
 

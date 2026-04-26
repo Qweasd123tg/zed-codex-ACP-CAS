@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use agent_client_protocol::{
@@ -404,7 +404,7 @@ impl Thread {
         codex_home: PathBuf,
         bundled_skills_enabled: bool,
         workspace_cwd: PathBuf,
-        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
         session_skills_summary: ContextSelectorSummary,
@@ -466,13 +466,14 @@ impl Thread {
                 active_turn_saw_plan_item: false,
                 active_turn_saw_plan_delta: false,
                 started_tool_calls: HashSet::new(),
-                completed_turn_ids: HashSet::new(),
+                last_completed_turn_id: None,
                 turn_plan_updates_seen: HashSet::new(),
                 fallback_plan: None,
                 file_change_locations: HashMap::new(),
                 file_change_started_changes: HashMap::new(),
                 file_change_before_contents: HashMap::new(),
                 latest_turn_diff: None,
+                turn_diff_history: Vec::new(),
                 file_change_paths_this_turn: HashSet::new(),
                 synced_paths_this_turn: HashSet::new(),
                 last_plan_steps: Vec::new(),
@@ -492,7 +493,7 @@ impl Thread {
         &self,
         config: &Config,
         cwd: PathBuf,
-        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        client_capabilities: Arc<RwLock<ClientCapabilities>>,
         requested_session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         requested_session_mcp_summary: ContextSelectorSummary,
     ) -> Result<(SessionId, Self), Error> {
@@ -579,7 +580,7 @@ impl Thread {
     async fn build_resumed_thread(
         session_id: SessionId,
         config: &Config,
-        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
         mut app: AppServerProcess,
@@ -642,7 +643,7 @@ impl Thread {
         codex_home: PathBuf,
         bundled_skills_enabled: bool,
         cwd: PathBuf,
-        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
         session_skills_summary: ContextSelectorSummary,
@@ -687,7 +688,7 @@ impl Thread {
         session_id: SessionId,
         config: &Config,
         cwd: PathBuf,
-        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
     ) -> Result<Self, Error> {
@@ -724,7 +725,7 @@ impl Thread {
     pub async fn start_session(
         config: &Config,
         cwd: PathBuf,
-        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
     ) -> Result<(SessionId, Self), Error> {
@@ -755,7 +756,7 @@ impl Thread {
         session_id: SessionId,
         config: &Config,
         cwd: PathBuf,
-        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
     ) -> Result<Self, Error> {
@@ -807,7 +808,7 @@ impl Thread {
         &self,
         config: &Config,
         cwd: PathBuf,
-        client_capabilities: Arc<Mutex<ClientCapabilities>>,
+        client_capabilities: Arc<RwLock<ClientCapabilities>>,
         requested_session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         requested_session_mcp_summary: ContextSelectorSummary,
     ) -> Result<(SessionId, Self), Error> {

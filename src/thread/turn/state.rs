@@ -1,7 +1,5 @@
 //! Хелперы учёта завершения turn для дедупликации финальных событий по turn id.
 
-use std::collections::HashSet;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TurnCompletionDisposition {
     Accepted,
@@ -9,9 +7,11 @@ pub(super) enum TurnCompletionDisposition {
     UnexpectedTurnId,
 }
 
-// Отслеживаем завершённые turn id, чтобы игнорировать дубликаты terminal-уведомлений.
+// Дедупликация терминальных уведомлений текущего turn. Нам достаточно помнить только
+// последний принятый turn_id: другие id отсекаются проверкой expected == completed,
+// а двойной приём одного id — сравнением с last_completed.
 pub(super) fn register_turn_completion(
-    completed_turn_ids: &mut HashSet<String>,
+    last_completed_turn_id: &mut Option<String>,
     expected_turn_id: &str,
     completed_turn_id: &str,
 ) -> TurnCompletionDisposition {
@@ -19,39 +19,38 @@ pub(super) fn register_turn_completion(
         return TurnCompletionDisposition::UnexpectedTurnId;
     }
 
-    if !completed_turn_ids.insert(completed_turn_id.to_string()) {
+    if last_completed_turn_id.as_deref() == Some(completed_turn_id) {
         return TurnCompletionDisposition::Duplicate;
     }
 
+    *last_completed_turn_id = Some(completed_turn_id.to_string());
     TurnCompletionDisposition::Accepted
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::{TurnCompletionDisposition, register_turn_completion};
 
     #[test]
     fn register_turn_completion_accepts_first_completion() {
-        let mut completed_turn_ids = HashSet::new();
-        let result = register_turn_completion(&mut completed_turn_ids, "turn_1", "turn_1");
+        let mut last_completed: Option<String> = None;
+        let result = register_turn_completion(&mut last_completed, "turn_1", "turn_1");
         assert_eq!(result, TurnCompletionDisposition::Accepted);
-        assert!(completed_turn_ids.contains("turn_1"));
+        assert_eq!(last_completed.as_deref(), Some("turn_1"));
     }
 
     #[test]
     fn register_turn_completion_detects_duplicate() {
-        let mut completed_turn_ids = HashSet::from(["turn_1".to_string()]);
-        let result = register_turn_completion(&mut completed_turn_ids, "turn_1", "turn_1");
+        let mut last_completed = Some("turn_1".to_string());
+        let result = register_turn_completion(&mut last_completed, "turn_1", "turn_1");
         assert_eq!(result, TurnCompletionDisposition::Duplicate);
     }
 
     #[test]
     fn register_turn_completion_rejects_unexpected_turn_id() {
-        let mut completed_turn_ids = HashSet::new();
-        let result = register_turn_completion(&mut completed_turn_ids, "turn_1", "turn_2");
+        let mut last_completed: Option<String> = None;
+        let result = register_turn_completion(&mut last_completed, "turn_1", "turn_2");
         assert_eq!(result, TurnCompletionDisposition::UnexpectedTurnId);
-        assert!(completed_turn_ids.is_empty());
+        assert!(last_completed.is_none());
     }
 }

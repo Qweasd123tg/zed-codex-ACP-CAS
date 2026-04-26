@@ -82,6 +82,7 @@ Sub-agent and collaboration tool-call rendering:
   - `/compact`
   - `/undo`
   - `/plan`
+  - `/diff`
   - hidden compatibility alias `/delete -> /archive`
 - Better thread title handling for resume/archive/rename/fork flows
 - ACP `session/fork` surfaced on top of native `thread/fork`
@@ -111,6 +112,11 @@ Sub-agent and collaboration tool-call rendering:
 - Less turn-completion lock contention: turn diff rendering now runs outside the main session mutex and optional ACP buffer writeback skips paths already reserved by file-change lifecycle
 - Less sparse completed tool cards: no-output commands, MCP results, and completed collab/sub-agent calls now keep a short visible summary while retaining raw details
 - Less transport serialization during quiet backend periods: app-server stdout now has a dedicated reader/inbox, so cancel, interrupt, post-turn drain, and thread-switch cleanup do not sit behind one long `next_message()` mutex wait
+- `/diff` slash-command: replays the diff of the last turn as an ACP diff card, with `/diff --session`, `/diff --last N`, and optional path filters for wider or narrower review. Diff history is kept in-memory per thread and is cleared on thread switch
+- Safer `turn/interrupt` error surfacing: if the backend rejects a cancel request (for example because the turn already finished), the adapter now surfaces that as "not interrupted" in its internal state instead of leaving the UI stuck in Cancelling while the turn continues
+- Bounded turn-completion dedup state: completed turn ids are no longer accumulated in an unbounded `HashSet` per session; only the last accepted turn id is kept, which is enough to deduplicate terminal notifications without leaking memory across long-running sessions
+- Poisoning-safe client-capabilities access: `ClientCapabilities` is now behind `RwLock` instead of `Mutex`, and both reader and writer tolerate lock poisoning. A panic in one session no longer poisons capabilities for every other session
+- Quieter but honest transport drain: during post-turn and background drain the adapter still ignores stop-bearing notifications (that is the drain contract), but it now logs them as `warn!` with turn-id and drain context instead of silently dropping them via `let _ = ...`
 
 ## Why Use This Fork
 
@@ -344,11 +350,10 @@ Current Zed-specific UI caveats are tracked in [docs/upstream-feature-matrix.md]
 Near-term work:
 
 - Keep refining the `Context` selector and `/status` report where it helps daily use
-- Decide the next surfaced preview flow after status, most likely `thread/read` or `/diff`
+- Decide the next surfaced preview flow after `/diff`, most likely `thread/read`
 
 Later candidates:
 
-- `/diff`
 - `/debug-config`
 - `thread/read`
 

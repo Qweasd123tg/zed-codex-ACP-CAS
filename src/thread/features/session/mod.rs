@@ -6,6 +6,7 @@ use chrono::Utc;
 use crate::thread::{SessionClient, ThreadInner, ThreadItem};
 
 pub(in crate::thread) mod controls;
+pub(in crate::thread) mod diff;
 pub(in crate::thread) mod events;
 pub(in crate::thread) mod modes;
 pub(in crate::thread) mod review;

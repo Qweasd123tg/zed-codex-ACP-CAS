@@ -24,7 +24,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
 use tracing::{debug, info};
@@ -40,7 +40,7 @@ const EXT_THREAD_ROLLBACK_METHODS: [&str; 4] = [
 
 pub struct CodexAgent {
     auth_manager: Arc<AuthManager>,
-    client_capabilities: Arc<Mutex<ClientCapabilities>>,
+    client_capabilities: Arc<RwLock<ClientCapabilities>>,
     config: Config,
     auto_restore_enabled: bool,
     startup_instant: Instant,
@@ -189,7 +189,12 @@ impl Agent for CodexAgent {
         } = request;
 
         debug!("Received initialize request with protocol version {protocol_version:?}");
-        *self.client_capabilities.lock().unwrap() = client_capabilities;
+        // RwLock write-path: poisoning означало бы panic в этом же write, которого у нас нет.
+        // Если читатель panic-нул с read guard — продолжить с текущим capabilities безопасно.
+        match self.client_capabilities.write() {
+            Ok(mut guard) => *guard = client_capabilities,
+            Err(poison) => *poison.into_inner() = client_capabilities,
+        }
 
         let mut capabilities = AgentCapabilities::new()
             .prompt_capabilities(PromptCapabilities::new().embedded_context(true).image(true))

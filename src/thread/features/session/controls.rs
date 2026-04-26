@@ -365,6 +365,8 @@ async fn apply_thread_switch(
         thread.agent_role.clone(),
     );
     inner.carryover_plan_steps = None;
+    // История turn-diff принадлежит прошлому треду; после переключения её показывать нельзя.
+    inner.turn_diff_history.clear();
     inner.reset_turn_transient_state();
     inner.reasoning_effort = crate::thread::session_config::resolve_reasoning_effort(
         &inner.models,

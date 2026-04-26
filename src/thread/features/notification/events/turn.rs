@@ -91,7 +91,7 @@ pub(in crate::thread) async fn emit_turn_completed(
     turn: AppTurn,
 ) -> Option<StopReason> {
     match turn_state::register_turn_completion(
-        &mut inner.completed_turn_ids,
+        &mut inner.last_completed_turn_id,
         expected_turn_id,
         &turn.id,
     ) {

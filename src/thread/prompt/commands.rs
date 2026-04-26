@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{Error, SessionCommand, StopReason, ThreadInner};
+use super::{DiffScope, Error, SessionCommand, StopReason, ThreadInner};
 use crate::thread::features::{plan::parse_collaboration_mode, resume, session};
 use agent_client_protocol::{
     AvailableCommand, AvailableCommandInput, ContentBlock, EmbeddedResource,
@@ -155,6 +155,10 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
+    if let Some(rest) = slash_command_rest(text, "/diff") {
+        return Some(parse_diff_args(rest));
+    }
+
     let mut parts = text.split_whitespace();
     match parts.next()? {
         "/threads" => Some(SessionCommand::Threads),
@@ -169,6 +173,43 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         }
         _ => None,
     }
+}
+
+fn parse_diff_args(rest: &str) -> SessionCommand {
+    let mut scope = DiffScope::LastTurn;
+    let mut paths: Vec<String> = Vec::new();
+    let mut tokens = rest.split_whitespace().peekable();
+
+    while let Some(token) = tokens.next() {
+        match token {
+            "--session" | "--all" => {
+                scope = DiffScope::Session;
+            }
+            "--last" => {
+                // Следующий токен ожидается как положительное число; иначе трактуем как путь.
+                match tokens.peek().and_then(|value| value.parse::<u32>().ok()) {
+                    Some(count) if count > 0 => {
+                        tokens.next();
+                        scope = if count == 1 {
+                            DiffScope::LastTurn
+                        } else {
+                            DiffScope::LastN(count)
+                        };
+                    }
+                    _ => {
+                        // `--last` без числа: просто оставим scope как есть и трактуем как ошибку парса
+                        // (форматтер обработает сообщение) — сохраняем токен как путь-подсказку.
+                        paths.push(token.to_string());
+                    }
+                }
+            }
+            other => {
+                paths.push(other.to_string());
+            }
+        }
+    }
+
+    SessionCommand::Diff { scope, paths }
 }
 
 fn extract_command_text(prompt: &[ContentBlock]) -> Option<&str> {
@@ -279,6 +320,10 @@ pub(super) async fn dispatch_session_command(
         SessionCommand::Rename { name } => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_rename_command(inner, name).await?,
         )),
+        SessionCommand::Diff { scope, paths } => Ok(CommandDispatchOutcome::Stop(
+            crate::thread::features::session::diff::handle_diff_command(inner, scope, paths)
+                .await?,
+        )),
     }
 }
 
@@ -356,6 +401,13 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
         AvailableCommand::new("rename", "Rename the current thread").input(
             AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("new thread name")),
         ),
+        AvailableCommand::new(
+            "diff",
+            "Show the diff of the last turn, or pass `--session`, `--last N`, or path filters",
+        )
+        .input(AvailableCommandInput::Unstructured(
+            UnstructuredCommandInput::new("optional flags and/or path filters"),
+        )),
     ]
 }
 

@@ -36,54 +36,33 @@ pub(super) async fn handle_server_request(
         ServerRequest::ToolRequestUserInput { request_id, params } => {
             approvals::user_input::handle_tool_request_user_input(inner, request_id, params).await
         }
-        ServerRequest::McpServerElicitationRequest { request_id, .. } => {
-            let mut app = inner.app.lock().await;
-            protocol_contract::reject_unsupported_server_request(
-                &mut app,
-                request_id,
-                "mcpServer/elicitation/request",
-            )
-            .await
-        }
         ServerRequest::PermissionsRequestApproval { request_id, params } => {
             approvals::permissions::handle_permissions_request_approval(inner, request_id, params)
                 .await
         }
+        ServerRequest::McpServerElicitationRequest { request_id, .. } => {
+            reject_unsupported(inner, request_id, "mcpServer/elicitation/request").await
+        }
         ServerRequest::DynamicToolCall { request_id, .. } => {
-            let mut app = inner.app.lock().await;
-            protocol_contract::reject_unsupported_server_request(
-                &mut app,
-                request_id,
-                "item/tool/call",
-            )
-            .await
+            reject_unsupported(inner, request_id, "item/tool/call").await
         }
         ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } => {
-            let mut app = inner.app.lock().await;
-            protocol_contract::reject_unsupported_server_request(
-                &mut app,
-                request_id,
-                "account/chatgptAuthTokens/refresh",
-            )
-            .await
+            reject_unsupported(inner, request_id, "account/chatgptAuthTokens/refresh").await
         }
         ServerRequest::ApplyPatchApproval { request_id, .. } => {
-            let mut app = inner.app.lock().await;
-            protocol_contract::reject_unsupported_server_request(
-                &mut app,
-                request_id,
-                "applyPatchApproval",
-            )
-            .await
+            reject_unsupported(inner, request_id, "applyPatchApproval").await
         }
         ServerRequest::ExecCommandApproval { request_id, .. } => {
-            let mut app = inner.app.lock().await;
-            protocol_contract::reject_unsupported_server_request(
-                &mut app,
-                request_id,
-                "execCommandApproval",
-            )
-            .await
+            reject_unsupported(inner, request_id, "execCommandApproval").await
         }
     }
+}
+
+async fn reject_unsupported(
+    inner: &mut ThreadInner,
+    request_id: codex_app_server_protocol::RequestId,
+    method: &str,
+) -> Result<(), Error> {
+    let mut app = inner.app.lock().await;
+    protocol_contract::reject_unsupported_server_request(&mut app, request_id, method).await
 }

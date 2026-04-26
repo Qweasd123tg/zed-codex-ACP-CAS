@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, RwLock};
 
 use agent_client_protocol::{
     AvailableCommandsUpdate, Client, ClientCapabilities, ConfigOptionUpdate, ContentChunk,
@@ -112,6 +112,9 @@ const PLAN_IMPLEMENTATION_TITLE: &str = "Implement this plan?";
 const PLAN_IMPLEMENTATION_PROMPT: &str = "Implement the plan.";
 const DEV_NULL: &str = "/dev/null";
 const TURN_DIFF_TOOL_CALL_PREFIX: &str = "turn-diff-";
+const DIFF_COMMAND_TOOL_CALL_PREFIX: &str = "diff-command-";
+// Держим историю turn-diff ограниченной, чтобы долгие сессии не раздували память.
+const TURN_DIFF_HISTORY_LIMIT: usize = 32;
 
 // Публичный handle потока: оборачивает изменяемое состояние сессии и сигнал отмены.
 pub struct Thread {
@@ -157,13 +160,14 @@ struct ThreadInner {
     active_turn_saw_plan_item: bool,
     active_turn_saw_plan_delta: bool,
     started_tool_calls: HashSet<String>,
-    completed_turn_ids: HashSet<String>,
+    last_completed_turn_id: Option<String>,
     turn_plan_updates_seen: HashSet<String>,
     fallback_plan: Option<FallbackPlanState>,
     file_change_locations: HashMap<String, Vec<PathBuf>>,
     file_change_started_changes: HashMap<String, Vec<codex_app_server_protocol::FileUpdateChange>>,
     file_change_before_contents: HashMap<String, HashMap<PathBuf, Option<String>>>,
     latest_turn_diff: Option<String>,
+    turn_diff_history: Vec<TurnDiffRecord>,
     file_change_paths_this_turn: HashSet<PathBuf>,
     synced_paths_this_turn: HashSet<PathBuf>,
     last_plan_steps: Vec<String>,
@@ -207,6 +211,16 @@ struct FallbackPlanState {
     steps: Vec<String>,
 }
 
+// Снимок финализированного turn-diff, сохраняемый для `/diff`.
+// Храним сырой unified-diff: перепарсим его, когда пользователь явно попросит.
+#[derive(Clone, Debug)]
+struct TurnDiffRecord {
+    turn_id: String,
+    // Секунды с UNIX epoch. Записываем момент финализации turn.
+    recorded_at: u64,
+    unified_diff: String,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 // Slash-команды, которые распознаются до обычного выполнения промпта.
 enum SessionCommand {
@@ -247,6 +261,17 @@ enum SessionCommand {
     Status {
         args: Option<String>,
     },
+    Diff {
+        scope: DiffScope,
+        paths: Vec<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DiffScope {
+    LastTurn,
+    Session,
+    LastN(u32),
 }
 
 #[derive(Clone)]
@@ -254,7 +279,7 @@ enum SessionCommand {
 struct SessionClient {
     session_id: SessionId,
     client: Arc<dyn Client>,
-    client_capabilities: Arc<Mutex<ClientCapabilities>>,
+    client_capabilities: Arc<RwLock<ClientCapabilities>>,
     suppress_text_output: bool,
 }
 

@@ -28,7 +28,7 @@ use super::session_config::{
 use super::turn_diff::parse_turn_unified_diff_files;
 use super::unified_diff::{apply_unified_diff_to_text, unified_diff_to_old_new};
 use super::{
-    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID,
+    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID, DiffScope,
     EditApprovalMode, FallbackPlanPhase, FallbackPlanState, MAX_VISIBLE_PLAN_ENTRIES,
     NONE_OF_THE_ABOVE, PLAN_SESSION_MODE_ID, SessionCommand,
 };
@@ -215,6 +215,78 @@ fn parses_rename_command_without_name() {
     assert_eq!(
         parse_session_command(&prompt),
         Some(SessionCommand::Rename { name: None })
+    );
+}
+
+#[test]
+fn parses_diff_command_without_args() {
+    let prompt: Vec<ContentBlock> = vec!["/diff".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Diff {
+            scope: DiffScope::LastTurn,
+            paths: Vec::new(),
+        })
+    );
+}
+
+#[test]
+fn parses_diff_command_with_session_flag() {
+    let prompt: Vec<ContentBlock> = vec!["/diff --session".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Diff {
+            scope: DiffScope::Session,
+            paths: Vec::new(),
+        })
+    );
+}
+
+#[test]
+fn parses_diff_command_with_last_n_flag() {
+    let prompt: Vec<ContentBlock> = vec!["/diff --last 3".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Diff {
+            scope: DiffScope::LastN(3),
+            paths: Vec::new(),
+        })
+    );
+}
+
+#[test]
+fn parses_diff_command_last_one_collapses_to_last_turn() {
+    let prompt: Vec<ContentBlock> = vec!["/diff --last 1".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Diff {
+            scope: DiffScope::LastTurn,
+            paths: Vec::new(),
+        })
+    );
+}
+
+#[test]
+fn parses_diff_command_with_path_filter() {
+    let prompt: Vec<ContentBlock> = vec!["/diff src/lib.rs".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Diff {
+            scope: DiffScope::LastTurn,
+            paths: vec!["src/lib.rs".to_string()],
+        })
+    );
+}
+
+#[test]
+fn parses_diff_command_with_session_flag_and_paths() {
+    let prompt: Vec<ContentBlock> = vec!["/diff --session src/lib.rs src/main.rs".into()];
+    assert_eq!(
+        parse_session_command(&prompt),
+        Some(SessionCommand::Diff {
+            scope: DiffScope::Session,
+            paths: vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
+        })
     );
 }
 

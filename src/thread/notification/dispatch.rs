@@ -84,8 +84,19 @@ async fn handle_drain_message(
 ) -> Result<(), Error> {
     match message {
         codex_app_server_protocol::JSONRPCMessage::Notification(notification) => {
-            let _ =
-                notification::handle_notification(inner, notification, expected_turn_id).await?;
+            // Drain намеренно не продвигает turn state: если notification внезапно вернул
+            // Stop-reason (например, поздний TurnCompleted чужого turn или Interrupted),
+            // засветим это в логах — молча терять такой сигнал значит скрыть баг.
+            if let Some(stop_reason) =
+                notification::handle_notification(inner, notification, expected_turn_id).await?
+            {
+                warn!(
+                    ?stop_reason,
+                    context = drain_context,
+                    expected_turn_id,
+                    "drain received a stop-bearing notification; ignoring for drain flow"
+                );
+            }
         }
         codex_app_server_protocol::JSONRPCMessage::Request(request) => {
             warn!(

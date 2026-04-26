@@ -5,18 +5,18 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 use crate::thread::{
-    DEV_NULL, Diff, SessionClient, TURN_DIFF_TOOL_CALL_PREFIX, ThreadInner, ToolCall,
-    ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, ToolKind, TurnDiffUpdatedNotification, read_file_text,
-    unified_diff_to_old_new,
+    DEV_NULL, Diff, SessionClient, TURN_DIFF_HISTORY_LIMIT, TURN_DIFF_TOOL_CALL_PREFIX,
+    ThreadInner, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind, TurnDiffRecord, TurnDiffUpdatedNotification,
+    read_file_text, unified_diff_to_old_new,
 };
 
 #[derive(Clone, Debug)]
-pub(super) struct TurnUnifiedDiffFile {
-    pub(super) path: PathBuf,
-    pub(super) old_text: String,
-    pub(super) new_text: String,
-    pub(super) is_delete: bool,
+pub(in crate::thread) struct TurnUnifiedDiffFile {
+    pub(in crate::thread) path: PathBuf,
+    pub(in crate::thread) old_text: String,
+    pub(in crate::thread) new_text: String,
+    pub(in crate::thread) is_delete: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +62,11 @@ pub(super) fn prepare_finalized_turn_diff_snapshot(
     if parsed_files.is_empty() {
         return None;
     }
+
+    // Сохраняем копию в истории ещё до resolution путей: /diff работает с сырым
+    // unified-diff, а не с перевязанными file paths. Дедуплицируем по turn_id,
+    // чтобы повторные finalize одного turn (например, после reconnect) не раздували список.
+    record_turn_diff(inner, turn_id, diff.clone());
     let repo_root = find_repo_root(&inner.workspace_cwd);
     let mut resolved_files = Vec::with_capacity(parsed_files.len());
     let mut sync_paths = Vec::new();
@@ -315,4 +320,49 @@ fn find_repo_root(workspace_cwd: &Path) -> Option<PathBuf> {
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists())
         .map(Path::to_path_buf)
+}
+
+fn record_turn_diff(inner: &mut ThreadInner, turn_id: &str, unified_diff: String) {
+    let recorded_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    // Если тот же turn уже был финализирован — обновляем запись, а не плодим дубли.
+    if let Some(existing) = inner
+        .turn_diff_history
+        .iter_mut()
+        .find(|record| record.turn_id == turn_id)
+    {
+        existing.unified_diff = unified_diff;
+        existing.recorded_at = recorded_at;
+        return;
+    }
+
+    inner.turn_diff_history.push(TurnDiffRecord {
+        turn_id: turn_id.to_string(),
+        recorded_at,
+        unified_diff,
+    });
+    // Ограничиваем память за долгую сессию: первые записи (самые старые) вытесняются.
+    let overflow = inner
+        .turn_diff_history
+        .len()
+        .saturating_sub(TURN_DIFF_HISTORY_LIMIT);
+    if overflow > 0 {
+        inner.turn_diff_history.drain(0..overflow);
+    }
+}
+
+// Позволяет /diff переиспользовать тот же парсер, что и finalize_turn_diff.
+pub(in crate::thread) fn parse_turn_diff_files(unified_diff: &str) -> Vec<TurnUnifiedDiffFile> {
+    parse_turn_unified_diff_files(unified_diff)
+}
+
+// Совмещает разрешение путей (workspace_cwd + .git root) с тем, что использует turn-diff.
+pub(in crate::thread) fn resolve_turn_diff_absolute_path(
+    workspace_cwd: &Path,
+    path: &Path,
+) -> PathBuf {
+    let repo_root = find_repo_root(workspace_cwd);
+    resolve_turn_diff_path(workspace_cwd, repo_root.as_deref(), path)
 }
