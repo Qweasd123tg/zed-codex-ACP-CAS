@@ -105,7 +105,7 @@ Sub-agent and collaboration tool-call rendering:
 - Less mutex hold time while waiting for file-change approval prompts
 - Less chat stall while command approval prompts are pending
 - Faster file-change start cards with ACP snapshot priming moved out of the main session mutex
-- Less mutex hold time while final file-change diff is published; ACP buffer writeback is opt-in via `CODEX_ACP_SYNC_EDIT_BUFFERS=1`
+- Less mutex hold time while final file-change diff is published; ACP buffer writeback still runs outside the main session mutex and can be disabled via `CODEX_ACP_DISABLE_SYNC_EDIT_BUFFERS=1`
 - Safer transport drain: stale server requests are rejected during post-turn and pre-prompt cleanup instead of triggering late approvals
 - Less reconnect spam: reconnect warnings now collapse into one normalized status line while reconnect-assisted stalled turns still abort cleanly
 - Less brittle transport cleanup: background drain and thread-switch flush now wait for the queue to go quiet instead of assuming `64` messages or one tiny timeout is enough

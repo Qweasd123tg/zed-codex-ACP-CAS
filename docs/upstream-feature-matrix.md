@@ -121,7 +121,7 @@
 Отдельное UX-направление, которое стоит держать рядом с этим shortlist:
 
 - Канонический status-pane теперь уже surfaced: есть отдельный `/status`, а нижний `Context` selector держит `status`, `ctx %`, `MCP`, `skills`, `plugins` и limits как read-only summary entries с короткой строкой в списке и расширенным `description`. `Status` intentionally держит на кнопке только суммарный `used`; detail/report раскрывает workspace, account и `used / in / out`. Нативный context circle остается Zed-side UX и не должен считаться закрытым только из-за adapter-side `UsageUpdate`.
-- Следующий вопрос теперь не “как ещё назвать status-команду”, а какие новые read-only preview flows реально полезно поднимать рядом с уже существующим `/status` и selector UX. Кандидаты из этой зоны сейчас в первую очередь `thread/read` и `/diff`.
+- Следующий вопрос теперь не “как ещё назвать status-команду”, а какие новые read-only preview flows реально полезно поднимать рядом с уже существующим `/status`, `/diff` и selector UX. Основной кандидат из этой зоны сейчас `thread/read`.
 - Для нового чистого чата канонический путь теперь native `Zed` `New Thread`. In-place switch в рантайме сознательно оставлен только для `/fork` и archive-triggered replacement; пока сам `Zed` не научится reset'ить ACP session view, старые сообщения в sidebar останутся видимыми после таких сценариев.
 
 ## 4.1 Текущие Ограничения Zed UI
@@ -142,7 +142,6 @@
 
 ## 5. Скорее Вторым Эшелоном
 
-- `/diff`, если появится понятный UX-контракт: показывать git diff рабочего дерева, session-local diff, или оба режима.
 - `/debug-config` как developer-facing dump текущего runtime/config состояния.
 - `thread/read` surfaced UX для preview старых тредов без немедленного `resume`.
 

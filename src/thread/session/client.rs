@@ -36,7 +36,7 @@ impl SessionClient {
     }
 
     pub(super) fn supports_buffer_writeback(&self) -> bool {
-        env_flag("CODEX_ACP_SYNC_EDIT_BUFFERS")
+        !env_flag("CODEX_ACP_DISABLE_SYNC_EDIT_BUFFERS")
             && read_client_capabilities(&self.client_capabilities, |caps| caps.fs.write_text_file)
     }
 

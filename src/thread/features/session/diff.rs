@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use agent_client_protocol::{
     Diff, Error, StopReason, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation,
-    ToolCallStatus, ToolKind,
+    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 
 use crate::thread::turn_diff::{
@@ -67,7 +67,9 @@ pub(in crate::thread) async fn handle_diff_command(
         return Ok(StopReason::EndTurn);
     }
 
-    let tool_call_id = next_diff_tool_call_id(inner);
+    let tool_call_key = next_diff_tool_call_key(inner);
+    let tool_call_id = ToolCallId::new(tool_call_key.clone());
+    let tool_call_title = diff_card_title(scope, records.len());
     let summary = build_summary_text(scope, records.len(), &aggregated);
     inner.client.send_agent_text(summary).await;
 
@@ -90,16 +92,30 @@ pub(in crate::thread) async fn handle_diff_command(
         })
         .collect();
 
+    inner.started_tool_calls.insert(tool_call_key.clone());
     inner
         .client
         .send_tool_call(
-            ToolCall::new(tool_call_id, diff_card_title(scope, records.len()))
+            ToolCall::new(tool_call_id.clone(), tool_call_title.clone())
                 .kind(ToolKind::Edit)
+                .status(ToolCallStatus::InProgress)
+                .locations(locations.clone())
+                .content(content.clone()),
+        )
+        .await;
+    inner
+        .client
+        .send_tool_call_update(ToolCallUpdate::new(
+            tool_call_id,
+            ToolCallUpdateFields::new()
+                .kind(ToolKind::Edit)
+                .title(tool_call_title)
                 .status(ToolCallStatus::Completed)
                 .locations(locations)
                 .content(content),
-        )
+        ))
         .await;
+    inner.started_tool_calls.remove(&tool_call_key);
 
     Ok(StopReason::EndTurn)
 }
@@ -293,16 +309,16 @@ fn plural(count: usize) -> &'static str {
 
 // Тоол-коллы для /diff уникальны per invocation: используем длину истории + размер scope
 // как суффикс, чтобы повторные /diff подряд давали разные tool-card id.
-fn next_diff_tool_call_id(inner: &ThreadInner) -> ToolCallId {
+fn next_diff_tool_call_key(inner: &ThreadInner) -> String {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0);
-    ToolCallId::new(format!(
+    format!(
         "{DIFF_COMMAND_TOOL_CALL_PREFIX}{}-{}",
         inner.turn_diff_history.len(),
         nonce
-    ))
+    )
 }
 
 #[cfg(test)]
