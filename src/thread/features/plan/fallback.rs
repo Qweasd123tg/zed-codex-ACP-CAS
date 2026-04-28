@@ -1,6 +1,8 @@
 //! Fallback state-machine plan-режима (инициализация и переходы фаз).
 
-use agent_client_protocol::{Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, SessionUpdate};
+use agent_client_protocol::schema::{
+    Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, SessionUpdate,
+};
 use codex_protocol::config_types::ModeKind;
 
 use crate::thread::{FallbackPlanPhase, FallbackPlanState, MAX_VISIBLE_PLAN_ENTRIES, ThreadInner};

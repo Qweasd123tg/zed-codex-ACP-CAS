@@ -5,14 +5,17 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
 
 use agent_client_protocol::{
-    AvailableCommandsUpdate, Client, ClientCapabilities, ConfigOptionUpdate, ContentChunk,
-    CurrentModeUpdate, Diff, Error, ListSessionsResponse, LoadSessionResponse, ModelId, ModelInfo,
-    PermissionOption, PermissionOptionKind, ReadTextFileRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, SelectedPermissionOutcome, SessionConfigId, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigSelectOption, SessionId, SessionMode, SessionModeId,
-    SessionModeState, SessionModelState, SessionNotification, SessionUpdate, StopReason, ToolCall,
-    ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, ToolKind, WriteTextFileRequest,
+    Client, ConnectionTo, Error,
+    schema::{
+        AvailableCommandsUpdate, ClientCapabilities, ConfigOptionUpdate, ContentChunk,
+        CurrentModeUpdate, Diff, ListSessionsResponse, LoadSessionResponse, ModelId, ModelInfo,
+        PermissionOption, PermissionOptionKind, ReadTextFileRequest, RequestPermissionOutcome,
+        RequestPermissionRequest, SelectedPermissionOutcome, SessionConfigId, SessionConfigOption,
+        SessionConfigOptionCategory, SessionConfigSelectOption, SessionId, SessionMode,
+        SessionModeId, SessionModeState, SessionModelState, SessionNotification, SessionUpdate,
+        StopReason, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
+        ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate, WriteTextFileRequest,
+    },
 };
 use codex_app_server_protocol::{
     AskForApproval as AppAskForApproval, ItemCompletedNotification, ItemStartedNotification,
@@ -29,7 +32,6 @@ use codex_protocol::protocol::{AskForApproval, SandboxPolicy};
 use codex_utils_approval_presets::{ApprovalPreset, builtin_approval_presets};
 pub(super) use tracing::warn;
 
-use crate::ACP_CLIENT;
 use crate::app_server::AppServerProcess;
 
 // Делим обработчики по подмодулям, чтобы корневой модуль оставался читаемым.
@@ -278,7 +280,7 @@ enum DiffScope {
 // Адаптер ACP-клиента, привязанный к одному session id для исходящих событий.
 struct SessionClient {
     session_id: SessionId,
-    client: Arc<dyn Client>,
+    client: ConnectionTo<Client>,
     client_capabilities: Arc<RwLock<ClientCapabilities>>,
     suppress_text_output: bool,
 }

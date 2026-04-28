@@ -1,21 +1,17 @@
 //! Codex ACP — реализация Agent Client Protocol для Codex.
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
-use agent_client_protocol::AgentSideConnection;
+use agent_client_protocol::ByteStreams;
 use codex_core::config::{Config, ConfigOverrides};
 use codex_utils_cli::CliConfigOverrides;
+use std::io::Result as IoResult;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
-use std::{io::Result as IoResult, rc::Rc};
-use tokio::task::LocalSet;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing_subscriber::EnvFilter;
 
 mod app_server;
 mod codex_agent;
 mod thread;
-
-pub static ACP_CLIENT: OnceLock<Arc<AgentSideConnection>> = OnceLock::new();
 
 /// Запускает ACP-агент Codex.
 ///
@@ -61,28 +57,15 @@ pub async fn run_main(
             })?;
 
     // Создаём реализацию Agent с каналом уведомлений.
-    let agent = Rc::new(codex_agent::CodexAgent::new(config));
+    let agent = std::sync::Arc::new(codex_agent::CodexAgent::new(config));
 
     let stdin = tokio::io::stdin().compat();
     let stdout = tokio::io::stdout().compat_write();
 
-    // Запускаем I/O-задачу для фактического обмена данными.
-    LocalSet::new()
-        .run_until(async move {
-            // Создаём ACP-соединение.
-            let (client, io_task) = AgentSideConnection::new(agent.clone(), stdout, stdin, |fut| {
-                tokio::task::spawn_local(fut);
-            });
-
-            if ACP_CLIENT.set(Arc::new(client)).is_err() {
-                return Err(std::io::Error::other("ACP client already set"));
-            }
-
-            io_task
-                .await
-                .map_err(|e| std::io::Error::other(format!("ACP I/O error: {e}")))
-        })
-        .await?;
+    agent
+        .serve(ByteStreams::new(stdout, stdin))
+        .await
+        .map_err(|e| std::io::Error::other(format!("ACP error: {e}")))?;
 
     Ok(())
 }

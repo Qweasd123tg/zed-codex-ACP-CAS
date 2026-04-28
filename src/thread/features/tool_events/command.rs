@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use agent_client_protocol::{
+use agent_client_protocol::schema::{
     ToolCall, ToolCallId, ToolCallLocation, ToolCallUpdate, ToolCallUpdateFields,
 };
 use codex_app_server_protocol::{CommandAction, CommandExecutionStatus};

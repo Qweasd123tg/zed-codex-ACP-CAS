@@ -19,6 +19,7 @@ use crate::thread::features::{
         clear_visible_plan_state, has_visible_plan_state, should_clear_visible_plan_for_mode_change,
     },
 };
+use agent_client_protocol::schema::SessionConfigValueId;
 use codex_app_server_protocol::ThreadRollbackParams;
 
 impl Thread {
@@ -112,10 +113,7 @@ impl Thread {
         Ok(())
     }
 
-    pub async fn set_context_control(
-        &self,
-        value: agent_client_protocol::SessionConfigValueId,
-    ) -> Result<(), Error> {
+    pub async fn set_context_control(&self, value: SessionConfigValueId) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
         match value.0.as_ref() {
             SESSION_STATUS_VALUE => {
@@ -193,7 +191,7 @@ impl Thread {
     pub async fn set_config_option(
         &self,
         config_id: SessionConfigId,
-        value: agent_client_protocol::SessionConfigValueId,
+        value: SessionConfigValueId,
     ) -> Result<(), Error> {
         match config_id.0.as_ref() {
             "mode" => self.set_mode(SessionModeId::new(value.0)).await,

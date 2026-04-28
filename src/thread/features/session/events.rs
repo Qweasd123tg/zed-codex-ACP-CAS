@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 
-use agent_client_protocol::SessionUpdate;
+use agent_client_protocol::schema::SessionUpdate;
 use codex_app_server_protocol::UserInput;
 
 use super::session_info_title_update_now;

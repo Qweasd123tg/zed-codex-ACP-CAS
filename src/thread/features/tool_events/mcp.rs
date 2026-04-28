@@ -1,6 +1,8 @@
 //! Live/replay обработка MCP tool-call веток.
 
-use agent_client_protocol::{ToolCall, ToolCallId, ToolCallUpdate, ToolCallUpdateFields, ToolKind};
+use agent_client_protocol::schema::{
+    ToolCall, ToolCallId, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+};
 use codex_app_server_protocol::McpToolCallStatus;
 use serde_json::Value;
 

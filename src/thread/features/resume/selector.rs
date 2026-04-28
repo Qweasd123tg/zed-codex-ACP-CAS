@@ -4,9 +4,12 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_client_protocol::{
-    Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-    SelectedPermissionOutcome, StopReason, ToolCallId, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, ToolKind,
+    Error,
+    schema::{
+        PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+        SelectedPermissionOutcome, StopReason, ToolCallId, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields, ToolKind,
+    },
 };
 use codex_app_server_protocol::{Thread as AppThread, ThreadSortKey};
 use serde_json::json;

@@ -1,6 +1,6 @@
 //! Обработка Plan-item событий (live-complete) и их синхронизация с fallback-plan state.
 
-use agent_client_protocol::{Plan, SessionUpdate};
+use agent_client_protocol::schema::{Plan, SessionUpdate};
 use codex_protocol::config_types::ModeKind;
 
 use crate::thread::ThreadInner;

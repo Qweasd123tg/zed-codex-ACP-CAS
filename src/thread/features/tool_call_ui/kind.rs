@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use agent_client_protocol::ToolKind;
+use agent_client_protocol::schema::ToolKind;
 use codex_app_server_protocol::CommandAction;
 
 // Определяем ToolKind для shell-команды по command_actions и fallback-эвристикам текста команды.

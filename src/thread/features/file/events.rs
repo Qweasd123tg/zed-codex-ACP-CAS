@@ -4,8 +4,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use agent_client_protocol::{
-    ToolCall, ToolCallContent, ToolCallId, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+use agent_client_protocol::schema::{
+    ToolCall, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallUpdate, ToolCallUpdateFields,
+    ToolKind,
 };
 use codex_app_server_protocol::{FileUpdateChange, PatchApplyStatus, PatchChangeKind};
 use tracing::warn;
@@ -17,7 +18,7 @@ pub(in crate::thread) struct FileChangeStartedSnapshot {
     pub(in crate::thread) client: SessionClient,
     pub(in crate::thread) id: String,
     pub(in crate::thread) status: PatchApplyStatus,
-    pub(in crate::thread) locations: Vec<agent_client_protocol::ToolCallLocation>,
+    pub(in crate::thread) locations: Vec<ToolCallLocation>,
     pub(in crate::thread) preview_content: Vec<ToolCallContent>,
     pub(in crate::thread) title: String,
     pub(in crate::thread) prime_paths: Vec<PathBuf>,
@@ -28,7 +29,7 @@ pub(in crate::thread) struct FileChangeCompletedSnapshot {
     pub(in crate::thread) id: String,
     pub(in crate::thread) status: PatchApplyStatus,
     pub(in crate::thread) title: String,
-    pub(in crate::thread) locations: Vec<agent_client_protocol::ToolCallLocation>,
+    pub(in crate::thread) locations: Vec<ToolCallLocation>,
     pub(in crate::thread) workspace_cwd: PathBuf,
     pub(in crate::thread) changes: Vec<FileUpdateChange>,
     pub(in crate::thread) before_contents: HashMap<PathBuf, Option<String>>,

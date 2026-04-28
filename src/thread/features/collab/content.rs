@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::thread::prompt_commands::normalize_preview;
-use agent_client_protocol::ToolCallContent;
+use agent_client_protocol::schema::ToolCallContent;
 use codex_app_server_protocol::{CollabAgentState, CollabAgentTool};
 use serde_json::Value;
 

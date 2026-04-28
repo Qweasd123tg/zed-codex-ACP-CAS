@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use agent_client_protocol::{
-    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
+use agent_client_protocol::schema::{
+    EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio, SessionInfo,
 };
 use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
 use codex_core::plugins::PluginsManager;
@@ -20,10 +20,10 @@ use super::session_config::{
     to_app_sandbox_mode,
 };
 use super::{
-    AppAskForApproval, AppModel, AppSandboxPolicy, AppServerProcess, ClientCapabilities, Config,
-    ContextUsageSource, EditApprovalMode, Error, ListSessionsResponse, ModeKind, ReasoningEffort,
-    ServiceTier, SessionClient, SessionId, Thread, ThreadInner, ThreadListParams, ThreadReadParams,
-    ThreadResumeParams, ThreadSortKey, ThreadStartParams,
+    AppAskForApproval, AppModel, AppSandboxPolicy, AppServerProcess, Client, ClientCapabilities,
+    Config, ConnectionTo, ContextUsageSource, EditApprovalMode, Error, ListSessionsResponse,
+    ModeKind, ReasoningEffort, ServiceTier, SessionClient, SessionId, Thread, ThreadInner,
+    ThreadListParams, ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
 };
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
@@ -404,6 +404,7 @@ impl Thread {
         codex_home: PathBuf,
         bundled_skills_enabled: bool,
         workspace_cwd: PathBuf,
+        client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
@@ -442,7 +443,7 @@ impl Thread {
                 session_plugins_summary,
                 account_status,
                 workspace_cwd,
-                client: SessionClient::new(session_id, client_capabilities),
+                client: SessionClient::new(session_id, client, client_capabilities),
                 approval_policy: bootstrap.approval_policy,
                 sandbox_policy: bootstrap.sandbox.clone(),
                 sandbox_mode: policy_to_mode(&bootstrap.sandbox),
@@ -493,6 +494,7 @@ impl Thread {
         &self,
         config: &Config,
         cwd: PathBuf,
+        client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
         requested_session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         requested_session_mcp_summary: ContextSelectorSummary,
@@ -568,6 +570,7 @@ impl Thread {
             session_id.clone(),
             config,
             resumed_cwd,
+            client,
             client_capabilities,
             session_mcp_config_overrides,
             session_mcp_summary,
@@ -577,9 +580,11 @@ impl Thread {
         Ok((session_id, thread))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn build_resumed_thread(
         session_id: SessionId,
         config: &Config,
+        client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
@@ -616,6 +621,7 @@ impl Thread {
             config.codex_home.clone(),
             config.bundled_skills_enabled(),
             resumed_workspace_cwd,
+            client,
             client_capabilities,
             session_mcp_config_overrides,
             session_mcp_summary,
@@ -643,6 +649,7 @@ impl Thread {
         codex_home: PathBuf,
         bundled_skills_enabled: bool,
         cwd: PathBuf,
+        client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
@@ -663,6 +670,7 @@ impl Thread {
             codex_home,
             bundled_skills_enabled,
             cwd,
+            client,
             client_capabilities,
             session_mcp_config_overrides,
             session_mcp_summary,
@@ -688,6 +696,7 @@ impl Thread {
         session_id: SessionId,
         config: &Config,
         cwd: PathBuf,
+        client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
@@ -710,6 +719,7 @@ impl Thread {
             config.codex_home.clone(),
             config.bundled_skills_enabled(),
             cwd,
+            client,
             client_capabilities,
             session_mcp_config_overrides,
             session_mcp_summary,
@@ -725,6 +735,7 @@ impl Thread {
     pub async fn start_session(
         config: &Config,
         cwd: PathBuf,
+        client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
@@ -739,6 +750,7 @@ impl Thread {
             config.codex_home.clone(),
             config.bundled_skills_enabled(),
             cwd,
+            client,
             client_capabilities,
             session_mcp_config_overrides,
             session_mcp_summary,
@@ -756,6 +768,7 @@ impl Thread {
         session_id: SessionId,
         config: &Config,
         cwd: PathBuf,
+        client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
         session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         session_mcp_summary: ContextSelectorSummary,
@@ -795,6 +808,7 @@ impl Thread {
         Ok(Self::build_resumed_thread(
             session_id,
             config,
+            client,
             client_capabilities,
             session_mcp_config_overrides,
             session_mcp_summary,
@@ -808,6 +822,7 @@ impl Thread {
         &self,
         config: &Config,
         cwd: PathBuf,
+        client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
         requested_session_mcp_config_overrides: Option<HashMap<String, JsonValue>>,
         requested_session_mcp_summary: ContextSelectorSummary,
@@ -815,6 +830,7 @@ impl Thread {
         self.fork_as_new_session(
             config,
             cwd,
+            client,
             client_capabilities,
             requested_session_mcp_config_overrides,
             requested_session_mcp_summary,
@@ -861,7 +877,7 @@ impl Thread {
             .into_iter()
             .map(|thread| {
                 let title = thread_display_title(&thread);
-                agent_client_protocol::SessionInfo::new(SessionId::new(thread.id), thread.cwd)
+                SessionInfo::new(SessionId::new(thread.id), thread.cwd)
                     .title(Some(title))
                     .updated_at(Some(format_session_updated_at(thread.updated_at)))
             })
@@ -878,7 +894,10 @@ mod tests {
         is_missing_rollout_thread_error, resume_params_with_discovered_path,
         resume_path_discovery_read_params,
     };
-    use agent_client_protocol::{Error, McpServer, McpServerHttp, McpServerSse, McpServerStdio};
+    use agent_client_protocol::{
+        Error,
+        schema::{McpServer, McpServerHttp, McpServerSse, McpServerStdio},
+    };
     use codex_app_server_protocol::ThreadResumeParams;
     use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
     use std::collections::HashMap;

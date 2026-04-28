@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::{DiffScope, Error, SessionCommand, StopReason, ThreadInner};
 use crate::thread::features::{plan::parse_collaboration_mode, resume, session};
-use agent_client_protocol::{
+use agent_client_protocol::schema::{
     AvailableCommand, AvailableCommandInput, ContentBlock, EmbeddedResource,
     EmbeddedResourceResource, ResourceLink, TextResourceContents, UnstructuredCommandInput,
 };

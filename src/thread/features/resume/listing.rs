@@ -1,6 +1,6 @@
 //! Вывод списка доступных thread для `/threads`.
 
-use agent_client_protocol::{Error, StopReason};
+use agent_client_protocol::{Error, schema::StopReason};
 use codex_app_server_protocol::ThreadSortKey;
 
 use super::common::{format_relative_timestamp, list_all_threads, thread_display_title};

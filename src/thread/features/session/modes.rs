@@ -1,6 +1,6 @@
 //! Режимные slash-команды сессии: `/plan on|off`.
 
-use agent_client_protocol::{Error, StopReason};
+use agent_client_protocol::{Error, schema::StopReason};
 use codex_protocol::config_types::ModeKind;
 
 use crate::thread::{

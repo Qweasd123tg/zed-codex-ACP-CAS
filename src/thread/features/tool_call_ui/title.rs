@@ -1,6 +1,6 @@
 //! Формирование заголовков и placeholder-контента для shell tool-call карточек.
 
-use agent_client_protocol::ToolCallContent;
+use agent_client_protocol::schema::ToolCallContent;
 use codex_app_server_protocol::CommandAction;
 
 // Строим стабильные заголовки команд, чтобы повторные обновления маппились в ту же строку tool call.

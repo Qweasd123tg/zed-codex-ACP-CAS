@@ -18,9 +18,12 @@ use crate::thread::{
     turn_notify::notify_config_update,
 };
 use agent_client_protocol::{
-    Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-    SelectedPermissionOutcome, SessionUpdate, StopReason, ToolCallId, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    Error,
+    schema::{
+        PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+        SelectedPermissionOutcome, SessionUpdate, StopReason, ToolCallId, ToolCallStatus,
+        ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    },
 };
 use codex_app_server_protocol::{
     AskForApproval as AppAskForApproval, RateLimitSnapshot as AppRateLimitSnapshot,

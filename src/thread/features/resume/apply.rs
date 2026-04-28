@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use agent_client_protocol::{Error, SessionUpdate, StopReason};
+use agent_client_protocol::{
+    Error,
+    schema::{SessionUpdate, StopReason},
+};
 use codex_app_server_protocol::{ThreadResumeParams, Turn as AppTurn};
 
 use crate::thread::features::collab::CollabAgentLabel;

@@ -1,7 +1,7 @@
 //! Обработчики дельт терминального вывода для потоков команд/изменений файлов в ACP UI.
 
 use super::{ThreadInner, ToolCallId, ToolCallUpdate, ToolCallUpdateFields};
-use agent_client_protocol::Meta;
+use agent_client_protocol::schema::Meta;
 use codex_app_server_protocol::{
     CommandExecutionOutputDeltaNotification, TerminalInteractionNotification,
 };

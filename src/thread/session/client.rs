@@ -6,20 +6,22 @@ use std::sync::{Arc, RwLock};
 use tracing::error;
 
 use crate::thread::{
-    ACP_CLIENT, ClientCapabilities, ContentChunk, Error, PermissionOption, ReadTextFileRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, SessionClient, SessionId,
-    SessionNotification, SessionUpdate, ToolCall, ToolCallUpdate, WriteTextFileRequest,
+    Client, ClientCapabilities, ConnectionTo, ContentChunk, Error, PermissionOption,
+    ReadTextFileRequest, RequestPermissionOutcome, RequestPermissionRequest, SessionClient,
+    SessionId, SessionNotification, SessionUpdate, ToolCall, ToolCallUpdate, UsageUpdate,
+    WriteTextFileRequest,
 };
 
 impl SessionClient {
     // Фиксируем session id один раз, чтобы каждое исходящее событие было корректно привязано к сессии.
     pub(super) fn new(
         session_id: SessionId,
+        client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
     ) -> Self {
         Self {
             session_id,
-            client: ACP_CLIENT.get().expect("Client should be set").clone(),
+            client,
             client_capabilities,
             suppress_text_output: env_flag("CODEX_ACP_DEV_LOGS_WITHOUT_TEXT_OUTPUT"),
         }
@@ -47,8 +49,7 @@ impl SessionClient {
     pub(super) async fn send_notification(&self, update: SessionUpdate) {
         if let Err(err) = self
             .client
-            .session_notification(SessionNotification::new(self.session_id.clone(), update))
-            .await
+            .send_notification(SessionNotification::new(self.session_id.clone(), update))
         {
             error!("Failed to send session notification: {err:?}");
         }
@@ -101,11 +102,12 @@ impl SessionClient {
     ) -> Result<RequestPermissionOutcome, Error> {
         let response = self
             .client
-            .request_permission(RequestPermissionRequest::new(
+            .send_request(RequestPermissionRequest::new(
                 self.session_id.clone(),
                 tool_call,
                 options,
             ))
+            .block_task()
             .await?;
         Ok(response.outcome)
     }
@@ -116,27 +118,27 @@ impl SessionClient {
         content: String,
     ) -> Result<(), Error> {
         self.client
-            .write_text_file(WriteTextFileRequest::new(
+            .send_request(WriteTextFileRequest::new(
                 self.session_id.clone(),
                 path,
                 content,
             ))
+            .block_task()
             .await?;
         Ok(())
     }
 
     pub(super) async fn prime_file_snapshot(&self, path: PathBuf) -> Result<(), Error> {
         self.client
-            .read_text_file(ReadTextFileRequest::new(self.session_id.clone(), path))
+            .send_request(ReadTextFileRequest::new(self.session_id.clone(), path))
+            .block_task()
             .await?;
         Ok(())
     }
 
     pub(super) async fn send_usage_update(&self, used: u64, size: u64) {
-        self.send_notification(SessionUpdate::UsageUpdate(
-            agent_client_protocol::UsageUpdate::new(used, size),
-        ))
-        .await;
+        self.send_notification(SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)))
+            .await;
     }
 }
 

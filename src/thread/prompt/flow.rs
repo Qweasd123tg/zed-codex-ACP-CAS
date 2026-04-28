@@ -4,14 +4,11 @@ use super::{
     Error, ModeKind, PLAN_IMPLEMENTATION_PROMPT, ReviewTarget, SessionCommand, StopReason, Thread,
     prompt_commands, turn_execution, turn_notify,
 };
-use agent_client_protocol::ContentBlock;
+use agent_client_protocol::schema::{ContentBlock, PromptRequest};
 
 impl Thread {
     // Сначала обрабатываем slash-команды, чтобы не отправлять управляющие команды как пользовательский промпт.
-    pub async fn prompt(
-        &self,
-        request: agent_client_protocol::PromptRequest,
-    ) -> Result<StopReason, Error> {
+    pub async fn prompt(&self, request: PromptRequest) -> Result<StopReason, Error> {
         let command = prompt_commands::parse_session_command(&request.prompt);
         let resume_request = match &command {
             Some(SessionCommand::Resume {

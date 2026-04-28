@@ -1,9 +1,12 @@
 //! Обработка request permissions: app-server просит временно выдать доп. права.
 
 use agent_client_protocol::{
-    Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-    SelectedPermissionOutcome, ToolCallId, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
-    ToolKind,
+    Error,
+    schema::{
+        PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+        SelectedPermissionOutcome, ToolCallId, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields, ToolKind,
+    },
 };
 use codex_app_server_protocol::{
     AdditionalMacOsPermissions, AdditionalPermissionProfile, GrantedMacOsPermissions,
@@ -194,7 +197,7 @@ mod tests {
         PermissionsRequestApprovalParams, approval_response_from_outcome,
         granted_permissions_from_request, permission_request_content,
     };
-    use agent_client_protocol::{
+    use agent_client_protocol::schema::{
         PermissionOptionId, RequestPermissionOutcome, SelectedPermissionOutcome,
     };
     use codex_app_server_protocol::AdditionalPermissionProfile;

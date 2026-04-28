@@ -6,8 +6,11 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use agent_client_protocol::{
-    Diff, Error, StopReason, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    Error,
+    schema::{
+        Diff, StopReason, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
+        ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    },
 };
 
 use crate::thread::turn_diff::{

@@ -29,7 +29,7 @@ const POST_TURN_NOTIFICATION_DRAIN_TIMEOUT: std::time::Duration =
 struct PendingTurnCommandApproval {
     turn_id: String,
     request_id: codex_app_server_protocol::RequestId,
-    outcome_fut: Pin<Box<dyn Future<Output = Result<RequestPermissionOutcome, Error>>>>,
+    outcome_fut: Pin<Box<dyn Future<Output = Result<RequestPermissionOutcome, Error>> + Send>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,9 +109,9 @@ impl Thread {
     async fn maybe_finish_stalled_turn(
         &self,
         turn_id: &str,
-        pending_command_approval: &Option<PendingTurnCommandApproval>,
+        has_pending_command_approval: bool,
     ) -> Result<Option<StopReason>, Error> {
-        if pending_command_approval.is_some() {
+        if has_pending_command_approval {
             return Ok(None);
         }
 
@@ -275,7 +275,7 @@ impl Thread {
                 }
                 _ = &mut watchdog => {
                     if let Some(stop_reason) = self
-                        .maybe_finish_stalled_turn(&turn_id, &pending_command_approval)
+                        .maybe_finish_stalled_turn(&turn_id, pending_command_approval.is_some())
                         .await?
                     {
                         return Ok(stop_reason);
@@ -321,7 +321,7 @@ impl Thread {
                         }
                     }
                     if let Some(stop_reason) = self
-                        .maybe_finish_stalled_turn(&turn_id, &pending_command_approval)
+                        .maybe_finish_stalled_turn(&turn_id, pending_command_approval.is_some())
                         .await?
                     {
                         return Ok(stop_reason);

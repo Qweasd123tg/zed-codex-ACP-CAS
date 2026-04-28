@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use agent_client_protocol::ToolCallStatus;
+use agent_client_protocol::schema::ToolCallStatus;
 use codex_app_server_protocol::{CollabAgentState, CollabAgentStatus, CollabAgentToolCallStatus};
 
 // Маппим app-server статусы collab tool-call в статусы ACP-карточек.

@@ -1,6 +1,6 @@
 //! Парсинг/нормализация plan-содержимого и collaboration-mode plumbing.
 
-use agent_client_protocol::{Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus};
+use agent_client_protocol::schema::{Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus};
 use codex_app_server_protocol::{TurnPlanStep, TurnPlanStepStatus};
 use codex_protocol::config_types::{
     CollaborationMode, ModeKind, Settings as CollaborationSettings,

@@ -1,6 +1,6 @@
 //! Delta/progress notification-ветки (text deltas и tool progress updates).
 
-use agent_client_protocol::{ToolCallId, ToolCallUpdate, ToolCallUpdateFields};
+use agent_client_protocol::schema::{ToolCallId, ToolCallUpdate, ToolCallUpdateFields};
 use codex_protocol::config_types::ModeKind;
 
 use crate::thread::features::notification::events::reconnect::{

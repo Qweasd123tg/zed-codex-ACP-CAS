@@ -1,6 +1,6 @@
 //! Live/replay обработка web-search и image-view tool-call веток.
 
-use agent_client_protocol::{
+use agent_client_protocol::schema::{
     Content, ContentBlock, ResourceLink, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation,
     ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };

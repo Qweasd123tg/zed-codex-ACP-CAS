@@ -4,9 +4,12 @@ use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_client_protocol::{
-    Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-    SelectedPermissionOutcome, StopReason, ToolCallId, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, ToolKind,
+    Error,
+    schema::{
+        PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+        SelectedPermissionOutcome, StopReason, ToolCallId, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields, ToolKind,
+    },
 };
 use codex_app_server_protocol::ReviewTarget;
 use serde_json::json;

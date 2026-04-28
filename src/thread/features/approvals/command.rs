@@ -1,9 +1,12 @@
 //! Обработка подтверждений запуска shell-команд (command approval).
 
 use agent_client_protocol::{
-    Error, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-    SelectedPermissionOutcome, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    Error,
+    schema::{
+        PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
+        SelectedPermissionOutcome, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
+        ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    },
 };
 use codex_app_server_protocol::{
     AdditionalPermissionProfile, CommandExecutionApprovalDecision,

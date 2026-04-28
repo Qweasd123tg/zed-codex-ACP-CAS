@@ -32,7 +32,7 @@ use super::{
     EditApprovalMode, FallbackPlanPhase, FallbackPlanState, MAX_VISIBLE_PLAN_ENTRIES,
     NONE_OF_THE_ABOVE, PLAN_SESSION_MODE_ID, SessionCommand,
 };
-use agent_client_protocol::{
+use agent_client_protocol::schema::{
     Content, ContentBlock, PermissionOptionKind, Plan, PlanEntry, PlanEntryPriority,
     PlanEntryStatus, ResourceLink, ToolCallContent, ToolCallStatus, ToolKind,
 };
