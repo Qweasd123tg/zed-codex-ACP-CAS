@@ -89,21 +89,21 @@ pub(in crate::thread) fn permission_modes(
         .find(|preset| preset.id == "read-only")
     {
         available_modes.push(
-            SessionMode::new(read_only_preset.id, read_only_preset.label).description(
+            SessionMode::new(read_only_preset.id, "Read only").description(
                 "Read-only sandbox. Codex must ask before edits, writes, or network access.",
             ),
         );
     }
-    if let Some(default_preset) = APPROVAL_PRESETS
+    if APPROVAL_PRESETS
         .iter()
-        .find(|preset| preset.id == AUTO_MODE_ID)
+        .any(|preset| preset.id == AUTO_MODE_ID)
     {
         available_modes.push(
-            SessionMode::new(AUTO_MODE_ID, default_preset.label)
+            SessionMode::new(AUTO_MODE_ID, "Workspace")
                 .description("Workspace-write sandbox. Codex can edit this workspace; network and outside-workspace writes still ask."),
         );
         available_modes.push(
-            SessionMode::new(AUTO_ASK_EDITS_MODE_ID, "Default (Ask on edits)").description(
+            SessionMode::new(AUTO_ASK_EDITS_MODE_ID, "Ask edits").description(
                 "Workspace-write sandbox with a confirmation popup for every file edit.",
             ),
         );
@@ -113,7 +113,7 @@ pub(in crate::thread) fn permission_modes(
         .find(|preset| preset.id == "full-access")
     {
         available_modes.push(
-            SessionMode::new(full_access_preset.id, "Full Access (no sandbox)")
+            SessionMode::new(full_access_preset.id, "Full access")
                 .description("No sandbox and no approval prompts for edits, commands, internet, or files outside this workspace."),
         );
     }

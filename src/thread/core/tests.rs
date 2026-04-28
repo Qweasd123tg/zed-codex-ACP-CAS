@@ -1314,7 +1314,7 @@ fn permission_modes_explain_full_access_sandbox_behavior() {
         .iter()
         .find(|mode| mode.id.0.as_ref() == "full-access")
         .expect("full access mode should exist");
-    assert_eq!(full_access.name, "Full Access (no sandbox)");
+    assert_eq!(full_access.name, "Full access");
     assert_eq!(
         full_access.description.as_deref(),
         Some(

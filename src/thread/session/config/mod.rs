@@ -3,7 +3,7 @@
 use crate::thread::{
     AppAskForApproval, AppModel, AppSandboxMode, ContextUsageSource, EditApprovalMode, ModeKind,
     ReasoningEffort, ServiceTier, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigSelectOption, ThreadInner,
+    SessionConfigSelectGroup, SessionConfigSelectOption, ThreadInner,
 };
 
 #[path = "context.rs"]
@@ -120,19 +120,38 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             .description("Choose how the agent should collaborate in this session"),
     );
 
-    let mut permission_options = Vec::new();
+    let mut guarded_permission_options = Vec::new();
+    let mut bypass_permission_options = Vec::new();
     for permission_mode in permission_modes(approval, sandbox, edit_approval_mode) {
-        permission_options.push(
-            SessionConfigSelectOption::new(permission_mode.id.0, permission_mode.name)
-                .description(permission_mode.description),
-        );
+        let option =
+            SessionConfigSelectOption::new(permission_mode.id.0.clone(), permission_mode.name)
+                .description(permission_mode.description);
+        match permission_mode.id.0.as_ref() {
+            "full-access" => bypass_permission_options.push(option),
+            _ => guarded_permission_options.push(option),
+        }
+    }
+    let mut permission_groups = Vec::new();
+    if !guarded_permission_options.is_empty() {
+        permission_groups.push(SessionConfigSelectGroup::new(
+            "guarded",
+            "Guarded",
+            guarded_permission_options,
+        ));
+    }
+    if !bypass_permission_options.is_empty() {
+        permission_groups.push(SessionConfigSelectGroup::new(
+            "bypass",
+            "Bypass",
+            bypass_permission_options,
+        ));
     }
     options.push(
         SessionConfigOption::select(
             "permissions",
             "Permissions",
             current_permissions_id.0,
-            permission_options,
+            permission_groups,
         )
         .description("Choose file edit and sandbox permission behavior"),
     );
@@ -215,7 +234,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             "context_control",
             "Context",
             context::CONTEXT_STATUS_VALUE,
-            context::context_control_options(
+            context::context_control_option_groups(
                 workspace_cwd,
                 account_status,
                 total_token_usage,

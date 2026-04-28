@@ -11,10 +11,11 @@ use agent_client_protocol::{
         CurrentModeUpdate, Diff, ListSessionsResponse, LoadSessionResponse, ModelId, ModelInfo,
         PermissionOption, PermissionOptionKind, ReadTextFileRequest, RequestPermissionOutcome,
         RequestPermissionRequest, SelectedPermissionOutcome, SessionConfigId, SessionConfigOption,
-        SessionConfigOptionCategory, SessionConfigSelectOption, SessionId, SessionMode,
-        SessionModeId, SessionModeState, SessionModelState, SessionNotification, SessionUpdate,
-        StopReason, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
-        ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate, WriteTextFileRequest,
+        SessionConfigOptionCategory, SessionConfigSelectGroup, SessionConfigSelectOption,
+        SessionId, SessionMode, SessionModeId, SessionModeState, SessionModelState,
+        SessionNotification, SessionUpdate, StopReason, ToolCall, ToolCallContent, ToolCallId,
+        ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+        UsageUpdate, WriteTextFileRequest,
     },
 };
 use codex_app_server_protocol::{

@@ -6,7 +6,7 @@ use codex_app_server_protocol::{Account, RateLimitSnapshot, TokenUsageBreakdown}
 use codex_protocol::account::PlanType;
 
 use super::limits::{combined_limits_reset_message, combined_limits_status_label};
-use crate::thread::{ContextUsageSource, SessionConfigSelectOption};
+use crate::thread::{ContextUsageSource, SessionConfigSelectGroup, SessionConfigSelectOption};
 
 #[path = "context/mcp.rs"]
 mod mcp;
@@ -89,6 +89,57 @@ pub(in crate::thread) fn context_control_options(
             .description(combined_limits_reset_message(rate_limits)),
         SessionConfigSelectOption::new(CONTEXT_COMPACT_VALUE, "Compact now")
             .description("Summarize the conversation to free context window"),
+    ]
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::thread) fn context_control_option_groups(
+    workspace_cwd: &Path,
+    account_status: &AccountStatus,
+    total_token_usage: Option<&TokenUsageBreakdown>,
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_percent: Option<u64>,
+    usage_source: Option<ContextUsageSource>,
+    rate_limits: Option<&RateLimitSnapshot>,
+    compaction_in_progress: bool,
+    mcp_summary: &ContextSelectorSummary,
+    skills_summary: &ContextSelectorSummary,
+    plugins_summary: &ContextSelectorSummary,
+) -> Vec<SessionConfigSelectGroup> {
+    let mut options = context_control_options(
+        workspace_cwd,
+        account_status,
+        total_token_usage,
+        used,
+        size,
+        usage_percent,
+        usage_source,
+        rate_limits,
+        compaction_in_progress,
+        mcp_summary,
+        skills_summary,
+        plugins_summary,
+    )
+    .into_iter();
+
+    let usage_options = vec![
+        options.next().expect("context usage option should exist"),
+        options.next().expect("session status option should exist"),
+    ];
+    let integration_options = vec![
+        options.next().expect("MCP status option should exist"),
+        options.next().expect("skills status option should exist"),
+        options.next().expect("plugins status option should exist"),
+    ];
+    let limit_options = vec![options.next().expect("limits option should exist")];
+    let action_options = vec![options.next().expect("compact option should exist")];
+
+    vec![
+        SessionConfigSelectGroup::new("usage", "Usage", usage_options),
+        SessionConfigSelectGroup::new("integrations", "Integrations", integration_options),
+        SessionConfigSelectGroup::new("limits", "Limits", limit_options),
+        SessionConfigSelectGroup::new("actions", "Actions", action_options),
     ]
 }
 
@@ -232,11 +283,11 @@ fn context_status_label(
             _ => "---".to_string(),
         }
     };
-    format!("ctx {short}")
+    format!("Context {short}")
 }
 
 fn limits_status_label(rate_limits: Option<&RateLimitSnapshot>) -> String {
-    format!("Limits · {}", combined_limits_status_label(rate_limits))
+    combined_limits_status_label(rate_limits)
 }
 
 fn status_label(
@@ -362,8 +413,9 @@ mod tests {
     use super::{
         AccountStatus, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
         MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
-        build_mcp_summary, build_plugins_summary, build_skills_summary, context_control_options,
-        context_usage_message, full_status_report, session_status_message,
+        build_mcp_summary, build_plugins_summary, build_skills_summary,
+        context_control_option_groups, context_control_options, context_usage_message,
+        full_status_report, session_status_message,
     };
     use crate::thread::ContextUsageSource;
     use codex_app_server_protocol::{
@@ -425,6 +477,35 @@ mod tests {
     }
 
     #[test]
+    fn context_options_are_grouped_for_zed_picker() {
+        let empty_summary = empty_summary("none");
+        let groups = context_control_option_groups(
+            PathBuf::from("/tmp/workspace").as_path(),
+            &AccountStatus::default(),
+            None,
+            Some(157_835),
+            Some(258_400),
+            Some(61),
+            Some(ContextUsageSource::Live),
+            None,
+            false,
+            &empty_summary,
+            &empty_summary,
+            &empty_summary,
+        );
+
+        let names = groups
+            .iter()
+            .map(|group| group.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["Usage", "Integrations", "Limits", "Actions"]);
+        assert_eq!(groups[0].options.len(), 2);
+        assert_eq!(groups[1].options.len(), 3);
+        assert_eq!(groups[2].options[0].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
+        assert_eq!(groups[3].options[0].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
+    }
+
+    #[test]
     fn context_options_use_dashes_when_usage_is_unknown() {
         let empty_summary = empty_summary("MCP · none");
         let options = context_control_options(
@@ -441,8 +522,8 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[0].name, "ctx ---");
-        assert_eq!(options[5].name, "Limits · 5h -- · wk --");
+        assert_eq!(options[0].name, "Context ---");
+        assert_eq!(options[5].name, "5h -- · wk --");
         assert_eq!(options[6].name, "Compact now");
     }
 
@@ -463,7 +544,7 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[0].name, "ctx 76%");
+        assert_eq!(options[0].name, "Context 76%");
         assert_eq!(
             options[0].description.as_deref(),
             Some("Context usage: 195499/258400 tokens.\nSource: cached.")
@@ -504,7 +585,7 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[5].name, "Limits · 5h 80% · wk 94%");
+        assert_eq!(options[5].name, "5h 80% · wk 94%");
     }
 
     #[test]

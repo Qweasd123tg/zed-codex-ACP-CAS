@@ -208,8 +208,9 @@ flowchart LR
   а `src/thread/session/lifecycle.rs` использует существующий `thread/fork` backend, после чего поднимает forked ACP session как отдельный `Thread`.
 - UX `Speed` selector относится к этому же lifecycle-набору: backend-поле `service_tier` хранится в `ThreadInner`, попадает в `thread/start` / `thread/resume` / `thread/fork`,
   синхронизируется после in-place `/resume` и `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
-- Нижний selector `Context` использует тот же session/config lifecycle и остается read-only surfaced control поверх backend `context_control`:
-  короткий label держится на `ctx`, а опции selector-а описываются как `status`, `ctx %`, `MCP`, `skills`, `plugins`, `Limits`, `Compact`.
+- Нижние selectors `Context` и `Permissions` используют тот же session/config lifecycle. В текущем `Zed` descriptions у config options
+  рендерятся как обычный text label, не Markdown, поэтому adapter-side UX держится на коротких option names и ACP grouped select options:
+  `Context` делит пункты на `Usage`, `Integrations`, `Limits`, `Actions`, а `Permissions` — на guarded и bypass режимы.
 - Account rate limits дополнительно дают одноразовые chat-advisory при переходе через 75/90/95/100% использованного окна; состояние порогов хранится в `ThreadInner`,
   а форматирование находится в `src/thread/session/config/limits.rs`, чтобы `Context` selector и warning-текст не расходились.
 - `ThreadTokenUsageUpdated` остается adapter-side forwarding в ACP `UsageUpdate`, но нативный context circle в текущем `Zed` для external ACP не подтвержден:
