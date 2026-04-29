@@ -71,7 +71,7 @@ impl AppServerProcess {
             .spawn()
             .with_context(|| {
                 format!(
-                    "failed to start `{codex_bin}` app-server; ensure the `codex` binary is installed and available in PATH"
+                    "failed to start `{codex_bin}` app-server; ensure the `codex` binary is installed and available in PATH, or set CODEX_ACP_CODEX_BIN to an absolute backend path"
                 )
             })
             .map_err(|err| io_error(err.to_string()))?;

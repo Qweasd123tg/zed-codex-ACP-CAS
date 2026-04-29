@@ -35,6 +35,7 @@ use tracing::{info, warn};
 
 const RESUME_STARTUP_RETRY_ATTEMPTS: usize = 6;
 const RESUME_STARTUP_RETRY_DELAY_MS: u64 = 300;
+const CODEX_APP_SERVER_BIN_ENV: &str = "CODEX_ACP_CODEX_BIN";
 
 pub(crate) struct SessionMcpSetup {
     pub(crate) config_overrides: Option<HashMap<String, JsonValue>>,
@@ -355,7 +356,8 @@ async fn retry_thread_resume_with_discovered_path(
 }
 
 async fn spawn_initialized_app(session_id: Option<&SessionId>) -> Result<AppServerProcess, Error> {
-    let mut app = AppServerProcess::spawn("codex")
+    let codex_bin = codex_app_server_binary();
+    let mut app = AppServerProcess::spawn(&codex_bin)
         .await
         .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
     if let Some(session_id) = session_id {
@@ -367,6 +369,18 @@ async fn spawn_initialized_app(session_id: Option<&SessionId>) -> Result<AppServ
         .await
         .map_err(|error| startup_error("failed to initialize `codex app-server`", error))?;
     Ok(app)
+}
+
+fn codex_app_server_binary() -> String {
+    let configured = std::env::var(CODEX_APP_SERVER_BIN_ENV).ok();
+    codex_app_server_binary_from_env_value(configured.as_deref())
+}
+
+fn codex_app_server_binary_from_env_value(value: Option<&str>) -> String {
+    match value {
+        Some(value) if !value.trim().is_empty() => value.trim().to_string(),
+        _ => "codex".to_string(),
+    }
 }
 
 async fn start_backend_thread(
@@ -890,9 +904,9 @@ impl Thread {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_session_mcp_config_overrides, format_session_updated_at,
-        is_missing_rollout_thread_error, resume_params_with_discovered_path,
-        resume_path_discovery_read_params,
+        build_session_mcp_config_overrides, codex_app_server_binary_from_env_value,
+        format_session_updated_at, is_missing_rollout_thread_error,
+        resume_params_with_discovered_path, resume_path_discovery_read_params,
     };
     use agent_client_protocol::{
         Error,
@@ -902,6 +916,23 @@ mod tests {
     use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
     use std::collections::HashMap;
     use std::path::PathBuf;
+
+    #[test]
+    fn codex_app_server_binary_defaults_to_codex() {
+        assert_eq!(codex_app_server_binary_from_env_value(None), "codex");
+        assert_eq!(codex_app_server_binary_from_env_value(Some("")), "codex");
+        assert_eq!(codex_app_server_binary_from_env_value(Some("   ")), "codex");
+    }
+
+    #[test]
+    fn codex_app_server_binary_uses_configured_path() {
+        assert_eq!(
+            codex_app_server_binary_from_env_value(Some(
+                r"C:\Users\LOQ\.vscode\extensions\openai.chatgpt\bin\windows-x86_64\codex.exe",
+            )),
+            r"C:\Users\LOQ\.vscode\extensions\openai.chatgpt\bin\windows-x86_64\codex.exe"
+        );
+    }
 
     #[test]
     fn detects_retryable_missing_rollout_resume_error() {

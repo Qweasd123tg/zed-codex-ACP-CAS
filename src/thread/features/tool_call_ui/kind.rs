@@ -74,9 +74,10 @@ pub(in crate::thread) fn extract_inner_shell_command(command: &str) -> String {
 
     if parts.len() >= 3
         && is_shell_executable(&parts[0])
-        && matches!(parts[1].as_str(), "-c" | "-lc" | "-ic")
+        && shell_command_arg_index(&parts).is_some()
     {
-        return parts[2].trim().to_string();
+        let command_index = shell_command_arg_index(&parts).unwrap_or(2);
+        return parts[command_index].trim().to_string();
     }
 
     trimmed.to_string()
@@ -87,7 +88,64 @@ fn is_shell_executable(program: &str) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(program);
-    matches!(binary, "bash" | "sh" | "zsh" | "fish")
+    let binary = binary
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(binary)
+        .to_ascii_lowercase();
+    matches!(
+        binary.as_str(),
+        "bash"
+            | "sh"
+            | "zsh"
+            | "fish"
+            | "cmd"
+            | "cmd.exe"
+            | "powershell"
+            | "powershell.exe"
+            | "pwsh"
+            | "pwsh.exe"
+    ) || binary.ends_with("cmd.exe")
+        || binary.ends_with("powershell.exe")
+        || binary.ends_with("pwsh.exe")
+}
+
+fn shell_command_arg_index(parts: &[String]) -> Option<usize> {
+    if parts.len() < 3 {
+        return None;
+    }
+
+    let shell = Path::new(&parts[0])
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&parts[0])
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(&parts[0])
+        .to_ascii_lowercase();
+
+    if matches!(shell.as_str(), "cmd" | "cmd.exe") || shell.ends_with("cmd.exe") {
+        return parts
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, part)| matches!(part.to_ascii_lowercase().as_str(), "/c" | "/k"))
+            .map(|(index, _)| index + 1)
+            .filter(|index| *index < parts.len());
+    }
+
+    parts
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, part)| {
+            matches!(
+                part.to_ascii_lowercase().as_str(),
+                "-c" | "-lc" | "-ic" | "-command" | "-commandwithargs"
+            )
+        })
+        .map(|(index, _)| index + 1)
+        .filter(|index| *index < parts.len())
 }
 
 fn shell_uses_command(command: &str, candidates: &[&str]) -> bool {
@@ -101,20 +159,56 @@ fn shell_uses_command(command: &str, candidates: &[&str]) -> bool {
 
 pub(super) fn looks_like_listing_command(command: &str) -> bool {
     command.contains("rg --files")
-        || shell_uses_command(command, &["ls", "tree", "eza", "exa", "fd", "find"])
+        || shell_uses_command(
+            command,
+            &[
+                "ls",
+                "tree",
+                "eza",
+                "exa",
+                "fd",
+                "find",
+                "dir",
+                "gci",
+                "get-childitem",
+            ],
+        )
         || (shell_uses_command(command, &["pwd"]) && command.contains("&&"))
 }
 
 pub(super) fn looks_like_search_command(command: &str) -> bool {
     !command.contains("rg --files")
-        && shell_uses_command(command, &["rg", "ripgrep", "grep", "ack", "ag"])
+        && shell_uses_command(
+            command,
+            &[
+                "rg",
+                "ripgrep",
+                "grep",
+                "ack",
+                "ag",
+                "findstr",
+                "select-string",
+                "sls",
+            ],
+        )
 }
 
 pub(super) fn looks_like_read_command(command: &str) -> bool {
     shell_uses_command(
         command,
         &[
-            "cat", "bat", "sed", "awk", "head", "tail", "less", "more", "nl",
+            "cat",
+            "bat",
+            "sed",
+            "awk",
+            "head",
+            "tail",
+            "less",
+            "more",
+            "nl",
+            "type",
+            "gc",
+            "get-content",
         ],
     )
 }

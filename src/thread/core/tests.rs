@@ -849,6 +849,10 @@ fn command_title_maps_common_shell_listing_commands() {
         command_tool_title("/bin/bash -lc 'rg --files | head -n 200'", &[]),
         "Analyze folder contents"
     );
+    assert_eq!(
+        command_tool_title(r#"C:\Windows\System32\cmd.exe /d /s /c "dir""#, &[]),
+        "Analyze folder contents"
+    );
 }
 
 #[test]
@@ -859,6 +863,10 @@ fn command_title_maps_common_shell_search_and_check_commands() {
     );
     assert_eq!(
         command_tool_title("/bin/bash -lc 'cargo test -q'", &[]),
+        "Run tests and checks"
+    );
+    assert_eq!(
+        command_tool_title(r#"pwsh.exe -NoProfile -Command "cargo test -q""#, &[]),
         "Run tests and checks"
     );
 }
@@ -879,6 +887,10 @@ fn command_tool_kind_uses_search_for_listing_and_grep_commands() {
     );
     assert_eq!(
         command_tool_kind("/bin/bash -lc 'rg \"plan\" src/thread.rs'", &[]),
+        ToolKind::Search
+    );
+    assert_eq!(
+        command_tool_kind(r#"powershell.exe -NoProfile -Command "rg plan src""#, &[]),
         ToolKind::Search
     );
 }

@@ -192,16 +192,18 @@ Download the artifact for your platform from the releases page.
 
 Current release artifacts are plain binaries plus `.sha256` files:
 
-- `codex-acp-cas-<version>-x86_64-unknown-linux-gnu`
-- `codex-acp-cas-<version>-<target>.sha256`
+- `codex-acp-linux-x86_64-unknown-linux-gnu`
+- `codex-acp-macos-aarch64-apple-darwin`
+- `codex-acp-windows-x86_64-pc-windows-msvc.exe`
+- matching `.sha256` files
 
-Place the binary somewhere on your `PATH`, mark it executable, and point Zed at that binary.
+Place the binary somewhere stable and point Zed at that binary.
 
-Example:
+Linux/macOS example:
 
 ```bash
 mkdir -p "$HOME/.local/bin"
-mv codex-acp-cas-<version>-x86_64-unknown-linux-gnu "$HOME/.local/bin/codex-acp"
+mv codex-acp-linux-x86_64-unknown-linux-gnu "$HOME/.local/bin/codex-acp"
 chmod +x "$HOME/.local/bin/codex-acp"
 ```
 
@@ -217,6 +219,39 @@ Then configure Zed to use the binary path:
   }
 }
 ```
+
+Windows example:
+
+1. Put `codex-acp-windows-x86_64-pc-windows-msvc.exe` somewhere stable and rename it to `codex-acp.exe` if desired.
+2. Make sure the `codex.exe` that provides `codex app-server` is available to the adapter. You can do that with `PATH`, or set `CODEX_ACP_CODEX_BIN` to the absolute `codex.exe` path.
+3. If you rely on the ChatGPT extension's bundled `codex.exe`, use a small wrapper next to `codex-acp.exe`:
+
+```cmd
+@echo off
+set "CODEX_ACP_CODEX_BIN=C:\Users\LOQ\.vscode\extensions\openai.chatgpt-26.422.71525-win32-x64\bin\windows-x86_64\codex.exe"
+"%~dp0codex-acp.exe" %*
+```
+
+Configure Zed to launch that wrapper through `cmd.exe`:
+
+```json
+{
+  "agent_servers": {
+    "codex-acp-cas": {
+      "type": "custom",
+      "command": "C:\\Windows\\System32\\cmd.exe",
+      "args": [
+        "/d",
+        "/s",
+        "/c",
+        "\"\"C:\\Users\\LOQ\\Desktop\\test\\codex-acp-zed.cmd\"\""
+      ]
+    }
+  }
+}
+```
+
+The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
 
 ### Add To Zed
 
@@ -249,7 +284,7 @@ Example:
 }
 ```
 
-If `codex` is not already available in your environment, make sure it is installed and visible in `PATH`, because this adapter starts `codex app-server` under the hood.
+If `codex` is not already available in your environment, make sure it is installed and visible in `PATH`, or set `CODEX_ACP_CODEX_BIN` to its absolute path, because this adapter starts `codex app-server` under the hood.
 
 ### Build From Source
 
@@ -257,6 +292,12 @@ Requirements:
 
 - Rust toolchain
 - `codex` available in your environment
+
+The local helper scripts in `script/` are bash-oriented and currently target Linux/macOS-style local development. On Windows, build with Cargo directly:
+
+```powershell
+cargo build --release --target x86_64-pc-windows-msvc
+```
 
 Build:
 
@@ -297,6 +338,7 @@ Useful environment variables:
 
 - `RUST_LOG=codex_acp=debug`
 - `RUST_BACKTRACE=1`
+- `CODEX_ACP_CODEX_BIN=<absolute path to codex or codex.exe>`
 - `CODEX_ACP_STARTUP_TIMEOUT_MS=<milliseconds>`
 - `CODEX_ACP_STARTUP_METADATA_TIMEOUT_MS=<milliseconds>`
 - `ACP_DISABLE_AUTO_RESTORE=1` for emergency startup debugging only
@@ -325,10 +367,19 @@ Important log lines:
 
 What they usually mean:
 
-- Timeout during `initialize`, `thread/start`, or `turn/start`: app-server is stuck before the adapter can safely continue
-- `failed to start 'codex' app-server`: `codex` is missing or not available in `PATH`
+- Timeout during `initialize`, `thread/start`, or `turn/start`: app-server is stuck before the adapter can safely continue, or the bundled `codex.exe` version is incompatible with this adapter's pinned app-server protocol
+- `failed to start 'codex' app-server`: `codex` is missing or not available in `PATH`; on Windows, set `CODEX_ACP_CODEX_BIN` to the intended `codex.exe`
 - `Turn appears stuck after repeated reconnect failures`: the adapter aborted a stalled turn and drained queued tail notifications so the next prompt starts from a clean state
 - Panic backtrace: the adapter or child process crashed directly
+
+On Windows, test the same wrapper that Zed launches:
+
+```cmd
+where codex
+codex --version
+codex app-server --help
+C:\Windows\System32\cmd.exe /d /s /c ""C:\Users\LOQ\Desktop\test\codex-acp-zed.cmd" --help"
+```
 
 Recent hardening in this fork:
 
