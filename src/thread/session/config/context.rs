@@ -274,7 +274,7 @@ fn context_status_label(
     usage_percent: Option<u64>,
     compaction_in_progress: bool,
 ) -> String {
-    let short = if compaction_in_progress {
+    if compaction_in_progress {
         "Compacting...".to_string()
     } else {
         match (used, size, usage_percent) {
@@ -282,8 +282,7 @@ fn context_status_label(
             (Some(used), None, _) => format!("{used} tok"),
             _ => "---".to_string(),
         }
-    };
-    format!("Context {short}")
+    }
 }
 
 fn limits_status_label(rate_limits: Option<&RateLimitSnapshot>) -> String {
@@ -522,7 +521,7 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[0].name, "Context ---");
+        assert_eq!(options[0].name, "---");
         assert_eq!(options[5].name, "5h -- · wk --");
         assert_eq!(options[6].name, "Compact now");
     }
@@ -544,7 +543,7 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[0].name, "Context 76%");
+        assert_eq!(options[0].name, "76%");
         assert_eq!(
             options[0].description.as_deref(),
             Some("Context usage: 195499/258400 tokens.\nSource: cached.")

@@ -4,8 +4,8 @@ use super::session_config::{
     CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
     PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, combined_limits_reset_message,
     context_usage_message, find_model_for_current, full_status_report,
-    normalize_reasoning_effort_for_model, parse_fast_mode_value, parse_reasoning_effort,
-    reasoning_effort_value,
+    normalize_reasoning_effort_for_model, parse_fast_mode_value, parse_model_reasoning_value,
+    parse_model_speed_value, parse_reasoning_effort, reasoning_effort_value,
 };
 use super::{
     APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID,
@@ -196,7 +196,19 @@ impl Thread {
         match config_id.0.as_ref() {
             "mode" => self.set_mode(SessionModeId::new(value.0)).await,
             "permissions" => self.set_permission_mode(SessionModeId::new(value.0)).await,
-            "model" => self.set_model(ModelId::new(value.0)).await,
+            "model" => {
+                if let Some(effort) = parse_model_reasoning_value(&value.0) {
+                    self.set_reasoning_effort(effort).await?;
+                    self.notify_config_options_update().await;
+                    Ok(())
+                } else if let Some(service_tier) = parse_model_speed_value(&value.0) {
+                    self.set_fast_mode(service_tier).await?;
+                    self.notify_config_options_update().await;
+                    Ok(())
+                } else {
+                    self.set_model(ModelId::new(value.0)).await
+                }
+            }
             "fast_mode" => {
                 let service_tier = parse_fast_mode_value(&value.0)
                     .ok_or_else(|| Error::invalid_params().data("Unsupported fast mode value"))?;

@@ -89,10 +89,10 @@ Sub-agent and collaboration tool-call rendering:
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
 - In-place `/fork` and standard ACP `session/fork` support
 - Tool call cards for command, MCP, web, image, file, and collab branches
-- Clearer status surfacing through `/status` and the existing `Context` selector
-- `Context` selector summaries for session status, context usage, MCP, skills, plugins, limits, and compaction
-- Chat warnings when account limits cross 75%, 90%, 95%, and exhausted thresholds
-- `Fast Mode` session config selector backed by Codex app-server `service_tier`, with `fast` as the primary surfaced value
+- Clearer status surfacing through `/status` and the compact context `%` selector
+- Compact context selector summaries for session status, context usage, MCP, skills, plugins, limits, and compaction
+- Compact chat warnings when account limits cross 75%, 90%, 95%, and exhausted thresholds
+- Grouped `Model` selector entries for model choice, reasoning effort, and Codex app-server `service_tier` speed
 - Practical plan mode support
 - Better default-mode fallback plan progress for long step lists: visible checkpoints now advance across the list instead of only snapping at the very end of work
 - Better startup and reconnect diagnostics
@@ -154,9 +154,9 @@ Current strengths of this fork:
 - Practical thread switching with native `Zed` `New Thread`, `/fork`, `/resume`, and archive-triggered replacement
 - Standard ACP `session/fork` surfaced separately from the in-place slash `/fork` flow
 - Practical plan mode support
-- Canonical session status surfacing through `/status` plus the `Context` selector
-- `plugins` now sit alongside `status`, `MCP`, `skills`, and limits in the selector UX
-- `Fast Mode` is surfaced as session config over Codex `service_tier` and carried through start, resume, fork, and future turns
+- Canonical session status surfacing through `/status` plus the compact context `%` selector
+- `plugins` now sit alongside `status`, `MCP`, `skills`, and limits in the context selector UX
+- `Speed` is surfaced inside the grouped `Model` selector over Codex `service_tier` and carried through start, resume, fork, and future turns
 - More complete collab and sub-agent UI mapping
 
 Current gaps:
@@ -175,7 +175,8 @@ Current gaps:
 - MCP passthrough supports `stdio` and `http` today
 - MCP `sse` passthrough is not supported yet
 - `item/tool/call` / `DynamicToolCall` requests are rejected as unsupported
-- `Fast Mode` is available through the adapter `Fast Mode` session config selector. It primarily exposes `service_tier=fast`, with `flex` available as the alternate Codex service tier. Zed's native toolbar fast-mode button is currently native-thread/staff/model-gated and is not a generic custom ACP control, so custom ACP users should use the adapter selector instead.
+- `Speed` is available inside the adapter `Model` selector. It primarily exposes `service_tier=fast`, with `flex` available as the alternate Codex service tier. Zed's native toolbar fast-mode button is currently native-thread/staff/model-gated and is not a generic custom ACP control, so custom ACP users should use the adapter selector instead.
+- The grouped `Model` selector is an adapter-side workaround for current ACP/Zed limits. ACP `select` exposes only one `current_value`, and current Zed does not provide native multi-current state, toolbar overflow control, or nested selector state for external ACP agents. The adapter therefore marks active nested entries such as reasoning and speed with short labels like `★ High` / `★ Fast` and keeps details in option descriptions.
 - `/undo` itself works, and the adapter also exposes rollback via ACP ext methods, but the visual rewind/edit button and the pencil-style edit UX in current `Zed` still depend on a client-side ACP fix: the external-agent ACP bridge does not wire `truncate()` / rollback ext-methods for this flow yet. In practice that means patching or rebuilding `Zed` if you want the native button UX
 - Zed Agent Panel message queueing is asymmetric today: native `Zed Agent` can send queued messages at turn/tool-call boundaries, but external ACP agents receive queued messages only after the current generation finishes. The pinned Codex app-server has `turn/steer`, so the backend can accept mid-turn steering, but this adapter cannot expose a real CLI-style "send before the next tool call" UX until `Zed` forwards queued external-agent prompts before generation completion.
 - Recent Zed Agent UI can edit chat names through the session `title` when that client-side path is enabled for external agents. The adapter already publishes titles through `SessionInfoUpdate` and `/rename`; inline title editing itself is controlled by Zed.
@@ -400,7 +401,7 @@ Current Zed-specific UI caveats are tracked in [docs/upstream-feature-matrix.md]
 
 Near-term work:
 
-- Keep refining the `Context` selector and `/status` report where it helps daily use
+- Keep refining the compact context `%` selector and `/status` report where it helps daily use
 - Decide the next surfaced preview flow after `/diff`, most likely `thread/read`
 
 Later candidates:

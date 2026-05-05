@@ -11,6 +11,12 @@ pub(in crate::thread) struct RateLimitWarningState {
     secondary_index: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::thread) struct RateLimitWarning {
+    pub(in crate::thread) label: String,
+    pub(in crate::thread) remaining_percent: Option<i32>,
+}
+
 pub(in crate::thread) fn combined_limits_status_label(
     snapshot: Option<&RateLimitSnapshot>,
 ) -> String {
@@ -62,7 +68,7 @@ pub(in crate::thread) fn weekly_reset_message(snapshot: Option<&RateLimitSnapsho
 pub(in crate::thread) fn take_rate_limit_warnings(
     state: &mut RateLimitWarningState,
     snapshot: &RateLimitSnapshot,
-) -> Vec<String> {
+) -> Vec<RateLimitWarning> {
     let mut warnings = Vec::new();
     if let Some(warning) = take_window_warning(
         &mut state.secondary_index,
@@ -91,7 +97,7 @@ fn take_window_warning(
     warning_index: &mut usize,
     window: Option<&RateLimitWindow>,
     fallback_label: &str,
-) -> Option<String> {
+) -> Option<RateLimitWarning> {
     let window = window?;
     let used_percent = clamp_percent(window.used_percent);
     let mut highest_threshold = None;
@@ -105,15 +111,16 @@ fn take_window_warning(
     let threshold = highest_threshold?;
     let label = limit_duration_label(window).unwrap_or_else(|| fallback_label.to_string());
     if threshold >= 100 {
-        return Some(format!(
-            "Your {label} limit is exhausted. Run `/status` for reset details."
-        ));
+        return Some(RateLimitWarning {
+            label,
+            remaining_percent: None,
+        });
     }
 
-    let remaining_percent = 100 - threshold;
-    Some(format!(
-        "Heads up, you have less than {remaining_percent}% of your {label} limit left. Run `/status` for a breakdown."
-    ))
+    Some(RateLimitWarning {
+        label,
+        remaining_percent: Some(100 - threshold),
+    })
 }
 
 fn format_reset_line(label: &str, window: Option<&RateLimitWindow>) -> String {
@@ -162,9 +169,9 @@ fn clamp_percent(value: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        RateLimitWarningState, combined_limits_reset_message, combined_limits_status_label,
-        five_hour_reset_message, five_hour_status_label, take_rate_limit_warnings,
-        weekly_reset_message, weekly_status_label,
+        RateLimitWarning, RateLimitWarningState, combined_limits_reset_message,
+        combined_limits_status_label, five_hour_reset_message, five_hour_status_label,
+        take_rate_limit_warnings, weekly_reset_message, weekly_status_label,
     };
     use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
     use codex_protocol::account::PlanType;
@@ -245,14 +252,24 @@ mod tests {
 
         snapshot.primary.as_mut().unwrap().used_percent = 91;
         let warnings = take_rate_limit_warnings(&mut state, &snapshot);
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("less than 10%"));
+        assert_eq!(
+            warnings,
+            vec![RateLimitWarning {
+                label: "5h".to_string(),
+                remaining_percent: Some(10),
+            }]
+        );
 
         assert!(take_rate_limit_warnings(&mut state, &snapshot).is_empty());
 
         snapshot.primary.as_mut().unwrap().used_percent = 100;
         let warnings = take_rate_limit_warnings(&mut state, &snapshot);
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("limit is exhausted"));
+        assert_eq!(
+            warnings,
+            vec![RateLimitWarning {
+                label: "5h".to_string(),
+                remaining_percent: None,
+            }]
+        );
     }
 }

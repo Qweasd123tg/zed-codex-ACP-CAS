@@ -5,7 +5,18 @@ use codex_app_server_protocol::{
     WindowsWorldWritableWarningNotification,
 };
 
-use crate::thread::ThreadInner;
+use crate::thread::{ThreadInner, session_config::RateLimitWarning};
+
+pub(in crate::thread) async fn emit_account_rate_limit_warnings(
+    inner: &mut ThreadInner,
+    warnings: Vec<RateLimitWarning>,
+) {
+    let Some(notice) = format_account_rate_limit_warning_notice(&warnings) else {
+        return;
+    };
+
+    inner.client.send_agent_text(notice).await;
+}
 
 pub(in crate::thread) async fn emit_config_warning(
     inner: &mut ThreadInner,
@@ -35,6 +46,53 @@ pub(in crate::thread) async fn emit_windows_world_writable_warning(
         .client
         .send_agent_text(format_windows_world_writable_warning(notification))
         .await;
+}
+
+fn format_account_rate_limit_warning_notice(warnings: &[RateLimitWarning]) -> Option<String> {
+    let active: Vec<&RateLimitWarning> = warnings
+        .iter()
+        .filter(|warning| !warning.label.trim().is_empty())
+        .collect();
+    if active.is_empty() {
+        return None;
+    }
+
+    let exhausted: Vec<&str> = active
+        .iter()
+        .filter(|warning| warning.remaining_percent.is_none())
+        .map(|warning| warning.label.trim())
+        .collect();
+    if !exhausted.is_empty() {
+        return Some(format!(
+            "\n\n⛔ Лимиты Codex: {} исчерпан{}. Подробности: `/status`.\n\n",
+            format_label_list(&exhausted),
+            if exhausted.len() == 1 { "" } else { "ы" }
+        ));
+    }
+
+    let percent = active
+        .iter()
+        .filter_map(|warning| warning.remaining_percent)
+        .min()?;
+    let labels: Vec<&str> = active.iter().map(|warning| warning.label.trim()).collect();
+    Some(format!(
+        "\n\n⚠️ Лимиты Codex: осталось меньше {percent}% для {}. Подробности: `/status`.\n\n",
+        format_label_list(&labels)
+    ))
+}
+
+fn format_label_list(labels: &[&str]) -> String {
+    match labels {
+        [] => String::new(),
+        [label] => (*label).to_string(),
+        [first, second] => format!("{first} и {second}"),
+        _ => {
+            let mut formatted = labels[..labels.len() - 1].join(", ");
+            formatted.push_str(" и ");
+            formatted.push_str(labels[labels.len() - 1]);
+            formatted
+        }
+    }
 }
 
 fn format_config_warning(notification: ConfigWarningNotification) -> String {
@@ -108,8 +166,10 @@ fn format_windows_world_writable_warning(
 #[cfg(test)]
 mod tests {
     use super::{
-        format_config_warning, format_deprecation_notice, format_windows_world_writable_warning,
+        format_account_rate_limit_warning_notice, format_config_warning, format_deprecation_notice,
+        format_windows_world_writable_warning,
     };
+    use crate::thread::session_config::RateLimitWarning;
     use codex_app_server_protocol::{
         ConfigWarningNotification, DeprecationNoticeNotification, TextPosition, TextRange,
         WindowsWorldWritableWarningNotification,
@@ -134,6 +194,50 @@ mod tests {
             rendered,
             "[warning] Unknown field\nLocation: /tmp/config.toml:3:5\nRemove it or rename it."
         );
+    }
+
+    #[test]
+    fn formats_account_rate_limit_warnings_as_compact_notice() {
+        let rendered = format_account_rate_limit_warning_notice(&[
+            RateLimitWarning {
+                label: "weekly".to_string(),
+                remaining_percent: Some(25),
+            },
+            RateLimitWarning {
+                label: "5h".to_string(),
+                remaining_percent: Some(25),
+            },
+        ]);
+
+        assert_eq!(
+            rendered.as_deref(),
+            Some(
+                "\n\n⚠️ Лимиты Codex: осталось меньше 25% для weekly и 5h. Подробности: `/status`.\n\n"
+            )
+        );
+    }
+
+    #[test]
+    fn formats_exhausted_account_rate_limit_warning_as_compact_notice() {
+        let rendered = format_account_rate_limit_warning_notice(&[RateLimitWarning {
+            label: "5h".to_string(),
+            remaining_percent: None,
+        }]);
+
+        assert_eq!(
+            rendered.as_deref(),
+            Some("\n\n⛔ Лимиты Codex: 5h исчерпан. Подробности: `/status`.\n\n")
+        );
+    }
+
+    #[test]
+    fn skips_empty_account_rate_limit_warning_notice() {
+        let rendered = format_account_rate_limit_warning_notice(&[RateLimitWarning {
+            label: "  ".to_string(),
+            remaining_percent: Some(25),
+        }]);
+
+        assert_eq!(rendered, None);
     }
 
     #[test]

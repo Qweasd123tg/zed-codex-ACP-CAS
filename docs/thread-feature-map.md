@@ -206,11 +206,12 @@ flowchart LR
   и должны переживать replacement-thread внутри той же ACP-сессии.
 - Тот же lifecycle-набор теперь обслуживает и стандартный ACP `session/fork`: `src/codex_agent.rs` публикует capability и handler,
   а `src/thread/session/lifecycle.rs` использует существующий `thread/fork` backend, после чего поднимает forked ACP session как отдельный `Thread`.
-- UX `Speed` selector относится к этому же lifecycle-набору: backend-поле `service_tier` хранится в `ThreadInner`, попадает в `thread/start` / `thread/resume` / `thread/fork`,
+- UX `Speed` теперь surfaced внутри grouped `Model` selector, но относится к тому же lifecycle-набору: backend-поле `service_tier` хранится в `ThreadInner`, попадает в `thread/start` / `thread/resume` / `thread/fork`,
   синхронизируется после in-place `/resume` и `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
 - Нижние selectors `Context` и `Permissions` используют тот же session/config lifecycle. В текущем `Zed` descriptions у config options
   рендерятся как обычный text label, не Markdown, поэтому adapter-side UX держится на коротких option names и ACP grouped select options:
-  `Context` делит пункты на `Usage`, `Integrations`, `Limits`, `Actions`, а `Permissions` — на guarded и bypass режимы.
+  `Model` делит пункты на `Models`, `Reasoning`, `Speed`, `Context` — на `Usage`, `Integrations`, `Limits`, `Actions`, а `Permissions` — на guarded и bypass режимы.
+  У ACP select есть только один `current_value`, поэтому выбранные nested пункты `Reasoning`/`Speed` помечаются adapter-side через `★` в option label.
 - Account rate limits дополнительно дают одноразовые chat-advisory при переходе через 75/90/95/100% использованного окна; состояние порогов хранится в `ThreadInner`,
   а форматирование находится в `src/thread/session/config/limits.rs`, чтобы `Context` selector и warning-текст не расходились.
 - `ThreadTokenUsageUpdated` остается adapter-side forwarding в ACP `UsageUpdate`, но нативный context circle в текущем `Zed` для external ACP не подтвержден:
@@ -246,6 +247,7 @@ flowchart LR
 
 Риск: пропущенная ветка маршрутизации или двойная обработка одного события.
 Отдельно сюда же относятся advisory notifications (`configWarning`, deprecation notice, Windows sandbox warnings): их легко забыть в `_ => Ok(None)` и снова сделать UX немым.
+Account rate-limit warnings должны оставаться одним компактным notice из `src/thread/features/notification/events/warnings.rs` с пустыми строками вокруг текста; отдельные сырые backend-фразы нельзя отправлять несколькими `AgentMessageChunk`, иначе системные предупреждения визуально склеиваются с ответом агента.
 `ItemStarted`/`ItemCompleted` здесь тоже должны оставаться turn-bound по `expected_turn_id`, иначе stale tail старого turn может создать ложные tool-card старты/апдейты уже в новом контексте.
 Дополнительная инварианта для drain path: `post-turn` и `background` cleanup не должны прокидывать late `JSONRPCRequest` обратно в live approval handlers. Во время drain такие request-ы нужно явно отклонять как stale transport tail; иначе после завершённого turn или прямо перед новым prompt можно случайно получить призрачный approval prompt от старого хвоста.
 

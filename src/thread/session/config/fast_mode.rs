@@ -57,7 +57,7 @@ mod tests {
     use crate::thread::ServiceTier;
 
     #[test]
-    fn fast_mode_values_round_trip_standard_and_fast() {
+    fn fast_mode_values_parse_standard_and_fast() {
         assert_eq!(fast_mode_value(None), "standard");
         assert_eq!(fast_mode_value(Some(ServiceTier::Fast)), "fast");
         assert_eq!(parse_fast_mode_value("standard"), Some(None));
