@@ -5,7 +5,7 @@ use codex_app_server_protocol::{
     AccountRateLimitsUpdatedNotification, FileChangeOutputDeltaNotification, JSONRPCNotification,
     McpToolCallProgressNotification, ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification, ServerNotification, ThreadNameUpdatedNotification,
-    ThreadTokenUsageUpdatedNotification,
+    ThreadTokenUsageUpdatedNotification, TurnStatus,
 };
 
 use crate::thread::{
@@ -125,6 +125,13 @@ pub(in crate::thread) async fn handle_notification(
             handle_item_completed(inner, payload, expected_turn_id).await;
             Ok(None)
         }
+        ServerNotification::ContextCompacted(payload) => {
+            if payload.thread_id == inner.thread_id && inner.compaction_in_progress {
+                crate::thread::features::session::events::emit_context_compaction_completed(inner)
+                    .await;
+            }
+            Ok(None)
+        }
         ServerNotification::CommandExecutionOutputDelta(payload) => {
             handle_command_output_delta(inner, payload).await;
             Ok(None)
@@ -166,9 +173,44 @@ pub(in crate::thread) async fn handle_notification(
             Ok(None)
         }
         ServerNotification::TurnCompleted(payload) => {
+            if payload.thread_id == inner.thread_id && inner.compaction_in_progress {
+                match payload.turn.status {
+                    TurnStatus::Completed => {
+                        crate::thread::features::session::events::emit_context_compaction_completed(
+                            inner,
+                        )
+                        .await;
+                        return Ok(None);
+                    }
+                    TurnStatus::Failed | TurnStatus::Interrupted => {
+                        let message = payload
+                            .turn
+                            .error
+                            .map(|error| error.message)
+                            .unwrap_or_else(|| "backend ended the compaction turn".to_string());
+                        crate::thread::features::session::events::emit_context_compaction_failed(
+                            inner, message,
+                        )
+                        .await;
+                        return Ok(None);
+                    }
+                    TurnStatus::InProgress => {}
+                }
+            }
             Ok(events::turn::emit_turn_completed(inner, expected_turn_id, payload.turn).await)
         }
         ServerNotification::Error(error) => {
+            if error.thread_id == inner.thread_id
+                && inner.compaction_in_progress
+                && !error.will_retry
+            {
+                crate::thread::features::session::events::emit_context_compaction_failed(
+                    inner,
+                    error.error.message,
+                )
+                .await;
+                return Ok(None);
+            }
             events::turn::emit_turn_error(
                 inner,
                 expected_turn_id,

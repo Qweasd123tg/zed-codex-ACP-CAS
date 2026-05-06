@@ -18,6 +18,8 @@ const BACKGROUND_DRAIN_TOTAL_TIMEOUT: Duration = Duration::from_millis(250);
 const BACKGROUND_DRAIN_POLL_TIMEOUT: Duration = Duration::from_millis(10);
 const BACKGROUND_DRAIN_IDLE_POLLS: usize = 2;
 const BACKGROUND_DRAIN_MAX_MESSAGES: usize = 256;
+const COMPACTION_DRAIN_POLL_TOTAL_TIMEOUT: Duration = Duration::from_secs(2);
+const COMPACTION_DRAIN_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 struct DrainConfig {
     drain_context: &'static str,
@@ -187,6 +189,52 @@ async fn drain_transport_until_quiet_ext(
 }
 
 impl Thread {
+    pub(super) fn spawn_compaction_drain_task(&self) {
+        let thread = self.clone();
+        tokio::spawn(async move {
+            let started_at = tokio::time::Instant::now();
+            loop {
+                let still_compacting = {
+                    let inner = thread.inner.lock().await;
+                    inner.compaction_in_progress
+                };
+                if !still_compacting {
+                    break;
+                }
+
+                if started_at.elapsed() >= COMPACTION_DRAIN_WATCHDOG_TIMEOUT {
+                    let mut inner = thread.inner.lock().await;
+                    if inner.compaction_in_progress {
+                        crate::thread::features::session::events::emit_context_compaction_failed(
+                            &mut inner,
+                            "timed out waiting for app-server completion".to_string(),
+                        )
+                        .await;
+                    }
+                    break;
+                }
+
+                match thread
+                    .drain_background_notifications_for_ext(COMPACTION_DRAIN_POLL_TOTAL_TIMEOUT)
+                    .await
+                {
+                    Ok(outcome) if outcome.was_truncated() => {
+                        warn!(
+                            processed_messages = outcome.processed(),
+                            outcome = ?outcome,
+                            "compact watcher drain stopped before the queue went quiet"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        warn!(error = %err, "compact watcher drain failed");
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                }
+            }
+        });
+    }
+
     pub(super) async fn drain_post_turn_notifications_ext(
         &self,
         expected_turn_id: &str,
@@ -218,6 +266,14 @@ impl Thread {
     }
 
     pub(super) async fn drain_background_notifications_ext(&self) -> Result<DrainOutcome, Error> {
+        self.drain_background_notifications_for_ext(BACKGROUND_DRAIN_TOTAL_TIMEOUT)
+            .await
+    }
+
+    pub(super) async fn drain_background_notifications_for_ext(
+        &self,
+        total_timeout: Duration,
+    ) -> Result<DrainOutcome, Error> {
         let app = {
             let inner = self.inner.lock().await;
             inner.app.clone()
@@ -234,7 +290,7 @@ impl Thread {
             "",
             DrainConfig {
                 drain_context: "background drain",
-                total_timeout: BACKGROUND_DRAIN_TOTAL_TIMEOUT,
+                total_timeout,
                 poll_timeout: BACKGROUND_DRAIN_POLL_TIMEOUT,
                 idle_polls_to_drain: BACKGROUND_DRAIN_IDLE_POLLS,
                 max_messages: BACKGROUND_DRAIN_MAX_MESSAGES,

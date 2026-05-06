@@ -1,5 +1,6 @@
 //! Хелперы выполнения turn, связывающие prompt input с API жизненного цикла turn в app-server.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -12,8 +13,8 @@ use super::{
     session_config,
 };
 use codex_app_server_protocol::{
-    JSONRPCMessage, ReviewDelivery, ReviewStartParams, ReviewTarget, ServerNotification,
-    ServerRequest, ThreadItem, TurnStatus,
+    CommandExecutionApprovalDecision, JSONRPCMessage, ReviewDelivery, ReviewStartParams,
+    ReviewTarget, ServerNotification, ServerRequest, ThreadItem, TurnStatus,
 };
 
 use tracing::{info, warn};
@@ -29,6 +30,7 @@ const POST_TURN_NOTIFICATION_DRAIN_TIMEOUT: std::time::Duration =
 struct PendingTurnCommandApproval {
     turn_id: String,
     request_id: codex_app_server_protocol::RequestId,
+    decisions_by_option_id: HashMap<String, CommandExecutionApprovalDecision>,
     outcome_fut: Pin<Box<dyn Future<Output = Result<RequestPermissionOutcome, Error>> + Send>>,
 }
 
@@ -137,14 +139,12 @@ impl Thread {
         app.lock()
             .await
             .send_command_approval_response(
-            pending.request_id,
-            codex_app_server_protocol::CommandExecutionRequestApprovalResponse {
-                decision: crate::thread::features::approvals::command::command_approval_decision_from_outcome(
-                    RequestPermissionOutcome::Cancelled
-                ),
-            },
-        )
-        .await
+                pending.request_id,
+                codex_app_server_protocol::CommandExecutionRequestApprovalResponse {
+                    decision: CommandExecutionApprovalDecision::Cancel,
+                },
+            )
+            .await
     }
 
     async fn interrupt_active_turn_if_needed(&self) -> bool {
@@ -286,9 +286,15 @@ impl Thread {
                         .as_mut()
                         .expect("pending command approval should exist");
                     let outcome = pending.outcome_fut.as_mut().await;
-                    (pending.request_id.clone(), pending.turn_id.clone(), outcome)
+                    (
+                        pending.request_id.clone(),
+                        pending.turn_id.clone(),
+                        pending.decisions_by_option_id.clone(),
+                        outcome,
+                    )
                 }, if pending_command_approval.is_some() => {
-                    let (request_id, approval_turn_id, outcome) = approval_result;
+                    let (request_id, approval_turn_id, decisions_by_option_id, outcome) =
+                        approval_result;
                     pending_command_approval = None;
                     let active_turn_matches = {
                         let inner = self.inner.lock().await;
@@ -297,6 +303,7 @@ impl Thread {
                     let decision = if active_turn_matches {
                         crate::thread::features::approvals::command::command_approval_decision_from_outcome(
                             outcome?,
+                            &decisions_by_option_id,
                         )
                     } else {
                         codex_app_server_protocol::CommandExecutionApprovalDecision::Cancel
@@ -524,9 +531,11 @@ impl Thread {
                 let client = pending.client;
                 let tool_call = pending.tool_call;
                 let options = pending.options;
+                let decisions_by_option_id = pending.decisions_by_option_id;
                 PendingTurnCommandApproval {
                     turn_id,
                     request_id,
+                    decisions_by_option_id,
                     outcome_fut: Box::pin(async move {
                         client.request_permission(tool_call, options).await
                     }),

@@ -13,6 +13,10 @@ pub(super) async fn handle_item_started(
     expected_turn_id: &str,
 ) {
     let turn_id = payload.turn_id.clone();
+    if should_handle_session_item(&inner.thread_id, &payload.thread_id, &payload.item) {
+        drop(session::handle_item_started(inner, payload.item).await);
+        return;
+    }
     if !should_handle_turn_item(expected_turn_id, &turn_id) {
         return;
     }
@@ -36,6 +40,10 @@ pub(super) async fn handle_item_completed(
     expected_turn_id: &str,
 ) {
     let turn_id = payload.turn_id.clone();
+    if should_handle_session_item(&inner.thread_id, &payload.thread_id, &payload.item) {
+        drop(session::handle_item_completed(inner, payload.item).await);
+        return;
+    }
     if !should_handle_turn_item(expected_turn_id, &turn_id) {
         return;
     }
@@ -59,6 +67,10 @@ pub(super) async fn handle_item_completed(
 
 fn should_handle_turn_item(expected_turn_id: &str, turn_id: &str) -> bool {
     turn_id == expected_turn_id
+}
+
+fn should_handle_session_item(current_thread_id: &str, thread_id: &str, item: &ThreadItem) -> bool {
+    current_thread_id == thread_id && matches!(item, ThreadItem::ContextCompaction { .. })
 }
 
 async fn maybe_advance_fallback_for_started_item(
@@ -86,12 +98,30 @@ async fn maybe_advance_fallback_for_started_item(
 
 #[cfg(test)]
 mod tests {
-    use super::should_handle_turn_item;
+    use super::{should_handle_session_item, should_handle_turn_item};
+    use crate::thread::ThreadItem;
 
     #[test]
     fn handles_only_matching_turn_items() {
         assert!(should_handle_turn_item("turn-1", "turn-1"));
         assert!(!should_handle_turn_item("turn-1", "turn-2"));
         assert!(!should_handle_turn_item("", "turn-1"));
+    }
+
+    #[test]
+    fn handles_context_compaction_as_thread_scoped_session_item() {
+        let item = ThreadItem::ContextCompaction {
+            id: "compact-1".to_string(),
+        };
+        assert!(should_handle_session_item("thread-1", "thread-1", &item));
+        assert!(!should_handle_session_item("thread-1", "thread-2", &item));
+        assert!(!should_handle_session_item(
+            "thread-1",
+            "thread-1",
+            &ThreadItem::Plan {
+                id: "plan-1".to_string(),
+                text: "plan".to_string(),
+            }
+        ));
     }
 }

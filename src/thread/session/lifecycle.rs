@@ -444,7 +444,7 @@ impl Thread {
 
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
         Thread {
-            inner: tokio::sync::Mutex::new(ThreadInner {
+            inner: Arc::new(tokio::sync::Mutex::new(ThreadInner {
                 session_id: session_id.clone(),
                 app: Arc::new(tokio::sync::Mutex::new(app)),
                 codex_home: codex_home.clone(),
@@ -499,7 +499,7 @@ impl Thread {
                 turn_last_progress_at: std::time::Instant::now(),
                 turn_reconnect_warning_count: 0,
                 turn_reconnect_retry_limit_hit: false,
-            }),
+            })),
             cancel_tx,
         }
     }

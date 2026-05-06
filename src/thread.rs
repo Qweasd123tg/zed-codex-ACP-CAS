@@ -120,8 +120,9 @@ const DIFF_COMMAND_TOOL_CALL_PREFIX: &str = "diff-command-";
 const TURN_DIFF_HISTORY_LIMIT: usize = 32;
 
 // Публичный handle потока: оборачивает изменяемое состояние сессии и сигнал отмены.
+#[derive(Clone)]
 pub struct Thread {
-    inner: tokio::sync::Mutex<ThreadInner>,
+    inner: Arc<tokio::sync::Mutex<ThreadInner>>,
     cancel_tx: tokio::sync::watch::Sender<u64>,
 }
 

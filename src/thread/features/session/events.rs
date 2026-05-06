@@ -57,6 +57,28 @@ pub(in crate::thread) async fn emit_context_compaction_completed(inner: &mut Thr
     inner.client.send_agent_thought("Context compacted.").await;
 }
 
+// Завершаем локальное состояние compaction, если backend прислал terminal error без completed item.
+pub(in crate::thread) async fn emit_context_compaction_failed(
+    inner: &mut ThreadInner,
+    message: String,
+) {
+    inner.compaction_in_progress = false;
+    inner.last_used_tokens = None;
+    inner.context_usage_source = None;
+    notify_config_update(inner).await;
+    if message.trim().is_empty() {
+        inner
+            .client
+            .send_agent_text("\n[error] Context compaction failed.")
+            .await;
+    } else {
+        inner
+            .client
+            .send_agent_text(format!("\n[error] Context compaction failed: {message}"))
+            .await;
+    }
+}
+
 // Replay-ветка для Plan item: это обычный agent-text без tool-card.
 pub(in crate::thread) async fn replay_plan_text(client: &SessionClient, text: String) {
     if !text.is_empty() {

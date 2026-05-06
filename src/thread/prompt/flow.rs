@@ -6,6 +6,8 @@ use super::{
 };
 use agent_client_protocol::schema::{ContentBlock, PromptRequest};
 
+const COMPACTION_PROMPT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 impl Thread {
     // Сначала обрабатываем slash-команды, чтобы не отправлять управляющие команды как пользовательский промпт.
     pub async fn prompt(&self, request: PromptRequest) -> Result<StopReason, Error> {
@@ -32,6 +34,7 @@ impl Thread {
         let mut prompt_override: Option<String> = None;
         let mut prompt_override_mode_kind: Option<ModeKind> = None;
         let mut review_target: Option<ReviewTarget> = None;
+        let compact_command = matches!(command, Some(SessionCommand::Compact));
         {
             let inner = self.inner.lock().await;
             if inner.history_replay_in_progress {
@@ -93,6 +96,10 @@ impl Thread {
         if let Some(command) = command {
             match prompt_commands::dispatch_session_command(&mut inner, command).await? {
                 prompt_commands::CommandDispatchOutcome::Stop(stop_reason) => {
+                    if compact_command {
+                        drop(inner);
+                        self.spawn_compaction_drain_task();
+                    }
                     return Ok(stop_reason);
                 }
                 prompt_commands::CommandDispatchOutcome::PromptOverride { prompt, mode_kind } => {
@@ -103,6 +110,21 @@ impl Thread {
                     review_target = Some(target);
                 }
             }
+        }
+
+        if inner.compaction_in_progress {
+            drop(inner);
+            let drain_outcome = self
+                .drain_background_notifications_for_ext(COMPACTION_PROMPT_DRAIN_TIMEOUT)
+                .await?;
+            if drain_outcome.was_truncated() {
+                tracing::warn!(
+                    processed_messages = drain_outcome.processed(),
+                    outcome = ?drain_outcome,
+                    "compact prompt drain stopped before the queue went quiet"
+                );
+            }
+            inner = self.inner.lock().await;
         }
 
         if inner.compaction_in_progress {

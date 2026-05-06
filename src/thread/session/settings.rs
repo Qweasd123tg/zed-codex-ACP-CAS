@@ -21,6 +21,9 @@ use crate::thread::features::{
 };
 use agent_client_protocol::schema::SessionConfigValueId;
 use codex_app_server_protocol::ThreadRollbackParams;
+use tracing::warn;
+
+const COMPACTION_SELECTOR_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl Thread {
     pub async fn set_mode(&self, mode: SessionModeId) -> Result<(), Error> {
@@ -182,6 +185,18 @@ impl Thread {
             CONTEXT_COMPACT_VALUE => {
                 let message = start_context_compaction(&mut inner).await?;
                 inner.client.send_agent_text(message).await;
+                drop(inner);
+                self.spawn_compaction_drain_task();
+                let drain_outcome = self
+                    .drain_background_notifications_for_ext(COMPACTION_SELECTOR_DRAIN_TIMEOUT)
+                    .await?;
+                if drain_outcome.was_truncated() {
+                    warn!(
+                        processed_messages = drain_outcome.processed(),
+                        outcome = ?drain_outcome,
+                        "context compact action drain stopped before the queue went quiet"
+                    );
+                }
                 Ok(())
             }
             _ => Err(Error::invalid_params().data("Unsupported context control action")),
@@ -193,6 +208,15 @@ impl Thread {
         config_id: SessionConfigId,
         value: SessionConfigValueId,
     ) -> Result<(), Error> {
+        let drain_outcome = self.drain_background_notifications_ext().await?;
+        if drain_outcome.was_truncated() {
+            warn!(
+                processed_messages = drain_outcome.processed(),
+                outcome = ?drain_outcome,
+                "set config background drain stopped before the queue went quiet"
+            );
+        }
+
         match config_id.0.as_ref() {
             "mode" => self.set_mode(SessionModeId::new(value.0)).await,
             "permissions" => self.set_permission_mode(SessionModeId::new(value.0)).await,

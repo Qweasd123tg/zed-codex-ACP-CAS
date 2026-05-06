@@ -68,6 +68,15 @@ impl Thread {
     }
 
     pub async fn config_options(&self) -> Result<Vec<SessionConfigOption>, Error> {
+        let drain_outcome = self.drain_background_notifications_ext().await?;
+        if drain_outcome.was_truncated() {
+            warn!(
+                processed_messages = drain_outcome.processed(),
+                outcome = ?drain_outcome,
+                "config options background drain stopped before the queue went quiet"
+            );
+        }
+
         let inner = self.inner.lock().await;
         Ok(session_config::config_options(
             session_config::config_options_input(&inner),
