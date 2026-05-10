@@ -172,9 +172,11 @@ impl Thread {
 
             let mut inner = self.inner.lock().await;
             inner.history_replay_in_progress = false;
+            turn_notify::notify_usage_update(&inner).await;
             turn_notify::notify_config_update(&inner).await;
         } else {
             let inner = self.inner.lock().await;
+            turn_notify::notify_usage_update(&inner).await;
             turn_notify::notify_config_update(&inner).await;
         }
 

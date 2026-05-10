@@ -115,6 +115,7 @@ impl CodexAgent {
             // метаданные команд, чтобы не ловить UI-гонки на старте новой ACP-сессии.
             tokio::task::yield_now().await;
             tokio::time::sleep(STARTUP_COMMANDS_SYNC_DELAY).await;
+            notify_thread.notify_usage_update().await;
             notify_thread.notify_available_commands().await;
             if replay_loaded_history {
                 notify_thread.replay_loaded_history().await;

@@ -39,7 +39,7 @@ pub(in crate::thread) async fn emit_thread_token_usage_updated(
         inner.context_window_size = Some(size);
     }
     if let Some(size) = inner.context_window_size {
-        inner.client.send_usage_update(used, size).await;
+        crate::thread::turn_notify::notify_usage_update(inner).await;
         if let Err(error) = persist_context_usage(
             &inner.context_usage_cache_path,
             &thread_id,

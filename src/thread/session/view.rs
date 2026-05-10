@@ -113,6 +113,11 @@ impl Thread {
             .await;
     }
 
+    pub async fn notify_usage_update(&self) {
+        let inner = self.inner.lock().await;
+        turn_notify::notify_usage_update(&inner).await;
+    }
+
     pub async fn notify_available_commands(&self) {
         let client = {
             let inner = self.inner.lock().await;

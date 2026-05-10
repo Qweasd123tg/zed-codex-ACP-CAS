@@ -218,6 +218,7 @@ flowchart LR
   а форматирование находится в `src/thread/session/config/limits.rs`, чтобы `Context` selector и warning-текст не расходились.
 - `ThreadTokenUsageUpdated` остается adapter-side forwarding в ACP `UsageUpdate`, но нативный context circle в текущем `Zed` для external ACP не подтвержден:
   если нужен именно этот UI, сначала нужен Zed-side patch/контракт, а не новая runtime-ветка в адаптере.
+  После обновления ACP/Zed adapter-side часть готова: `src/thread/turn/notify.rs` публикует `usage_update` из cached context usage на `load`/`resume` и из live `ThreadTokenUsageUpdated` после turn, чтобы клиент мог отрисовать нативный context indicator без ожидания текстового `/status`.
 
 6. Изменение collab/subagents контракта:
 - `src/thread/features/collab/render.rs`

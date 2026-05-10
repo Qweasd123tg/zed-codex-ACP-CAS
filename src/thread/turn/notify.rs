@@ -25,3 +25,15 @@ pub(super) async fn notify_config_update(inner: &ThreadInner) {
         )))
         .await;
 }
+
+// Публикуем ACP usage_update для клиентов, которые умеют рисовать нативный context indicator.
+pub(super) async fn notify_usage_update(inner: &ThreadInner) {
+    let (Some(used), Some(size)) = (inner.last_used_tokens, inner.context_window_size) else {
+        return;
+    };
+    if size == 0 {
+        return;
+    }
+
+    inner.client.send_usage_update(used.min(size), size).await;
+}
