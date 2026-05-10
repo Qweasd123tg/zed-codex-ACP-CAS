@@ -119,17 +119,19 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
     let current_model_id = current_model_entry
         .map(|model| model.id.clone())
         .unwrap_or_else(|| current_model.to_string());
+    let current_mode_description = current_mode_description(&mode_state);
     let mut options = Vec::with_capacity(4);
     let mut mode_options = Vec::with_capacity(mode_state.available_modes.len());
-    for mode in mode_state.available_modes {
+    for mode in &mode_state.available_modes {
         mode_options.push(
-            SessionConfigSelectOption::new(mode.id.0, mode.name).description(mode.description),
+            SessionConfigSelectOption::new(mode.id.0.clone(), mode.name.clone())
+                .description(mode.description.clone()),
         );
     }
     options.push(
         SessionConfigOption::select("mode", "Mode", mode_state.current_mode_id.0, mode_options)
             .category(SessionConfigOptionCategory::Mode)
-            .description("Choose how the agent should collaborate in this session"),
+            .description(current_mode_description),
     );
 
     let mut guarded_permission_options = Vec::new();
@@ -165,7 +167,11 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             current_permissions_id.0,
             permission_groups,
         )
-        .description("Choose file edit and sandbox permission behavior"),
+        .description(current_permission_description(
+            approval,
+            sandbox,
+            edit_approval_mode,
+        )),
     );
 
     options.push(
@@ -182,7 +188,12 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             ),
         )
         .category(SessionConfigOptionCategory::Model)
-        .description("Choose model, reasoning effort, or speed"),
+        .description(model_selector_description(
+            current_model_entry,
+            &current_model_id,
+            current_reasoning_effort,
+            current_service_tier,
+        )),
     );
 
     options.push(
@@ -205,9 +216,14 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 session_plugins_summary,
             ),
         )
-        .description(
-            "Inspect session status, context usage, MCP, skills, plugins, limits, or start compaction",
-        ),
+        .description(context_selector_description(
+            current_context_display,
+            current_used_tokens,
+            current_context_window_size,
+            current_context_usage_source,
+            current_account_rate_limits,
+            compaction_in_progress,
+        )),
     );
 
     options
@@ -340,6 +356,67 @@ fn fast_mode_label(service_tier: Option<ServiceTier>) -> &'static str {
     }
 }
 
+fn current_mode_description(mode_state: &crate::thread::SessionModeState) -> String {
+    mode_state
+        .available_modes
+        .iter()
+        .find(|mode| mode.id == mode_state.current_mode_id)
+        .and_then(|mode| mode.description.clone())
+        .unwrap_or_else(|| "Choose how the agent should collaborate in this session".to_string())
+}
+
+fn current_permission_description(
+    approval: AppAskForApproval,
+    sandbox: AppSandboxMode,
+    edit_approval_mode: EditApprovalMode,
+) -> String {
+    let current_permissions_id = current_permission_mode_id(approval, sandbox, edit_approval_mode);
+    permission_modes(approval, sandbox, edit_approval_mode)
+        .into_iter()
+        .find(|mode| mode.id == current_permissions_id)
+        .and_then(|mode| mode.description)
+        .unwrap_or_else(|| "Choose file edit and sandbox permission behavior".to_string())
+}
+
+fn model_selector_description(
+    current_model_entry: Option<&AppModel>,
+    current_model_id: &str,
+    current_reasoning_effort: ReasoningEffort,
+    current_service_tier: Option<ServiceTier>,
+) -> String {
+    let current_effort_label = reasoning::reasoning_effort_option_label(current_reasoning_effort);
+    let current_speed_label = fast_mode_label(current_service_tier);
+    match current_model_entry {
+        Some(model) => format!(
+            "{}\nReasoning: {current_effort_label}\nSpeed: {current_speed_label}",
+            model.display_name
+        ),
+        None => format!(
+            "{current_model_id}\nReasoning: {current_effort_label}\nSpeed: {current_speed_label}"
+        ),
+    }
+}
+
+fn context_selector_description(
+    current_display: ContextControlDisplay,
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_source: Option<ContextUsageSource>,
+    rate_limits: Option<&codex_app_server_protocol::RateLimitSnapshot>,
+    compaction_in_progress: bool,
+) -> String {
+    let mut description = match current_display {
+        ContextControlDisplay::Context => context::context_usage_message(used, size, usage_source),
+        ContextControlDisplay::FiveHourLimit => limits::limits_status_description(rate_limits),
+    };
+
+    if compaction_in_progress {
+        description.push_str("\nContext compaction is currently running.");
+    }
+
+    description
+}
+
 pub(super) use context::{
     AccountStatus, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
     ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE,
@@ -451,6 +528,10 @@ mod tests {
             .find(|option| option.id.0.as_ref() == "model")
             .expect("model selector exists");
         assert_eq!(model.category, Some(SessionConfigOptionCategory::Model));
+        assert_eq!(
+            model.description.as_deref(),
+            Some("GPT-5.5\nReasoning: High\nSpeed: Fast")
+        );
         let SessionConfigKind::Select(select) = &model.kind else {
             panic!("model selector should be a select config option");
         };
@@ -550,6 +631,11 @@ mod tests {
             .iter()
             .find(|option| option.id.0.as_ref() == "context_control")
             .expect("context selector exists");
+        assert!(context.description.as_deref().is_some_and(|description| {
+            description.contains("5h 80% · wk 94%")
+                && description.contains("5-hour: resets -")
+                && description.contains("Weekly: resets -")
+        }));
         let SessionConfigKind::Select(select) = &context.kind else {
             panic!("context selector should be a select config option");
         };
@@ -564,5 +650,65 @@ mod tests {
                 .any(|option| option.value.0.as_ref() == "limits_status"
                     && option.name == "5h 80%")
         );
+    }
+
+    #[test]
+    fn selector_descriptions_track_current_mode_permissions_and_context() {
+        let account_status = super::AccountStatus::default();
+        let mcp_summary = super::ContextSelectorSummary::default();
+        let skills_summary = super::ContextSelectorSummary::default();
+        let plugins_summary = super::ContextSelectorSummary::default();
+
+        let options = config_options(ConfigOptionsInput {
+            workspace_cwd: std::path::Path::new("/tmp"),
+            models: &[],
+            current_model: "gpt-5.5",
+            current_service_tier: None,
+            current_reasoning_effort: ReasoningEffort::High,
+            current_used_tokens: Some(1_000),
+            current_context_window_size: Some(2_000),
+            current_usage_percent: Some(50),
+            current_context_usage_source: Some(ContextUsageSource::Cached),
+            current_context_display: ContextControlDisplay::Context,
+            current_account_rate_limits: None,
+            compaction_in_progress: true,
+            approval: AppAskForApproval::Never,
+            sandbox: AppSandboxMode::ReadOnly,
+            edit_approval_mode: EditApprovalMode::AskEveryEdit,
+            collaboration_mode_kind: ModeKind::Plan,
+            account_status: &account_status,
+            total_token_usage: None,
+            session_mcp_summary: &mcp_summary,
+            session_skills_summary: &skills_summary,
+            session_plugins_summary: &plugins_summary,
+        });
+
+        let mode = options
+            .iter()
+            .find(|option| option.id.0.as_ref() == "mode")
+            .expect("mode selector exists");
+        assert_eq!(
+            mode.description.as_deref(),
+            Some("Plan-first mode with visible step tracking.")
+        );
+
+        let permissions = options
+            .iter()
+            .find(|option| option.id.0.as_ref() == "permissions")
+            .expect("permissions selector exists");
+        assert_eq!(
+            permissions.description.as_deref(),
+            Some("Read-only sandbox. Codex must ask before edits, writes, or network access.")
+        );
+
+        let context = options
+            .iter()
+            .find(|option| option.id.0.as_ref() == "context_control")
+            .expect("context selector exists");
+        assert!(context.description.as_deref().is_some_and(|description| {
+            description.contains("Context usage: 1000/2000 tokens.")
+                && description.contains("Source: cached.")
+                && description.contains("Context compaction is currently running.")
+        }));
     }
 }
