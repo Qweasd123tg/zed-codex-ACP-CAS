@@ -344,14 +344,13 @@ pub(super) use context::{
     AccountStatus, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
     ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE,
     SKILLS_STATUS_VALUE, build_account_status, build_mcp_summary, build_plugins_summary,
-    build_skills_summary, context_usage_message, full_status_report,
+    build_skills_summary, full_status_report,
 };
 pub(super) use fast_mode::{
     parse_fast_mode_value, service_tier_override_from_config, service_tier_override_from_session,
 };
 pub(super) use limits::{
-    RateLimitWarning, RateLimitWarningState, combined_limits_reset_message,
-    observe_rate_limit_snapshot, take_rate_limit_warnings,
+    RateLimitWarning, RateLimitWarningState, observe_rate_limit_snapshot, take_rate_limit_warnings,
 };
 pub(super) use reasoning::{
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,

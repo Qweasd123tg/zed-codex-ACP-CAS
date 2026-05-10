@@ -2,8 +2,7 @@
 
 use super::session_config::{
     CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
-    PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, combined_limits_reset_message,
-    context_usage_message, find_model_for_current, full_status_report,
+    PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, find_model_for_current,
     normalize_reasoning_effort_for_model, parse_fast_mode_value, parse_model_reasoning_value,
     parse_model_speed_value, parse_reasoning_effort, reasoning_effort_value,
 };
@@ -120,90 +119,17 @@ impl Thread {
         let mut inner = self.inner.lock().await;
         let mut notify_options_update = false;
         match value.0.as_ref() {
-            SESSION_STATUS_VALUE => {
-                inner
-                    .client
-                    .send_system_message(
-                        "status",
-                        "Session status",
-                        full_status_report(
-                            &inner.workspace_cwd,
-                            &inner.account_status,
-                            inner.total_token_usage.as_ref(),
-                            inner.last_used_tokens,
-                            inner.context_window_size,
-                            inner.context_usage_source,
-                            inner.account_rate_limits.as_ref(),
-                            inner.compaction_in_progress,
-                            &inner.session_mcp_summary,
-                            &inner.session_skills_summary,
-                            &inner.session_plugins_summary,
-                        ),
-                    )
-                    .await;
-                Ok(())
-            }
+            SESSION_STATUS_VALUE | MCP_STATUS_VALUE | SKILLS_STATUS_VALUE
+            | PLUGINS_STATUS_VALUE => Ok(()),
             CONTEXT_STATUS_VALUE => {
                 if inner.context_control_display != ContextControlDisplay::Context {
                     inner.context_control_display = ContextControlDisplay::Context;
                     notify_options_update = true;
                 }
-                if inner.last_used_tokens.is_none() && inner.context_window_size.is_none() {
-                    drop(inner);
-                    if notify_options_update {
-                        self.notify_config_options_update().await;
-                    }
-                    return Ok(());
-                }
-                inner
-                    .client
-                    .send_system_message(
-                        "status",
-                        "Context usage",
-                        context_usage_message(
-                            inner.last_used_tokens,
-                            inner.context_window_size,
-                            inner.context_usage_source,
-                        ),
-                    )
-                    .await;
                 drop(inner);
                 if notify_options_update {
                     self.notify_config_options_update().await;
                 }
-                Ok(())
-            }
-            MCP_STATUS_VALUE => {
-                inner
-                    .client
-                    .send_system_message(
-                        "status",
-                        "MCP status",
-                        inner.session_mcp_summary.report.clone(),
-                    )
-                    .await;
-                Ok(())
-            }
-            SKILLS_STATUS_VALUE => {
-                inner
-                    .client
-                    .send_system_message(
-                        "status",
-                        "Skills status",
-                        inner.session_skills_summary.report.clone(),
-                    )
-                    .await;
-                Ok(())
-            }
-            PLUGINS_STATUS_VALUE => {
-                inner
-                    .client
-                    .send_system_message(
-                        "status",
-                        "Plugins status",
-                        inner.session_plugins_summary.report.clone(),
-                    )
-                    .await;
                 Ok(())
             }
             CONTEXT_LIMITS_VALUE => {
@@ -211,14 +137,6 @@ impl Thread {
                     inner.context_control_display = ContextControlDisplay::FiveHourLimit;
                     notify_options_update = true;
                 }
-                inner
-                    .client
-                    .send_system_message(
-                        "status",
-                        "Account limits",
-                        combined_limits_reset_message(inner.account_rate_limits.as_ref()),
-                    )
-                    .await;
                 drop(inner);
                 if notify_options_update {
                     self.notify_config_options_update().await;
