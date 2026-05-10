@@ -121,6 +121,12 @@ impl Thread {
             if let Some(models) = models {
                 inner.models = models;
             }
+            if let Some(rate_limits) = account_rate_limits.as_ref() {
+                session_config::observe_rate_limit_snapshot(
+                    &mut inner.rate_limit_warning_state,
+                    rate_limits,
+                );
+            }
             inner.account_rate_limits = account_rate_limits;
             inner.reasoning_effort = session_config::resolve_reasoning_effort(
                 &inner.models,

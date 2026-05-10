@@ -95,6 +95,14 @@ pub(in crate::thread) fn take_rate_limit_warnings(
     warnings
 }
 
+pub(in crate::thread) fn observe_rate_limit_snapshot(
+    state: &mut RateLimitWarningState,
+    snapshot: &RateLimitSnapshot,
+) {
+    observe_window_warning_index(&mut state.secondary_index, snapshot.secondary.as_ref());
+    observe_window_warning_index(&mut state.primary_index, snapshot.primary.as_ref());
+}
+
 fn short_window_remaining(window: Option<&RateLimitWindow>) -> String {
     window
         .map(|window| format!("{}%", remaining_percent(window.used_percent)))
@@ -108,6 +116,7 @@ fn take_window_warning(
 ) -> Option<RateLimitWarning> {
     let window = window?;
     let used_percent = clamp_percent(window.used_percent);
+    reset_window_warning_index_after_reset(warning_index, used_percent);
     let mut highest_threshold = None;
     while *warning_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
         && used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[*warning_index]
@@ -129,6 +138,25 @@ fn take_window_warning(
         label,
         remaining_percent: Some(100 - threshold),
     })
+}
+
+fn reset_window_warning_index_after_reset(warning_index: &mut usize, used_percent: i32) {
+    if crossed_threshold_count(used_percent) == 0 {
+        *warning_index = 0;
+    }
+}
+
+fn observe_window_warning_index(warning_index: &mut usize, window: Option<&RateLimitWindow>) {
+    if let Some(window) = window {
+        *warning_index = crossed_threshold_count(clamp_percent(window.used_percent));
+    }
+}
+
+fn crossed_threshold_count(used_percent: i32) -> usize {
+    RATE_LIMIT_WARNING_THRESHOLDS
+        .iter()
+        .take_while(|threshold| used_percent >= **threshold)
+        .count()
 }
 
 fn format_reset_line(label: &str, window: Option<&RateLimitWindow>) -> String {
@@ -179,7 +207,8 @@ mod tests {
     use super::{
         RateLimitWarning, RateLimitWarningState, combined_limits_reset_message,
         combined_limits_status_label, five_hour_reset_message, five_hour_status_label,
-        take_rate_limit_warnings, weekly_reset_message, weekly_status_label,
+        observe_rate_limit_snapshot, take_rate_limit_warnings, weekly_reset_message,
+        weekly_status_label,
     };
     use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
     use codex_protocol::account::PlanType;
@@ -279,5 +308,68 @@ mod tests {
                 remaining_percent: None,
             }]
         );
+    }
+
+    #[test]
+    fn observed_rate_limits_do_not_warn_again_until_a_new_threshold_crossing() {
+        let mut state = RateLimitWarningState::default();
+        let mut snapshot = RateLimitSnapshot {
+            limit_id: Some("codex".to_string()),
+            limit_name: None,
+            primary: Some(RateLimitWindow {
+                used_percent: 100,
+                window_duration_mins: Some(300),
+                resets_at: Some(4_102_444_800),
+            }),
+            secondary: None,
+            credits: None,
+            plan_type: Some(PlanType::Plus),
+        };
+
+        observe_rate_limit_snapshot(&mut state, &snapshot);
+        assert!(take_rate_limit_warnings(&mut state, &snapshot).is_empty());
+
+        snapshot.primary.as_mut().unwrap().used_percent = 10;
+        assert!(take_rate_limit_warnings(&mut state, &snapshot).is_empty());
+
+        snapshot.primary.as_mut().unwrap().used_percent = 76;
+        assert_eq!(
+            take_rate_limit_warnings(&mut state, &snapshot),
+            vec![RateLimitWarning {
+                label: "5h".to_string(),
+                remaining_percent: Some(25),
+            }]
+        );
+    }
+
+    #[test]
+    fn rate_limit_warnings_do_not_repeat_after_small_usage_dips() {
+        let mut state = RateLimitWarningState::default();
+        let mut snapshot = RateLimitSnapshot {
+            limit_id: Some("codex".to_string()),
+            limit_name: None,
+            primary: Some(RateLimitWindow {
+                used_percent: 91,
+                window_duration_mins: Some(300),
+                resets_at: Some(4_102_444_800),
+            }),
+            secondary: None,
+            credits: None,
+            plan_type: Some(PlanType::Plus),
+        };
+
+        assert_eq!(
+            take_rate_limit_warnings(&mut state, &snapshot),
+            vec![RateLimitWarning {
+                label: "5h".to_string(),
+                remaining_percent: Some(10),
+            }]
+        );
+
+        snapshot.primary.as_mut().unwrap().used_percent = 89;
+        assert!(take_rate_limit_warnings(&mut state, &snapshot).is_empty());
+
+        snapshot.primary.as_mut().unwrap().used_percent = 91;
+        assert!(take_rate_limit_warnings(&mut state, &snapshot).is_empty());
     }
 }

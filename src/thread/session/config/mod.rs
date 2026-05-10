@@ -351,7 +351,7 @@ pub(super) use fast_mode::{
 };
 pub(super) use limits::{
     RateLimitWarning, RateLimitWarningState, combined_limits_reset_message,
-    take_rate_limit_warnings,
+    observe_rate_limit_snapshot, take_rate_limit_warnings,
 };
 pub(super) use reasoning::{
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,

@@ -198,6 +198,12 @@ impl Thread {
         };
 
         let mut inner = self.inner.lock().await;
+        if let Some(rate_limits) = account_rate_limits.as_ref() {
+            session_config::observe_rate_limit_snapshot(
+                &mut inner.rate_limit_warning_state,
+                rate_limits,
+            );
+        }
         inner.account_rate_limits = account_rate_limits;
         inner.account_status = account_status;
         if inner.workspace_cwd == workspace_cwd {

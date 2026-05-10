@@ -377,6 +377,10 @@ async fn apply_thread_switch(
         state.reasoning_effort,
     );
     if let Some(account_rate_limits) = account_rate_limits {
+        crate::thread::session_config::observe_rate_limit_snapshot(
+            &mut inner.rate_limit_warning_state,
+            &account_rate_limits,
+        );
         inner.account_rate_limits = Some(account_rate_limits);
     }
 
