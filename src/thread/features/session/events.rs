@@ -69,12 +69,12 @@ pub(in crate::thread) async fn emit_context_compaction_failed(
     if message.trim().is_empty() {
         inner
             .client
-            .send_agent_text("\n[error] Context compaction failed.")
+            .send_system_message("error", "Context compaction failed", "")
             .await;
     } else {
         inner
             .client
-            .send_agent_text(format!("\n[error] Context compaction failed: {message}"))
+            .send_system_message("error", "Context compaction failed", message)
             .await;
     }
 }

@@ -23,7 +23,7 @@ const TURN_MESSAGE_POLL_INTERVAL: std::time::Duration = std::time::Duration::fro
 const RECONNECT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(12);
 const RECONNECT_SILENT_STALL_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(20);
 const RECONNECT_STALL_WARNING_THRESHOLD: u32 = 5;
-const RECONNECT_STALL_MESSAGE: &str = "\n[error] Turn appears stuck after repeated reconnect failures. Ending this turn so the UI does not spin forever. Check network/auth and retry.";
+const RECONNECT_STALL_MESSAGE: &str = "Turn appears stuck after repeated reconnect failures. Ending this turn so the UI does not spin forever. Check network/auth and retry.";
 const POST_TURN_NOTIFICATION_DRAIN_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(200);
 
@@ -65,7 +65,10 @@ async fn maybe_abort_turn_stall(inner: &mut ThreadInner) -> Option<StopReason> {
     let message = match abort_kind {
         StallAbortKind::Reconnect => RECONNECT_STALL_MESSAGE,
     };
-    inner.client.send_agent_text(message).await;
+    inner
+        .client
+        .send_system_message("error", "Turn stalled", message)
+        .await;
     Some(StopReason::EndTurn)
 }
 
@@ -436,10 +439,8 @@ impl Thread {
         {
             let turn = payload.turn;
             let status = turn.status.clone();
-            let turn_error_text = if status == TurnStatus::Failed {
-                turn.error
-                    .as_ref()
-                    .map(|error| format!("\n[turn error] {}", error.message))
+            let turn_error_message = if status == TurnStatus::Failed {
+                turn.error.as_ref().map(|error| error.message.clone())
             } else {
                 None
             };
@@ -504,8 +505,10 @@ impl Thread {
                 }
             }
 
-            if let Some(turn_error_text) = turn_error_text {
-                client.send_agent_text(turn_error_text).await;
+            if let Some(turn_error_message) = turn_error_message {
+                client
+                    .send_system_message("error", "Turn failed", turn_error_message)
+                    .await;
             }
 
             let stop_reason = match status {

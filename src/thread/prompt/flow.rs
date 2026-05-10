@@ -40,8 +40,10 @@ impl Thread {
             if inner.history_replay_in_progress {
                 inner
                     .client
-                    .send_agent_text(
-                        "History replay is still running. Wait for it to finish before sending the next prompt or session command.",
+                    .send_system_message(
+                        "status",
+                        "History replay is still running",
+                        "Wait for it to finish before sending the next prompt or session command.",
                     )
                     .await;
                 return Ok(StopReason::EndTurn);
@@ -61,8 +63,10 @@ impl Thread {
         if inner.history_replay_in_progress {
             inner
                 .client
-                .send_agent_text(
-                    "History replay is still running. Wait for it to finish before sending the next prompt or session command.",
+                .send_system_message(
+                    "status",
+                    "History replay is still running",
+                    "Wait for it to finish before sending the next prompt or session command.",
                 )
                 .await;
             return Ok(StopReason::EndTurn);
@@ -81,7 +85,11 @@ impl Thread {
                 inner.client.clone()
             };
             client
-                .send_agent_text(format!("Rolled back last {num_turns} turn(s)."))
+                .send_system_message(
+                    "status",
+                    "Undo completed",
+                    format!("Rolled back last {num_turns} turn(s)."),
+                )
                 .await;
             return Ok(StopReason::EndTurn);
         }
@@ -130,8 +138,10 @@ impl Thread {
         if inner.compaction_in_progress {
             inner
                 .client
-                .send_agent_text(
-                    "Context compaction is still running. Wait for \"Context compacted.\" and send your prompt again.",
+                .send_system_message(
+                    "status",
+                    "Context compaction is still running",
+                    "Wait for \"Context compacted.\" and send your prompt again.",
                 )
                 .await;
             return Ok(StopReason::EndTurn);
@@ -206,7 +216,11 @@ async fn maybe_prepare_plan_implementation(
 
     inner
         .client
-        .send_agent_text("Switching to default mode and implementing the plan.")
+        .send_system_message(
+            "status",
+            "Switching to default mode",
+            "Implementing the plan.",
+        )
         .await;
     Ok(Some(implementation_input))
 }

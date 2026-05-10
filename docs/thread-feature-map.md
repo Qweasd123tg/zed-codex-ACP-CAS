@@ -247,7 +247,7 @@ flowchart LR
 
 Риск: пропущенная ветка маршрутизации или двойная обработка одного события.
 Отдельно сюда же относятся advisory notifications (`configWarning`, deprecation notice, Windows sandbox warnings): их легко забыть в `_ => Ok(None)` и снова сделать UX немым.
-Account rate-limit warnings должны оставаться одним компактным notice из `src/thread/features/notification/events/warnings.rs` с пустыми строками вокруг текста; отдельные сырые backend-фразы нельзя отправлять несколькими `AgentMessageChunk`, иначе системные предупреждения визуально склеиваются с ответом агента.
+Account rate-limit warnings должны оставаться одним компактным notice из `src/thread/features/notification/events/warnings.rs`; служебные warning/status/error сообщения нужно отправлять через общий Markdown quote formatter в `src/thread/session/client.rs`, чтобы Zed рендерил их отдельным блоком и они не склеивались с обычным ответом агента.
 `ItemStarted`/`ItemCompleted` здесь тоже должны оставаться turn-bound по `expected_turn_id`, иначе stale tail старого turn может создать ложные tool-card старты/апдейты уже в новом контексте.
 Дополнительная инварианта для drain path: `post-turn` и `background` cleanup не должны прокидывать late `JSONRPCRequest` обратно в live approval handlers. Во время drain такие request-ы нужно явно отклонять как stale transport tail; иначе после завершённого turn или прямо перед новым prompt можно случайно получить призрачный approval prompt от старого хвоста.
 

@@ -246,7 +246,10 @@ pub(super) async fn dispatch_session_command(
     match command {
         SessionCommand::Init { args } => {
             if args.is_some() {
-                inner.client.send_agent_text("Usage: `/init`").await;
+                inner
+                    .client
+                    .send_system_message("usage", "Usage", "`/init`")
+                    .await;
                 return Ok(CommandDispatchOutcome::Stop(StopReason::EndTurn));
             }
 
@@ -257,25 +260,32 @@ pub(super) async fn dispatch_session_command(
         }
         SessionCommand::Status { args } => {
             if args.is_some() {
-                inner.client.send_agent_text("Usage: `/status`").await;
+                inner
+                    .client
+                    .send_system_message("usage", "Usage", "`/status`")
+                    .await;
                 return Ok(CommandDispatchOutcome::Stop(StopReason::EndTurn));
             }
 
             inner
                 .client
-                .send_agent_text(crate::thread::session_config::full_status_report(
-                    &inner.workspace_cwd,
-                    &inner.account_status,
-                    inner.total_token_usage.as_ref(),
-                    inner.last_used_tokens,
-                    inner.context_window_size,
-                    inner.context_usage_source,
-                    inner.account_rate_limits.as_ref(),
-                    inner.compaction_in_progress,
-                    &inner.session_mcp_summary,
-                    &inner.session_skills_summary,
-                    &inner.session_plugins_summary,
-                ))
+                .send_system_message(
+                    "status",
+                    "Session status",
+                    crate::thread::session_config::full_status_report(
+                        &inner.workspace_cwd,
+                        &inner.account_status,
+                        inner.total_token_usage.as_ref(),
+                        inner.last_used_tokens,
+                        inner.context_window_size,
+                        inner.context_usage_source,
+                        inner.account_rate_limits.as_ref(),
+                        inner.compaction_in_progress,
+                        &inner.session_mcp_summary,
+                        &inner.session_skills_summary,
+                        &inner.session_plugins_summary,
+                    ),
+                )
                 .await;
             Ok(CommandDispatchOutcome::Stop(StopReason::EndTurn))
         }

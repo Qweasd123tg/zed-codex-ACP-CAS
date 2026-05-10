@@ -15,7 +15,10 @@ pub(in crate::thread) async fn emit_account_rate_limit_warnings(
         return;
     };
 
-    inner.client.send_agent_text(notice).await;
+    inner
+        .client
+        .send_system_message("warning", "Codex limits", notice)
+        .await;
 }
 
 pub(in crate::thread) async fn emit_config_warning(
@@ -24,7 +27,11 @@ pub(in crate::thread) async fn emit_config_warning(
 ) {
     inner
         .client
-        .send_agent_text(format_config_warning(notification))
+        .send_system_message(
+            "warning",
+            "Config warning",
+            format_config_warning(notification),
+        )
         .await;
 }
 
@@ -34,7 +41,11 @@ pub(in crate::thread) async fn emit_deprecation_notice(
 ) {
     inner
         .client
-        .send_agent_text(format_deprecation_notice(notification))
+        .send_system_message(
+            "deprecated",
+            "Deprecation notice",
+            format_deprecation_notice(notification),
+        )
         .await;
 }
 
@@ -44,7 +55,11 @@ pub(in crate::thread) async fn emit_windows_world_writable_warning(
 ) {
     inner
         .client
-        .send_agent_text(format_windows_world_writable_warning(notification))
+        .send_system_message(
+            "warning",
+            "Windows sandbox warning",
+            format_windows_world_writable_warning(notification),
+        )
         .await;
 }
 
@@ -64,7 +79,7 @@ fn format_account_rate_limit_warning_notice(warnings: &[RateLimitWarning]) -> Op
         .collect();
     if !exhausted.is_empty() {
         return Some(format!(
-            "\n\n⛔ Лимиты Codex: {} исчерпан{}. Подробности: `/status`.\n\n",
+            "{} исчерпан{}. Подробности: `/status`.",
             format_label_list(&exhausted),
             if exhausted.len() == 1 { "" } else { "ы" }
         ));
@@ -76,7 +91,7 @@ fn format_account_rate_limit_warning_notice(warnings: &[RateLimitWarning]) -> Op
         .min()?;
     let labels: Vec<&str> = active.iter().map(|warning| warning.label.trim()).collect();
     Some(format!(
-        "\n\n⚠️ Лимиты Codex: осталось меньше {percent}% для {}. Подробности: `/status`.\n\n",
+        "Осталось меньше {percent}% для {}. Подробности: `/status`.",
         format_label_list(&labels)
     ))
 }
@@ -103,7 +118,7 @@ fn format_config_warning(notification: ConfigWarningNotification) -> String {
         range,
     } = notification;
 
-    let mut lines = vec![format!("[warning] {summary}")];
+    let mut lines = vec![summary];
     if let Some(location) = format_config_warning_location(path.as_deref(), range.as_ref()) {
         lines.push(format!("Location: {location}"));
     }
@@ -134,9 +149,9 @@ fn format_deprecation_notice(notification: DeprecationNoticeNotification) -> Str
     let DeprecationNoticeNotification { summary, details } = notification;
     match details {
         Some(details) if !details.trim().is_empty() => {
-            format!("[deprecated] {summary}\n{details}")
+            format!("{summary}\n{details}")
         }
-        _ => format!("[deprecated] {summary}"),
+        _ => summary,
     }
 }
 
@@ -149,8 +164,7 @@ fn format_windows_world_writable_warning(
         failed_scan,
     } = notification;
 
-    let mut lines =
-        vec!["[warning] Windows sandbox cannot protect world-writable directories.".to_string()];
+    let mut lines = vec!["Windows sandbox cannot protect world-writable directories.".to_string()];
     if !sample_paths.is_empty() {
         lines.push(format!("Examples: {}", sample_paths.join(", ")));
     }
@@ -192,7 +206,7 @@ mod tests {
 
         assert_eq!(
             rendered,
-            "[warning] Unknown field\nLocation: /tmp/config.toml:3:5\nRemove it or rename it."
+            "Unknown field\nLocation: /tmp/config.toml:3:5\nRemove it or rename it."
         );
     }
 
@@ -211,9 +225,7 @@ mod tests {
 
         assert_eq!(
             rendered.as_deref(),
-            Some(
-                "\n\n⚠️ Лимиты Codex: осталось меньше 25% для weekly и 5h. Подробности: `/status`.\n\n"
-            )
+            Some("Осталось меньше 25% для weekly и 5h. Подробности: `/status`.")
         );
     }
 
@@ -226,7 +238,7 @@ mod tests {
 
         assert_eq!(
             rendered.as_deref(),
-            Some("\n\n⛔ Лимиты Codex: 5h исчерпан. Подробности: `/status`.\n\n")
+            Some("5h исчерпан. Подробности: `/status`.")
         );
     }
 
@@ -247,7 +259,7 @@ mod tests {
                 summary: "Legacy flag is deprecated".to_string(),
                 details: Some("Use the new selector instead.".to_string()),
             }),
-            "[deprecated] Legacy flag is deprecated\nUse the new selector instead."
+            "Legacy flag is deprecated\nUse the new selector instead."
         );
     }
 
@@ -262,7 +274,7 @@ mod tests {
 
         assert_eq!(
             rendered,
-            "[warning] Windows sandbox cannot protect world-writable directories.\nExamples: C:\\temp, D:\\shared\nAnd 2 more path(s).\nDirectory scan was incomplete, so the warning set may be partial."
+            "Windows sandbox cannot protect world-writable directories.\nExamples: C:\\temp, D:\\shared\nAnd 2 more path(s).\nDirectory scan was incomplete, so the warning set may be partial."
         );
     }
 }

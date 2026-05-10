@@ -126,7 +126,7 @@ pub(in crate::thread) async fn emit_turn_completed(
     {
         inner
             .client
-            .send_agent_text(format!("\n[turn error] {}", error.message))
+            .send_system_message("error", "Turn failed", error.message)
             .await;
     }
 
@@ -156,7 +156,7 @@ pub(in crate::thread) async fn emit_turn_error(
             inner.mark_turn_progress();
             inner
                 .client
-                .send_agent_text(format!("\n[error] {message}"))
+                .send_system_message("error", "Turn error", message)
                 .await;
         }
     }

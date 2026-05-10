@@ -123,19 +123,23 @@ impl Thread {
             SESSION_STATUS_VALUE => {
                 inner
                     .client
-                    .send_agent_text(full_status_report(
-                        &inner.workspace_cwd,
-                        &inner.account_status,
-                        inner.total_token_usage.as_ref(),
-                        inner.last_used_tokens,
-                        inner.context_window_size,
-                        inner.context_usage_source,
-                        inner.account_rate_limits.as_ref(),
-                        inner.compaction_in_progress,
-                        &inner.session_mcp_summary,
-                        &inner.session_skills_summary,
-                        &inner.session_plugins_summary,
-                    ))
+                    .send_system_message(
+                        "status",
+                        "Session status",
+                        full_status_report(
+                            &inner.workspace_cwd,
+                            &inner.account_status,
+                            inner.total_token_usage.as_ref(),
+                            inner.last_used_tokens,
+                            inner.context_window_size,
+                            inner.context_usage_source,
+                            inner.account_rate_limits.as_ref(),
+                            inner.compaction_in_progress,
+                            &inner.session_mcp_summary,
+                            &inner.session_skills_summary,
+                            &inner.session_plugins_summary,
+                        ),
+                    )
                     .await;
                 Ok(())
             }
@@ -153,11 +157,15 @@ impl Thread {
                 }
                 inner
                     .client
-                    .send_agent_text(context_usage_message(
-                        inner.last_used_tokens,
-                        inner.context_window_size,
-                        inner.context_usage_source,
-                    ))
+                    .send_system_message(
+                        "status",
+                        "Context usage",
+                        context_usage_message(
+                            inner.last_used_tokens,
+                            inner.context_window_size,
+                            inner.context_usage_source,
+                        ),
+                    )
                     .await;
                 drop(inner);
                 if notify_options_update {
@@ -168,21 +176,33 @@ impl Thread {
             MCP_STATUS_VALUE => {
                 inner
                     .client
-                    .send_agent_text(inner.session_mcp_summary.report.clone())
+                    .send_system_message(
+                        "status",
+                        "MCP status",
+                        inner.session_mcp_summary.report.clone(),
+                    )
                     .await;
                 Ok(())
             }
             SKILLS_STATUS_VALUE => {
                 inner
                     .client
-                    .send_agent_text(inner.session_skills_summary.report.clone())
+                    .send_system_message(
+                        "status",
+                        "Skills status",
+                        inner.session_skills_summary.report.clone(),
+                    )
                     .await;
                 Ok(())
             }
             PLUGINS_STATUS_VALUE => {
                 inner
                     .client
-                    .send_agent_text(inner.session_plugins_summary.report.clone())
+                    .send_system_message(
+                        "status",
+                        "Plugins status",
+                        inner.session_plugins_summary.report.clone(),
+                    )
                     .await;
                 Ok(())
             }
@@ -193,9 +213,11 @@ impl Thread {
                 }
                 inner
                     .client
-                    .send_agent_text(combined_limits_reset_message(
-                        inner.account_rate_limits.as_ref(),
-                    ))
+                    .send_system_message(
+                        "status",
+                        "Account limits",
+                        combined_limits_reset_message(inner.account_rate_limits.as_ref()),
+                    )
                     .await;
                 drop(inner);
                 if notify_options_update {
@@ -205,7 +227,10 @@ impl Thread {
             }
             CONTEXT_COMPACT_VALUE => {
                 let message = start_context_compaction(&mut inner).await?;
-                inner.client.send_agent_text(message).await;
+                inner
+                    .client
+                    .send_system_message("status", "Context compaction", message)
+                    .await;
                 drop(inner);
                 self.spawn_compaction_drain_task();
                 let drain_outcome = self

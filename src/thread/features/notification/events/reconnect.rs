@@ -18,9 +18,13 @@ pub(in crate::thread) fn parse_reconnect_progress(message: &str) -> Option<Recon
 }
 
 pub(in crate::thread) fn format_reconnect_status(progress: ReconnectProgress) -> String {
-    format!(
-        "\n[status] Reconnecting to app-server ({}/{}). Waiting for the turn to resume.",
-        progress.current, progress.total
+    crate::thread::session_client::format_system_message(
+        "status",
+        "Reconnecting to app-server",
+        &format!(
+            "Attempt {}/{}. Waiting for the turn to resume.",
+            progress.current, progress.total
+        ),
     )
 }
 
@@ -57,7 +61,7 @@ mod tests {
                 current: 2,
                 total: 5,
             }),
-            "\n[status] Reconnecting to app-server (2/5). Waiting for the turn to resume."
+            "\n\n> **System / status: Reconnecting to app-server**\n>\n> Attempt 2/5. Waiting for the turn to resume.\n\n"
         );
     }
 }
