@@ -825,7 +825,7 @@ impl CodexAgent {
         args: SetSessionConfigOptionRequest,
     ) -> Result<SetSessionConfigOptionResponse, Error> {
         let thread = self.get_thread(&args.session_id)?;
-        let is_mode_option = args.config_id.0.as_ref() == "mode";
+        let is_mode_option = matches!(args.config_id.0.as_ref(), "mode" | "permissions");
         let value = args.value.as_value_id().cloned().ok_or_else(|| {
             Error::invalid_params().data("boolean config values are not supported")
         })?;

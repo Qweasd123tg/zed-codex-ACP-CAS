@@ -2,8 +2,9 @@
 
 use crate::thread::{
     AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextUsageSource,
-    EditApprovalMode, ModeKind, ReasoningEffort, ServiceTier, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigSelectGroup, SessionConfigSelectOption, ThreadInner,
+    EditApprovalMode, ModeKind, PLAN_SESSION_MODE_ID, ReasoningEffort, ServiceTier,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectGroup,
+    SessionConfigSelectOption, ThreadInner,
 };
 
 #[path = "context.rs"]
@@ -113,27 +114,22 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         session_plugins_summary,
     } = input;
 
-    let mode_state = mode_state(collaboration_mode_kind);
     let current_permissions_id = current_permission_mode_id(approval, sandbox, edit_approval_mode);
+    let current_permissions_value = if collaboration_mode_kind == ModeKind::Plan {
+        PLAN_SESSION_MODE_ID.to_string()
+    } else {
+        current_permissions_id.0.to_string()
+    };
     let current_model_entry = find_model_for_current(models, current_model);
     let current_model_id = current_model_entry
         .map(|model| model.id.clone())
         .unwrap_or_else(|| current_model.to_string());
-    let current_mode_description = current_mode_description(&mode_state);
-    let mut options = Vec::with_capacity(4);
-    let mut mode_options = Vec::with_capacity(mode_state.available_modes.len());
-    for mode in &mode_state.available_modes {
-        mode_options.push(
-            SessionConfigSelectOption::new(mode.id.0.clone(), mode.name.clone())
-                .description(mode.description.clone()),
-        );
-    }
-    options.push(
-        SessionConfigOption::select("mode", "Mode", mode_state.current_mode_id.0, mode_options)
-            .category(SessionConfigOptionCategory::Mode)
-            .description(current_mode_description),
-    );
+    let mut options = Vec::with_capacity(3);
 
+    let workflow_options = vec![
+        SessionConfigSelectOption::new(PLAN_SESSION_MODE_ID, "Plan")
+            .description("Plan-first mode with visible step tracking."),
+    ];
     let mut guarded_permission_options = Vec::new();
     let mut bypass_permission_options = Vec::new();
     for permission_mode in permission_modes(approval, sandbox, edit_approval_mode) {
@@ -146,6 +142,11 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         }
     }
     let mut permission_groups = Vec::new();
+    permission_groups.push(SessionConfigSelectGroup::new(
+        "workflow",
+        "Workflow",
+        workflow_options,
+    ));
     if !guarded_permission_options.is_empty() {
         permission_groups.push(SessionConfigSelectGroup::new(
             "guarded",
@@ -164,13 +165,14 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         SessionConfigOption::select(
             "permissions",
             "Permissions",
-            current_permissions_id.0,
+            current_permissions_value,
             permission_groups,
         )
         .description(current_permission_description(
             approval,
             sandbox,
             edit_approval_mode,
+            collaboration_mode_kind,
         )),
     );
 
@@ -355,26 +357,34 @@ fn fast_mode_label(service_tier: Option<ServiceTier>) -> &'static str {
     }
 }
 
-fn current_mode_description(mode_state: &crate::thread::SessionModeState) -> String {
-    mode_state
-        .available_modes
-        .iter()
-        .find(|mode| mode.id == mode_state.current_mode_id)
-        .and_then(|mode| mode.description.clone())
-        .unwrap_or_else(|| "Choose how the agent should collaborate in this session".to_string())
-}
-
 fn current_permission_description(
     approval: AppAskForApproval,
     sandbox: AppSandboxMode,
     edit_approval_mode: EditApprovalMode,
+    collaboration_mode_kind: ModeKind,
 ) -> String {
+    let permission_description =
+        current_permission_mode_description(approval, sandbox, edit_approval_mode)
+            .unwrap_or_else(|| "Choose file edit and sandbox permission behavior".to_string());
+    if collaboration_mode_kind == ModeKind::Plan {
+        return format!(
+            "Plan-first mode with visible step tracking.\nPermissions: {permission_description}"
+        );
+    }
+
+    permission_description
+}
+
+fn current_permission_mode_description(
+    approval: AppAskForApproval,
+    sandbox: AppSandboxMode,
+    edit_approval_mode: EditApprovalMode,
+) -> Option<String> {
     let current_permissions_id = current_permission_mode_id(approval, sandbox, edit_approval_mode);
     permission_modes(approval, sandbox, edit_approval_mode)
         .into_iter()
         .find(|mode| mode.id == current_permissions_id)
         .and_then(|mode| mode.description)
-        .unwrap_or_else(|| "Choose file edit and sandbox permission behavior".to_string())
 }
 
 fn model_selector_description(
@@ -509,7 +519,8 @@ mod tests {
             session_plugins_summary: &plugins_summary,
         });
 
-        assert_eq!(options.len(), 4);
+        assert_eq!(options.len(), 3);
+        assert!(options.iter().all(|option| option.id.0.as_ref() != "mode"));
         assert!(
             options
                 .iter()
@@ -654,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn selector_descriptions_track_current_mode_permissions_and_context() {
+    fn permissions_selector_embeds_plan_mode_without_losing_permission_state() {
         let account_status = super::AccountStatus::default();
         let mcp_summary = super::ContextSelectorSummary::default();
         let skills_summary = super::ContextSelectorSummary::default();
@@ -684,23 +695,42 @@ mod tests {
             session_plugins_summary: &plugins_summary,
         });
 
-        let mode = options
-            .iter()
-            .find(|option| option.id.0.as_ref() == "mode")
-            .expect("mode selector exists");
-        assert_eq!(
-            mode.description.as_deref(),
-            Some("Plan-first mode with visible step tracking.")
-        );
-
         let permissions = options
             .iter()
             .find(|option| option.id.0.as_ref() == "permissions")
             .expect("permissions selector exists");
-        assert_eq!(
-            permissions.description.as_deref(),
-            Some("Read-only sandbox. Codex must ask before edits, writes, or network access.")
+        assert!(
+            permissions
+                .description
+                .as_deref()
+                .is_some_and(|description| {
+                    description.contains("Plan-first mode with visible step tracking.")
+                        && description.contains("Permissions: Read-only sandbox.")
+                })
         );
+        let SessionConfigKind::Select(select) = &permissions.kind else {
+            panic!("permissions selector should be a select config option");
+        };
+        assert_eq!(select.current_value.0.as_ref(), "plan");
+        let SessionConfigSelectOptions::Grouped(groups) = &select.options else {
+            panic!("permissions selector should use grouped options");
+        };
+        assert_eq!(
+            groups
+                .iter()
+                .map(|group| group.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Workflow", "Guarded", "Bypass"]
+        );
+        assert!(
+            groups[0]
+                .options
+                .iter()
+                .any(|option| option.value.0.as_ref() == "plan" && option.name == "Plan")
+        );
+        assert!(groups[1].options.iter().any(|option| {
+            option.value.0.as_ref() == "read-only" && option.name == "Read only"
+        }));
 
         let context = options
             .iter()

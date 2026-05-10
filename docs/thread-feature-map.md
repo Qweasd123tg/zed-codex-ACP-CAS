@@ -210,10 +210,11 @@ flowchart LR
   синхронизируется после in-place `/resume` и `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
 - Нижние selectors `Context` и `Permissions` используют тот же session/config lifecycle. В текущем `Zed` descriptions у config options
   рендерятся как обычный text label, не Markdown, поэтому adapter-side UX держится на коротких option names и ACP grouped select options:
-  `Model` делит пункты на `Models`, `Reasoning`, `Speed`, `Context` — на `Usage`, `Limits`, `Integrations`, `Actions`, а `Permissions` — на guarded и bypass режимы.
+  `Model` делит пункты на `Models`, `Reasoning`, `Speed`, `Context` — на `Usage`, `Limits`, `Integrations`, `Actions`, а `Permissions` — на workflow, guarded и bypass режимы.
   У ACP select есть только один `current_value`, поэтому выбранные nested пункты `Reasoning`/`Speed` помечаются adapter-side через `★` в option label.
+- `Plan` intentionally живет внутри `Permissions` selector: при выборе `Plan` кнопка показывает `Plan`, но sandbox/approval профиль сохраняется; выбор `Read only` / `Workspace` / `Ask edits` / `Full access` возвращает session в default chat mode и обновляет permission profile.
 - Read-only пункты `Context` (`Status`, `MCP`, `Skills`, `Plugins`, `Limits`) не отправляют summary в чат при клике: Zed уже показывает подробности в hover/description. Выбор `Context`/`Limits` только меняет короткое значение нижнего selector, а явный chat-report остается за `/status`.
-- Hover/description у самих selectors тоже собирается из текущего runtime state: `Mode` показывает активный режим, `Permissions` — активный sandbox/approval профиль, `Model` — текущие model/reasoning/speed, а `Context` — context usage и account limits вместе без необходимости открывать пункт списка.
+- Hover/description у самих selectors тоже собирается из текущего runtime state: `Permissions` показывает active workflow и сохраненный sandbox/approval профиль, `Model` — текущие model/reasoning/speed, а `Context` — context usage и account limits вместе без необходимости открывать пункт списка.
 - Account rate limits дополнительно дают одноразовые chat-advisory при переходе через 75/90/95/100% использованного окна; состояние порогов хранится в `ThreadInner`,
   а форматирование находится в `src/thread/session/config/limits.rs`, чтобы `Context` selector и warning-текст не расходились.
 - `ThreadTokenUsageUpdated` остается adapter-side forwarding в ACP `UsageUpdate`, но нативный context circle в текущем `Zed` для external ACP не подтвержден:
@@ -240,7 +241,7 @@ flowchart LR
 - `src/thread/features/notification/events/turn.rs`
 
 Риск: сломать переходы `Plan -> Default` и fallback при неполных plan-update.
-Отдельно: UX `Speed` selector не является `ModeKind` и не должен смешиваться с `Plan`/`Default`. Это session/config `service_tier`; если менять его plumbing, нужно сохранять состояние в `ThreadInner` и подавать явный `service_tier` в следующий `TurnStartParams`.
+Отдельно: UX `Speed` selector не является `ModeKind` и не должен смешиваться с `Plan`/`Default`. Это session/config `service_tier`; если менять его plumbing, нужно сохранять состояние в `ThreadInner` и подавать явный `service_tier` в следующий `TurnStartParams`. `Plan` теперь surfaced через `Permissions` selector, но runtime state всё ещё остается `ThreadInner.collaboration_mode_kind`.
 
 ### Маршрутизация сообщений
 - `src/thread/notification/dispatch.rs`
@@ -267,6 +268,7 @@ Startup/resume/thread-switch snapshots account rate limits должны толь
 Риск: если не синхронизировать эти файлы вместе, можно либо снова получить вечную загрузку ACP UI, либо преждевременно завершать живой turn.
 Отдельная инварианта: watchdog-abort stalled turn должен проходить через тот же `finalize + drain post-turn notifications`, что и обычное завершение; иначе transport-хвост протечёт в следующий prompt.
 Отдельный UX-контракт: reconnect warnings не должны спамить чат сырой backend-строкой на каждую дельту/error. Безопасная текущая схема: `src/thread/features/notification/events/reconnect.rs` нормализует `Reconnecting... N/N`, live handlers показывают один статус на первую волну reconnect warning-ов, а watchdog в `src/thread/turn/execution.rs` оставляет только reconnect-assisted stall abort без агрессивного default cutoff на “полную тишину”, потому что долгие silent runs у агента могут быть легитимны.
+Нативный Zed retry/error banner над composer не доступен внешнему ACP adapter напрямую: без Zed-side surface адаптер может только отправить chat/system notice, но не показать встроенный transient banner как у оригинального Zed Agent.
 
 ### Replay/Resume
 - `src/thread/features/resume/*`

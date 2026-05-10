@@ -47,17 +47,27 @@ impl Thread {
 
     pub async fn set_permission_mode(&self, mode: SessionModeId) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
-        let collaboration_mode_kind = inner.collaboration_mode_kind;
+        let previous_mode = inner.collaboration_mode_kind;
+        let had_visible_plan_state = has_visible_plan_state(&inner);
+        if mode.0.as_ref() == PLAN_SESSION_MODE_ID {
+            inner.collaboration_mode_kind = ModeKind::Plan;
+            return Ok(());
+        }
+
+        let next_mode = ModeKind::Default;
         if mode.0.as_ref() == AUTO_ASK_EDITS_MODE_ID {
             let default_preset = APPROVAL_PRESETS
                 .iter()
                 .find(|preset| preset.id == AUTO_MODE_ID)
                 .ok_or_else(Error::invalid_params)?;
-            inner.apply_mode_preset(
-                default_preset,
-                EditApprovalMode::AskEveryEdit,
-                collaboration_mode_kind,
-            );
+            inner.apply_mode_preset(default_preset, EditApprovalMode::AskEveryEdit, next_mode);
+            if should_clear_visible_plan_for_mode_change(
+                previous_mode,
+                next_mode,
+                had_visible_plan_state,
+            ) {
+                clear_visible_plan_state(&mut inner).await;
+            }
             return Ok(());
         }
 
@@ -70,7 +80,14 @@ impl Thread {
         } else {
             EditApprovalMode::AskEveryEdit
         };
-        inner.apply_mode_preset(preset, edit_approval_mode, collaboration_mode_kind);
+        inner.apply_mode_preset(preset, edit_approval_mode, next_mode);
+        if should_clear_visible_plan_for_mode_change(
+            previous_mode,
+            next_mode,
+            had_visible_plan_state,
+        ) {
+            clear_visible_plan_state(&mut inner).await;
+        }
         Ok(())
     }
 
