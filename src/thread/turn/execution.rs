@@ -439,12 +439,12 @@ impl Thread {
         {
             let turn = payload.turn;
             let status = turn.status.clone();
-            let turn_error_message = if status == TurnStatus::Failed {
+            let raw_turn_error_message = if status == TurnStatus::Failed {
                 turn.error.as_ref().map(|error| error.message.clone())
             } else {
                 None
             };
-            let (completion_disposition, diff_snapshot, client) = {
+            let (completion_disposition, diff_snapshot, client, turn_error_message) = {
                 let mut inner = self.inner.lock().await;
                 let disposition = crate::thread::turn_state::register_turn_completion(
                     &mut inner.last_completed_turn_id,
@@ -477,7 +477,21 @@ impl Thread {
                 } else {
                     None
                 };
-                (disposition, diff_snapshot, inner.client.clone())
+                let turn_error_message = if disposition
+                    == crate::thread::turn_state::TurnCompletionDisposition::Accepted
+                {
+                    raw_turn_error_message
+                        .as_ref()
+                        .and_then(|message| inner.record_turn_error_notice(turn_id, message))
+                } else {
+                    None
+                };
+                (
+                    disposition,
+                    diff_snapshot,
+                    inner.client.clone(),
+                    turn_error_message,
+                )
             };
 
             match completion_disposition {

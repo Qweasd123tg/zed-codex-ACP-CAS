@@ -483,6 +483,7 @@ impl Thread {
                 active_turn_saw_plan_delta: false,
                 started_tool_calls: HashSet::new(),
                 last_completed_turn_id: None,
+                last_turn_error_notice: None,
                 turn_plan_updates_seen: HashSet::new(),
                 fallback_plan: None,
                 file_change_locations: HashMap::new(),

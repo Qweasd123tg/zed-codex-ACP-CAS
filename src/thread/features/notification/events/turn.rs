@@ -123,10 +123,11 @@ pub(in crate::thread) async fn emit_turn_completed(
     let status = turn.status.clone();
     if status == TurnStatus::Failed
         && let Some(error) = turn.error
+        && let Some(message) = inner.record_turn_error_notice(&turn.id, error.message)
     {
         inner
             .client
-            .send_system_message("error", "Turn failed", error.message)
+            .send_system_message("error", "Turn failed", message)
             .await;
     }
 
@@ -154,10 +155,12 @@ pub(in crate::thread) async fn emit_turn_error(
             }
         } else if !message.trim().is_empty() {
             inner.mark_turn_progress();
-            inner
-                .client
-                .send_system_message("error", "Turn error", message)
-                .await;
+            if let Some(message) = inner.record_turn_error_notice(&turn_id, message) {
+                inner
+                    .client
+                    .send_system_message("error", "Turn error", message)
+                    .await;
+            }
         }
     }
 }

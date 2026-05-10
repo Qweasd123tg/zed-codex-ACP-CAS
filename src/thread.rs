@@ -166,6 +166,7 @@ struct ThreadInner {
     active_turn_saw_plan_delta: bool,
     started_tool_calls: HashSet<String>,
     last_completed_turn_id: Option<String>,
+    last_turn_error_notice: Option<(String, String)>,
     turn_plan_updates_seen: HashSet<String>,
     fallback_plan: Option<FallbackPlanState>,
     file_change_locations: HashMap<String, Vec<PathBuf>>,

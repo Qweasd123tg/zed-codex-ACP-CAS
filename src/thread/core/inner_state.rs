@@ -14,6 +14,7 @@ impl ThreadInner {
         self.active_turn_saw_plan_delta = false;
         self.started_tool_calls.clear();
         self.last_completed_turn_id = None;
+        self.last_turn_error_notice = None;
         self.turn_plan_updates_seen.clear();
         self.fallback_plan = None;
         self.file_change_locations.clear();
@@ -74,6 +75,14 @@ impl ThreadInner {
         self.turn_reconnect_warning_count
     }
 
+    pub(super) fn record_turn_error_notice(
+        &mut self,
+        turn_id: &str,
+        message: impl AsRef<str>,
+    ) -> Option<String> {
+        record_turn_error_notice(&mut self.last_turn_error_notice, turn_id, message)
+    }
+
     pub(super) fn apply_mode_preset(
         &mut self,
         preset: &ApprovalPreset,
@@ -100,5 +109,50 @@ impl ThreadInner {
             "Sandbox mode was inconsistent with stored sandbox policy; syncing mode"
         );
         self.sandbox_mode = expected_mode;
+    }
+}
+
+fn record_turn_error_notice(
+    last_notice: &mut Option<(String, String)>,
+    turn_id: &str,
+    message: impl AsRef<str>,
+) -> Option<String> {
+    let message = message.as_ref().trim();
+    if message.is_empty() {
+        return None;
+    }
+
+    if last_notice
+        .as_ref()
+        .is_some_and(|(seen_turn_id, seen_message)| {
+            seen_turn_id == turn_id && seen_message == message
+        })
+    {
+        return None;
+    }
+
+    *last_notice = Some((turn_id.to_string(), message.to_string()));
+    Some(message.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::record_turn_error_notice;
+
+    #[test]
+    fn turn_error_notice_dedupes_same_message_for_same_turn() {
+        let mut last_notice = None;
+        assert_eq!(
+            record_turn_error_notice(&mut last_notice, "turn-1", " limit reached "),
+            Some("limit reached".to_string())
+        );
+        assert_eq!(
+            record_turn_error_notice(&mut last_notice, "turn-1", "limit reached"),
+            None
+        );
+        assert_eq!(
+            record_turn_error_notice(&mut last_notice, "turn-2", "limit reached"),
+            Some("limit reached".to_string())
+        );
     }
 }
