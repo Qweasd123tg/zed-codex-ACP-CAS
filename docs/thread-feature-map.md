@@ -210,10 +210,10 @@ flowchart LR
   синхронизируется после in-place `/resume` и `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
 - Нижние selectors `Context` и `Permissions` используют тот же session/config lifecycle. В текущем `Zed` descriptions у config options
   рендерятся как обычный text label, не Markdown, поэтому adapter-side UX держится на коротких option names и ACP grouped select options:
-  `Model` делит пункты на `Models`, `Reasoning`, `Speed`, `Context` — на `Usage`, `Integrations`, `Limits`, `Actions`, а `Permissions` — на guarded и bypass режимы.
+  `Model` делит пункты на `Models`, `Reasoning`, `Speed`, `Context` — на `Usage`, `Limits`, `Integrations`, `Actions`, а `Permissions` — на guarded и bypass режимы.
   У ACP select есть только один `current_value`, поэтому выбранные nested пункты `Reasoning`/`Speed` помечаются adapter-side через `★` в option label.
 - Read-only пункты `Context` (`Status`, `MCP`, `Skills`, `Plugins`, `Limits`) не отправляют summary в чат при клике: Zed уже показывает подробности в hover/description. Выбор `Context`/`Limits` только меняет короткое значение нижнего selector, а явный chat-report остается за `/status`.
-- Hover/description у самих selectors тоже собирается из текущего runtime state: `Mode` показывает активный режим, `Permissions` — активный sandbox/approval профиль, `Model` — текущие model/reasoning/speed, а `Context` — выбранный context/limits summary без необходимости открывать пункт списка.
+- Hover/description у самих selectors тоже собирается из текущего runtime state: `Mode` показывает активный режим, `Permissions` — активный sandbox/approval профиль, `Model` — текущие model/reasoning/speed, а `Context` — context usage и account limits вместе без необходимости открывать пункт списка.
 - Account rate limits дополнительно дают одноразовые chat-advisory при переходе через 75/90/95/100% использованного окна; состояние порогов хранится в `ThreadInner`,
   а форматирование находится в `src/thread/session/config/limits.rs`, чтобы `Context` selector и warning-текст не расходились.
 - `ThreadTokenUsageUpdated` остается adapter-side forwarding в ACP `UsageUpdate`, но нативный context circle в текущем `Zed` для external ACP не подтвержден:

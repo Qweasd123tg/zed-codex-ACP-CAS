@@ -139,8 +139,8 @@ pub(in crate::thread) fn context_control_option_groups(
 
     vec![
         SessionConfigSelectGroup::new("usage", "Usage", usage_options),
-        SessionConfigSelectGroup::new("integrations", "Integrations", integration_options),
         SessionConfigSelectGroup::new("limits", "Limits", limit_options),
+        SessionConfigSelectGroup::new("integrations", "Integrations", integration_options),
         SessionConfigSelectGroup::new("actions", "Actions", action_options),
     ]
 }
@@ -499,10 +499,10 @@ mod tests {
             .iter()
             .map(|group| group.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["Usage", "Integrations", "Limits", "Actions"]);
+        assert_eq!(names, vec!["Usage", "Limits", "Integrations", "Actions"]);
         assert_eq!(groups[0].options.len(), 2);
-        assert_eq!(groups[1].options.len(), 3);
-        assert_eq!(groups[2].options[0].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
+        assert_eq!(groups[1].options[0].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
+        assert_eq!(groups[2].options.len(), 3);
         assert_eq!(groups[3].options[0].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
     }
 

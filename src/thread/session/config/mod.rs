@@ -199,7 +199,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
     options.push(
         SessionConfigOption::select(
             "context_control",
-            " ",
+            "Context",
             current_context_display.value_id(),
             context::context_control_option_groups(
                 workspace_cwd,
@@ -217,7 +217,6 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             ),
         )
         .description(context_selector_description(
-            current_context_display,
             current_used_tokens,
             current_context_window_size,
             current_context_usage_source,
@@ -398,23 +397,22 @@ fn model_selector_description(
 }
 
 fn context_selector_description(
-    current_display: ContextControlDisplay,
     used: Option<u64>,
     size: Option<u64>,
     usage_source: Option<ContextUsageSource>,
     rate_limits: Option<&codex_app_server_protocol::RateLimitSnapshot>,
     compaction_in_progress: bool,
 ) -> String {
-    let mut description = match current_display {
-        ContextControlDisplay::Context => context::context_usage_message(used, size, usage_source),
-        ContextControlDisplay::FiveHourLimit => limits::limits_status_description(rate_limits),
-    };
+    let mut sections = vec![
+        context::context_usage_message(used, size, usage_source),
+        limits::limits_status_description(rate_limits),
+    ];
 
     if compaction_in_progress {
-        description.push_str("\nContext compaction is currently running.");
+        sections.push("Context compaction is currently running.".to_string());
     }
 
-    description
+    sections.join("\n\n")
 }
 
 pub(super) use context::{
@@ -631,8 +629,11 @@ mod tests {
             .iter()
             .find(|option| option.id.0.as_ref() == "context_control")
             .expect("context selector exists");
+        assert_eq!(context.name, "Context");
         assert!(context.description.as_deref().is_some_and(|description| {
-            description.contains("5h 80% · wk 94%")
+            description.contains("Context usage: 195499/258400 tokens.")
+                && description.contains("Source: live.")
+                && description.contains("5h 80% · wk 94%")
                 && description.contains("5-hour: resets -")
                 && description.contains("Weekly: resets -")
         }));
