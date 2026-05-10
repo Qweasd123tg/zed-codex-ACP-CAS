@@ -37,6 +37,14 @@ pub(in crate::thread) fn combined_limits_reset_message(
     )
 }
 
+pub(in crate::thread) fn limits_status_description(snapshot: Option<&RateLimitSnapshot>) -> String {
+    format!(
+        "{}\n{}",
+        combined_limits_status_label(snapshot),
+        combined_limits_reset_message(snapshot)
+    )
+}
+
 pub(in crate::thread) fn five_hour_status_label(snapshot: Option<&RateLimitSnapshot>) -> String {
     format!(
         "5h {}",

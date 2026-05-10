@@ -469,6 +469,7 @@ impl Thread {
                 reasoning_effort,
                 agent_labels,
                 compaction_in_progress: false,
+                context_control_display: Default::default(),
                 last_used_tokens: cached_context_usage.map(|(used, _)| used),
                 total_token_usage: None,
                 context_window_size: cached_context_usage.map(|(_, size)| size),

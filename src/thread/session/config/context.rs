@@ -5,7 +5,9 @@ use std::path::Path;
 use codex_app_server_protocol::{Account, RateLimitSnapshot, TokenUsageBreakdown};
 use codex_protocol::account::PlanType;
 
-use super::limits::{combined_limits_reset_message, combined_limits_status_label};
+use super::limits::{
+    combined_limits_reset_message, five_hour_status_label, limits_status_description,
+};
 use crate::thread::{ContextUsageSource, SessionConfigSelectGroup, SessionConfigSelectOption};
 
 #[path = "context/mcp.rs"]
@@ -86,7 +88,7 @@ pub(in crate::thread) fn context_control_options(
         SessionConfigSelectOption::new(PLUGINS_STATUS_VALUE, &plugins_summary.label)
             .description(plugins_summary.description.clone()),
         SessionConfigSelectOption::new(CONTEXT_LIMITS_VALUE, limits_status_label(rate_limits))
-            .description(combined_limits_reset_message(rate_limits)),
+            .description(limits_status_description(rate_limits)),
         SessionConfigSelectOption::new(CONTEXT_COMPACT_VALUE, "Compact now")
             .description("Summarize the conversation to free context window"),
     ]
@@ -286,7 +288,7 @@ fn context_status_label(
 }
 
 fn limits_status_label(rate_limits: Option<&RateLimitSnapshot>) -> String {
-    combined_limits_status_label(rate_limits)
+    five_hour_status_label(rate_limits)
 }
 
 fn status_label(
@@ -522,7 +524,7 @@ mod tests {
             &empty_summary,
         );
         assert_eq!(options[0].name, "---");
-        assert_eq!(options[5].name, "5h -- · wk --");
+        assert_eq!(options[5].name, "5h --");
         assert_eq!(options[6].name, "Compact now");
     }
 
@@ -584,7 +586,13 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[5].name, "5h 80% · wk 94%");
+        assert_eq!(options[5].name, "5h 80%");
+        assert!(
+            options[5]
+                .description
+                .as_deref()
+                .is_some_and(|description| description.contains("5h 80% · wk 94%"))
+        );
     }
 
     #[test]

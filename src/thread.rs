@@ -152,6 +152,7 @@ struct ThreadInner {
     reasoning_effort: ReasoningEffort,
     agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
     compaction_in_progress: bool,
+    context_control_display: ContextControlDisplay,
     last_used_tokens: Option<u64>,
     total_token_usage: Option<AppTokenUsageBreakdown>,
     context_window_size: Option<u64>,
@@ -188,6 +189,13 @@ struct ThreadInner {
 enum ContextUsageSource {
     Live,
     Cached,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ContextControlDisplay {
+    #[default]
+    Context,
+    FiveHourLimit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

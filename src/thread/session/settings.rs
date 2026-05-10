@@ -8,9 +8,9 @@ use super::session_config::{
     parse_model_speed_value, parse_reasoning_effort, reasoning_effort_value,
 };
 use super::{
-    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID,
-    EditApprovalMode, Error, ModeKind, ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort,
-    SessionConfigId, SessionModeId, Thread, replay,
+    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, ContextControlDisplay,
+    DEFAULT_SESSION_MODE_ID, EditApprovalMode, Error, ModeKind, ModelId, PLAN_SESSION_MODE_ID,
+    ReasoningEffort, SessionConfigId, SessionModeId, Thread, replay,
 };
 use crate::thread::features::session::controls::start_context_compaction;
 use crate::thread::features::{
@@ -118,6 +118,7 @@ impl Thread {
 
     pub async fn set_context_control(&self, value: SessionConfigValueId) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
+        let mut notify_options_update = false;
         match value.0.as_ref() {
             SESSION_STATUS_VALUE => {
                 inner
@@ -139,7 +140,15 @@ impl Thread {
                 Ok(())
             }
             CONTEXT_STATUS_VALUE => {
+                if inner.context_control_display != ContextControlDisplay::Context {
+                    inner.context_control_display = ContextControlDisplay::Context;
+                    notify_options_update = true;
+                }
                 if inner.last_used_tokens.is_none() && inner.context_window_size.is_none() {
+                    drop(inner);
+                    if notify_options_update {
+                        self.notify_config_options_update().await;
+                    }
                     return Ok(());
                 }
                 inner
@@ -150,6 +159,10 @@ impl Thread {
                         inner.context_usage_source,
                     ))
                     .await;
+                drop(inner);
+                if notify_options_update {
+                    self.notify_config_options_update().await;
+                }
                 Ok(())
             }
             MCP_STATUS_VALUE => {
@@ -174,12 +187,20 @@ impl Thread {
                 Ok(())
             }
             CONTEXT_LIMITS_VALUE => {
+                if inner.context_control_display != ContextControlDisplay::FiveHourLimit {
+                    inner.context_control_display = ContextControlDisplay::FiveHourLimit;
+                    notify_options_update = true;
+                }
                 inner
                     .client
                     .send_agent_text(combined_limits_reset_message(
                         inner.account_rate_limits.as_ref(),
                     ))
                     .await;
+                drop(inner);
+                if notify_options_update {
+                    self.notify_config_options_update().await;
+                }
                 Ok(())
             }
             CONTEXT_COMPACT_VALUE => {
