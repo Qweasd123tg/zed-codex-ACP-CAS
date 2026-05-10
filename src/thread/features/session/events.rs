@@ -54,7 +54,10 @@ pub(in crate::thread) async fn emit_context_compaction_completed(inner: &mut Thr
     inner.last_used_tokens = None;
     inner.context_usage_source = None;
     notify_config_update(inner).await;
-    inner.client.send_agent_thought("Context compacted.").await;
+    inner
+        .client
+        .send_system_message("status", "Context compaction", "Context compacted.")
+        .await;
 }
 
 // Завершаем локальное состояние compaction, если backend прислал terminal error без completed item.

@@ -311,9 +311,9 @@ pub(super) async fn dispatch_session_command(
         SessionCommand::Unarchive { thread_id } => Ok(CommandDispatchOutcome::Stop(
             session::controls::handle_unarchive_command(inner, thread_id).await?,
         )),
-        SessionCommand::Compact => Ok(CommandDispatchOutcome::Stop(
-            session::controls::handle_compact_command(inner).await?,
-        )),
+        SessionCommand::Compact => {
+            Err(Error::internal_error().data("compact should be handled directly in prompt flow"))
+        }
         SessionCommand::Undo { .. } => {
             Err(Error::internal_error().data("undo should be handled directly in prompt flow"))
         }

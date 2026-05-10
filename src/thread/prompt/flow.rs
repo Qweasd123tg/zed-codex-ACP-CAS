@@ -34,7 +34,6 @@ impl Thread {
         let mut prompt_override: Option<String> = None;
         let mut prompt_override_mode_kind: Option<ModeKind> = None;
         let mut review_target: Option<ReviewTarget> = None;
-        let compact_command = matches!(command, Some(SessionCommand::Compact));
         {
             let inner = self.inner.lock().await;
             if inner.history_replay_in_progress {
@@ -101,13 +100,13 @@ impl Thread {
             drop(inner);
             return self.handle_fork_command_ext(args).await;
         }
+        if matches!(command.as_ref(), Some(SessionCommand::Compact)) {
+            drop(inner);
+            return self.handle_compact_command_ext().await;
+        }
         if let Some(command) = command {
             match prompt_commands::dispatch_session_command(&mut inner, command).await? {
                 prompt_commands::CommandDispatchOutcome::Stop(stop_reason) => {
-                    if compact_command {
-                        drop(inner);
-                        self.spawn_compaction_drain_task();
-                    }
                     return Ok(stop_reason);
                 }
                 prompt_commands::CommandDispatchOutcome::PromptOverride { prompt, mode_kind } => {

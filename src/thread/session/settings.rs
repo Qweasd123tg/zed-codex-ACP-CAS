@@ -12,7 +12,6 @@ use super::{
     DEFAULT_SESSION_MODE_ID, EditApprovalMode, Error, ModeKind, ModelId, PLAN_SESSION_MODE_ID,
     ReasoningEffort, SessionConfigId, SessionModeId, Thread, replay,
 };
-use crate::thread::features::session::controls::start_context_compaction;
 use crate::thread::features::{
     collab::{remember_agent_label, warm_agent_labels_for_turns},
     plan::{
@@ -23,7 +22,8 @@ use agent_client_protocol::schema::SessionConfigValueId;
 use codex_app_server_protocol::ThreadRollbackParams;
 use tracing::warn;
 
-const COMPACTION_SELECTOR_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+const COMPACTION_SELECTOR_DRAIN_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(100);
 
 impl Thread {
     pub async fn set_mode(&self, mode: SessionModeId) -> Result<(), Error> {
@@ -226,22 +226,19 @@ impl Thread {
                 Ok(())
             }
             CONTEXT_COMPACT_VALUE => {
-                let message = start_context_compaction(&mut inner).await?;
-                inner
-                    .client
-                    .send_system_message("status", "Context compaction", message)
-                    .await;
                 drop(inner);
-                self.spawn_compaction_drain_task();
-                let drain_outcome = self
-                    .drain_background_notifications_for_ext(COMPACTION_SELECTOR_DRAIN_TIMEOUT)
-                    .await?;
-                if drain_outcome.was_truncated() {
-                    warn!(
-                        processed_messages = drain_outcome.processed(),
-                        outcome = ?drain_outcome,
-                        "context compact action drain stopped before the queue went quiet"
-                    );
+                if self.request_context_compaction_ext().await? {
+                    self.spawn_compaction_drain_task();
+                    let drain_outcome = self
+                        .drain_background_notifications_for_ext(COMPACTION_SELECTOR_DRAIN_TIMEOUT)
+                        .await?;
+                    if drain_outcome.was_truncated() {
+                        warn!(
+                            processed_messages = drain_outcome.processed(),
+                            outcome = ?drain_outcome,
+                            "context compact action drain stopped before the queue went quiet"
+                        );
+                    }
                 }
                 Ok(())
             }

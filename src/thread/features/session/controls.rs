@@ -45,6 +45,70 @@ struct ThreadSwitchState {
 }
 
 impl SessionThread {
+    pub(in crate::thread) async fn handle_compact_command_ext(&self) -> Result<StopReason, Error> {
+        if self.request_context_compaction_ext().await? {
+            self.spawn_compaction_drain_task();
+        }
+        Ok(StopReason::EndTurn)
+    }
+
+    pub(in crate::thread) async fn request_context_compaction_ext(&self) -> Result<bool, Error> {
+        let (app, thread_id) = {
+            let mut inner = self.inner.lock().await;
+            if inner.compaction_in_progress {
+                inner
+                    .client
+                    .send_system_message(
+                        "status",
+                        "Context compaction",
+                        "Context compaction is already running.",
+                    )
+                    .await;
+                return Ok(true);
+            }
+
+            let app = inner.app.clone();
+            let thread_id = inner.thread_id.clone();
+            inner.compaction_in_progress = true;
+            // Статистика токенов может оставаться устаревшей (часто 100%) до следующего
+            // завершённого turn модели. Сразу после /compact очищаем кэш usage, чтобы
+            // процент контекста не вводил в заблуждение.
+            inner.last_used_tokens = None;
+            inner.context_usage_source = None;
+            notify_config_update(&inner).await;
+            inner
+                .client
+                .send_system_message(
+                    "status",
+                    "Context compaction",
+                    "Context compaction started. Wait for \"Context compacted.\" before sending the next prompt.",
+                )
+                .await;
+            (app, thread_id)
+        };
+
+        let start_result = app
+            .lock()
+            .await
+            .thread_compact_start(ThreadCompactStartParams {
+                thread_id: thread_id.clone(),
+            })
+            .await;
+        if let Err(error) = start_result {
+            let mut inner = self.inner.lock().await;
+            if inner.thread_id == thread_id && inner.compaction_in_progress {
+                crate::thread::features::session::events::emit_context_compaction_failed(
+                    &mut inner,
+                    format!("failed to start backend compaction: {error}"),
+                )
+                .await;
+            }
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
     pub(in crate::thread) async fn handle_archive_command_ext(
         &self,
         thread_id: Option<String>,
@@ -240,38 +304,6 @@ impl SessionThread {
         let mut inner = self.inner.lock().await;
         apply_thread_switch(&mut inner, thread, state, account_rate_limits, sync_reason).await
     }
-}
-
-pub(in crate::thread) async fn handle_compact_command(
-    inner: &mut ThreadInner,
-) -> Result<StopReason, Error> {
-    let message = start_context_compaction(inner).await?;
-    inner.client.send_agent_text(message).await;
-    Ok(StopReason::EndTurn)
-}
-
-pub(in crate::thread) async fn start_context_compaction(
-    inner: &mut ThreadInner,
-) -> Result<String, Error> {
-    if inner.compaction_in_progress {
-        return Ok("Context compaction is already running.".to_string());
-    }
-
-    inner
-        .app
-        .lock()
-        .await
-        .thread_compact_start(ThreadCompactStartParams {
-            thread_id: inner.thread_id.clone(),
-        })
-        .await?;
-    inner.compaction_in_progress = true;
-    // Статистика токенов может оставаться устаревшей (часто 100%) до следующего завершённого turn модели.
-    // Сразу после /compact очищаем кэш usage, чтобы процент контекста не вводил в заблуждение.
-    inner.last_used_tokens = None;
-    inner.context_usage_source = None;
-    notify_config_update(inner).await;
-    Ok("Context compaction started. Wait for \"Context compacted.\" before sending the next prompt.".to_string())
 }
 
 pub(in crate::thread) async fn handle_unarchive_command(

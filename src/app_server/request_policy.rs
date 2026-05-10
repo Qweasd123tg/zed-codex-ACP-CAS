@@ -21,9 +21,15 @@ fn configured_timeout(env_name: &str, fallback: Duration) -> Duration {
 
 pub(super) fn request_timeout(method_name: &str) -> Option<Duration> {
     match method_name {
-        "initialize" | "thread/start" | "thread/resume" | "thread/list" | "turn/start" => Some(
-            configured_timeout(STARTUP_REQUEST_TIMEOUT_ENV, STARTUP_REQUEST_TIMEOUT),
-        ),
+        "initialize"
+        | "thread/start"
+        | "thread/resume"
+        | "thread/list"
+        | "thread/compact/start"
+        | "turn/start" => Some(configured_timeout(
+            STARTUP_REQUEST_TIMEOUT_ENV,
+            STARTUP_REQUEST_TIMEOUT,
+        )),
         "model/list"
         | "account/rateLimits/read"
         | "account/read"
@@ -67,6 +73,10 @@ mod tests {
         );
         assert_eq!(
             request_timeout("thread/list"),
+            Some(STARTUP_REQUEST_TIMEOUT)
+        );
+        assert_eq!(
+            request_timeout("thread/compact/start"),
             Some(STARTUP_REQUEST_TIMEOUT)
         );
         assert_eq!(request_timeout("turn/start"), Some(STARTUP_REQUEST_TIMEOUT));
