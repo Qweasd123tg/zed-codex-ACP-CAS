@@ -58,6 +58,7 @@ flowchart TD
     ItemHandlers --> SessionEvents[src/thread/features/session/events.rs]
 
     ToolEventsCommand --> ToolUiKind[src/thread/features/tool_call_ui/kind.rs]
+    ToolEventsCommand --> ToolUiLocation[src/thread/features/tool_call_ui/location.rs]
     ToolEventsCommand --> ToolUiTitle[src/thread/features/tool_call_ui/title.rs]
     ToolEventsCommand --> ToolUiRaw[src/thread/features/tool_call_ui/raw.rs]
     ToolEventsCommand --> StatusMapping[src/thread/features/status_mapping.rs]
@@ -212,14 +213,18 @@ flowchart LR
   рендерятся как обычный text label, не Markdown, поэтому adapter-side UX держится на коротких option names и ACP grouped select options:
   `Model` делит пункты на `Models`, `Reasoning`, `Speed`, `Context` — на `Usage`, `Limits`, `Integrations`, `Actions`, а `Permissions` — на workflow, guarded и bypass режимы.
   У ACP select есть только один `current_value`, поэтому выбранные nested пункты `Reasoning`/`Speed` помечаются adapter-side через `★` в option label.
+  Текущий `Model` label намеренно compact для ноутбучной панели: `<model> <effort icon> <speed marker>`, например `5.5 ◕ ⚡`, где `◔/◑/◕/●` соответствуют low/medium/high/extra-high reasoning, standard speed не показывает маркер, `⚡` означает fast, а `~` — flex.
 - `Plan` intentionally живет внутри `Permissions` selector: при выборе `Plan` кнопка показывает `Plan`, но sandbox/approval профиль сохраняется; выбор `Read only` / `Workspace` / `Ask edits` / `Full access` возвращает session в default chat mode и обновляет permission profile.
+- Planned `Auto-review` permission UX не должен смешиваться с bypass: это отдельный guarded/workspace-write режим рядом с `Workspace`, который меняет reviewer/routing approval-запросов на auto-reviewer subagent. Для реализации нужны protocol fields вроде `ApprovalsReviewer::AutoReview`, прокидывание policy через session/turn params и отдельный render lifecycle для `item/autoApprovalReview/*`.
 - Read-only пункты `Context` (`Status`, `MCP`, `Skills`, `Plugins`, `Limits`) не отправляют summary в чат при клике: Zed уже показывает подробности в hover/description. Выбор `Context`/`Limits` только меняет короткое значение нижнего selector, а явный chat-report остается за `/status`.
 - Hover/description у самих selectors тоже собирается из текущего runtime state: `Permissions` показывает active workflow и сохраненный sandbox/approval профиль, `Model` — текущие model/reasoning/speed, а `Context` — context usage и account limits вместе без необходимости открывать пункт списка.
+- В группе `Context -> Usage` есть два компактных display-пункта: braille-only (`⠀` / `⣤` / `⣿`) и percentage-only (`---` / `50%` / `100%`). Сам hover при этом обязан оставаться человекочитаемым: процент, exact tokens и status (`live` / `cached` / `pending` / `compacting`) отдельными строками.
 - Account rate limits дополнительно дают одноразовые chat-advisory при переходе через 75/90/95/100% использованного окна; состояние порогов хранится в `ThreadInner`,
   а форматирование находится в `src/thread/session/config/limits.rs`, чтобы `Context` selector и warning-текст не расходились.
 - `ThreadTokenUsageUpdated` остается adapter-side forwarding в ACP `UsageUpdate`, но нативный context circle в текущем `Zed` для external ACP не подтвержден:
   если нужен именно этот UI, сначала нужен Zed-side patch/контракт, а не новая runtime-ветка в адаптере.
   После обновления ACP/Zed adapter-side часть готова: `src/thread/turn/notify.rs` публикует `usage_update` из cached context usage на `load`/`resume` и из live `ThreadTokenUsageUpdated` после turn, чтобы клиент мог отрисовать нативный context indicator без ожидания текстового `/status`.
+- Нативный left-toolbar `Thinking Mode` / effort split-button с иконкой у оригинального Zed Agent сейчас не является adapter-controlled ACP UI. Для external agents `SessionConfigOptionCategory::ThoughtLevel` в протоколе может быть UX-подсказкой, но текущий `Zed` generic `ConfigOptionsView` рендерит config options как обычные text selectors справа. В этом форке не держать runtime-ветку, которая обещает native icon/placement без Zed-side патча; честный adapter-side fallback — grouped `Model` selector с `Reasoning` и hover.
 
 6. Изменение collab/subagents контракта:
 - `src/thread/features/collab/render.rs`
@@ -269,6 +274,7 @@ Startup/resume/thread-switch snapshots account rate limits должны толь
 Отдельная инварианта: watchdog-abort stalled turn должен проходить через тот же `finalize + drain post-turn notifications`, что и обычное завершение; иначе transport-хвост протечёт в следующий prompt.
 Отдельный UX-контракт: reconnect warnings не должны спамить чат сырой backend-строкой на каждую дельту/error. Безопасная текущая схема: `src/thread/features/notification/events/reconnect.rs` нормализует `Reconnecting... N/N`, live handlers показывают один статус на первую волну reconnect warning-ов, а watchdog в `src/thread/turn/execution.rs` оставляет только reconnect-assisted stall abort без агрессивного default cutoff на “полную тишину”, потому что долгие silent runs у агента могут быть легитимны.
 Нативный Zed retry/error banner над composer не доступен внешнему ACP adapter напрямую: без Zed-side surface адаптер может только отправить chat/system notice, но не показать встроенный transient banner как у оригинального Zed Agent.
+Нативный Zed thinking/effort split-button с иконкой также Zed-side: adapter может отдавать reasoning values через config options, но не может сам переместить selector в левую toolbar-зону или выбрать `IconName::ThinkingMode`.
 
 ### Replay/Resume
 - `src/thread/features/resume/*`
@@ -291,6 +297,7 @@ Startup/resume/thread-switch snapshots account rate limits должны толь
 - `src/thread/turn/execution.rs`
 
 Риск: финальный `turn diff` historically держал `ThreadInner` mutex через `send_tool_call_update(...)`, `read_file_text(...)` и `write_text_file(...)`, а это уже на завершении turn ощущалось как лишний хвостовой фриз. Текущая безопасная граница здесь такая: `latest_turn_diff`, `started_tool_calls` и dedupe по `file_change_paths_this_turn` / `synced_paths_this_turn` снимаются в snapshot под lock, а сам ACP update идет уже после unlock через fast-path `TurnCompleted` в `src/thread/turn/execution.rs`. ACP buffer writeback тоже идет после unlock и может быть отключен через `CODEX_ACP_DISABLE_SYNC_EDIT_BUFFERS=1`, если локально начинает гоняться с Zed file watcher на уже измененных файлах. Отдельная инварианта: turn-diff writeback не должен повторно синкать пути, уже зарезервированные file-change lifecycle в том же turn.
+`Turn diff` locations для Zed Follow должны включать не только path, но и первый hunk line, когда unified diff дает такую строку. Это держится в `src/thread/turn/diff.rs` рядом с `parse_turn_unified_diff_files(...)`, чтобы preview/writeback и Follow не расходились по тому, какой файл считается затронутым.
 
 ### File-change lifecycle
 - `src/thread/features/file/events.rs`
@@ -310,6 +317,7 @@ Startup/resume/thread-switch snapshots account rate limits должны толь
 
 Риск: держать `ThreadInner` mutex через весь `request_permission(...)` think-time пользователя. Для file-change approval текущая безопасная граница теперь такая: snapshot prompt payload под lock, сам ACP permission prompt вне lock, потом короткий relock только на ответ в `app-server`.
 Для command approval есть дополнительная инварианта: это live gate на выполнение shell-команды, поэтому `request_permission(...)` нельзя просто await-ить внутри message branch. Текущая безопасная схема в `turn/execution.rs`: parked pending approval state внутри active-turn loop, чтобы `cancel` и reconnect watchdog не умирали, пока пользователь думает.
+Command tool-call и command approval locations для Zed Follow собираются в `src/thread/features/tool_call_ui/location.rs`: сначала из structured `CommandAction` (`Read`, `ListFiles`, `Search`), затем из очень консервативного fallback для одиночных shell read/write команд, и только потом из `cwd`.
 
 ### Collab/Subagents
 - `src/thread/features/collab/*`
@@ -332,7 +340,7 @@ Startup/resume/thread-switch snapshots account rate limits должны толь
 | `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, hidden `/delete -> /archive` alias, archive/unarchive picker UI, ACP `session/fork` bootstrap helper, session replay события, `SessionInfoUpdate` (`title` + `updated_at`), history replay fencing и runtime handling нижних `Context` и `Speed` selectors |
 | `src/codex_agent.rs` + `src/thread/session/lifecycle.rs` | ACP `session/fork` capability и handler поверх существующего `thread/fork` backend |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
-| `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw payload |
+| `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw/location payload |
 | `src/thread/features/status_mapping.rs` | app-server status -> ACP status |
 
 ## 9) Практические правила безопасного редактирования

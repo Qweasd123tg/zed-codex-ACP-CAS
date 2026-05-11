@@ -8,7 +8,7 @@ use crate::thread::{
     DEV_NULL, Diff, SessionClient, TURN_DIFF_HISTORY_LIMIT, TURN_DIFF_TOOL_CALL_PREFIX,
     ThreadInner, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
     ToolCallUpdate, ToolCallUpdateFields, ToolKind, TurnDiffRecord, TurnDiffUpdatedNotification,
-    read_file_text, unified_diff_to_old_new,
+    first_hunk_line, read_file_text, unified_diff_to_old_new,
 };
 
 #[derive(Clone, Debug)]
@@ -17,6 +17,7 @@ pub(in crate::thread) struct TurnUnifiedDiffFile {
     pub(in crate::thread) old_text: String,
     pub(in crate::thread) new_text: String,
     pub(in crate::thread) is_delete: bool,
+    pub(in crate::thread) line: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -24,6 +25,7 @@ struct ResolvedTurnDiffFile {
     path: PathBuf,
     old_text: String,
     new_text: String,
+    line: Option<u32>,
 }
 
 pub(super) struct PreparedTurnDiffRender {
@@ -83,6 +85,7 @@ pub(super) fn prepare_finalized_turn_diff_snapshot(
             path,
             old_text: file.old_text,
             new_text: file.new_text,
+            line: file.line,
         });
     }
     if resolved_files.is_empty() {
@@ -179,7 +182,12 @@ fn prepare_turn_diff_tool_call(
         content.push(ToolCallContent::Diff(
             Diff::new(path.clone(), file.new_text).old_text(old_text),
         ));
-        locations.push(ToolCallLocation::new(path));
+        let location = ToolCallLocation::new(path);
+        locations.push(if let Some(line) = file.line {
+            location.line(line)
+        } else {
+            location
+        });
     }
     if content.is_empty() {
         if !in_progress {
@@ -246,6 +254,11 @@ pub(super) fn parse_turn_unified_diff_files(unified_diff: &str) -> Vec<TurnUnifi
             old_text,
             new_text,
             is_delete: new_is_dev_null,
+            line: if new_is_dev_null {
+                first_hunk_line(section, false)
+            } else {
+                first_hunk_line(section, true).or_else(|| first_hunk_line(section, false))
+            },
         });
         section.clear();
     }

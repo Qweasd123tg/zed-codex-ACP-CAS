@@ -22,6 +22,7 @@ pub(in crate::thread) use plugins::build_plugins_summary;
 pub(in crate::thread) use skills::build_skills_summary;
 
 pub(in crate::thread) const SESSION_STATUS_VALUE: &str = "session_status";
+pub(in crate::thread) const CONTEXT_BRAILLE_VALUE: &str = "context_braille_status";
 pub(in crate::thread) const CONTEXT_STATUS_VALUE: &str = "context_status";
 pub(in crate::thread) const MCP_STATUS_VALUE: &str = "mcp_status";
 pub(in crate::thread) const SKILLS_STATUS_VALUE: &str = "skills_status";
@@ -75,10 +76,27 @@ pub(in crate::thread) fn context_control_options(
 
     vec![
         SessionConfigSelectOption::new(
+            CONTEXT_BRAILLE_VALUE,
+            context_braille_label(used, size, usage_percent),
+        )
+        .description(context_status_description(
+            used,
+            size,
+            usage_percent,
+            usage_source,
+            compaction_in_progress,
+        )),
+        SessionConfigSelectOption::new(
             CONTEXT_STATUS_VALUE,
             context_status_label(used, size, usage_percent, compaction_in_progress),
         )
-        .description(context_usage_message(used, size, usage_source)),
+        .description(context_status_description(
+            used,
+            size,
+            usage_percent,
+            usage_source,
+            compaction_in_progress,
+        )),
         SessionConfigSelectOption::new(SESSION_STATUS_VALUE, status_summary.label)
             .description(status_summary.description),
         SessionConfigSelectOption::new(MCP_STATUS_VALUE, &mcp_summary.label)
@@ -127,6 +145,9 @@ pub(in crate::thread) fn context_control_option_groups(
 
     let usage_options = vec![
         options.next().expect("context usage option should exist"),
+        options
+            .next()
+            .expect("context percentage option should exist"),
         options.next().expect("session status option should exist"),
     ];
     let integration_options = vec![
@@ -281,10 +302,78 @@ fn context_status_label(
     } else {
         match (used, size, usage_percent) {
             (_, Some(_), Some(percent)) => format!("{percent}%"),
-            (Some(used), None, _) => format!("{used} tok"),
+            (Some(used), None, _) => {
+                format!(
+                    "{} tok",
+                    format_compact_token_count(u64_to_i64_saturating(used))
+                )
+            }
             _ => "---".to_string(),
         }
     }
+}
+
+fn context_braille_label(
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_percent: Option<u64>,
+) -> &'static str {
+    context_usage_braille(used, size, usage_percent)
+}
+
+pub(in crate::thread) fn context_status_description(
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_percent: Option<u64>,
+    usage_source: Option<ContextUsageSource>,
+    compaction_in_progress: bool,
+) -> String {
+    let status = if compaction_in_progress {
+        "compacting"
+    } else {
+        context_status_source_label(usage_source)
+    };
+
+    match (used, size, usage_percent) {
+        (Some(used), Some(size), Some(percent)) if size > 0 => format!(
+            "Context: {} {percent}%\nTokens: {used}/{size}\nStatus: {status}",
+            context_usage_braille(Some(used), Some(size), Some(percent)),
+        ),
+        (Some(used), None, _) => {
+            format!("Context: ?\nTokens: {used} (window size unavailable)\nStatus: {status}",)
+        }
+        _ => format!("Context: ⠀ --\nTokens: waiting for usage update\nStatus: {status}"),
+    }
+}
+
+fn context_usage_braille(
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_percent: Option<u64>,
+) -> &'static str {
+    const INDICATORS: [&str; 9] = ["⠀", "⢀", "⣀", "⣄", "⣤", "⣦", "⣶", "⣷", "⣿"];
+
+    let bucket = match (used, size) {
+        (Some(used), Some(size)) if size > 0 => {
+            (((used as u128) * 8 + (size as u128 / 2)) / size as u128).min(8) as usize
+        }
+        _ => usage_percent
+            .map(|percent| ((percent.min(100) * 8 + 50) / 100).min(8) as usize)
+            .unwrap_or(0),
+    };
+    INDICATORS[bucket]
+}
+
+fn context_status_source_label(source: Option<ContextUsageSource>) -> &'static str {
+    match source {
+        Some(ContextUsageSource::Live) => "live",
+        Some(ContextUsageSource::Cached) => "cached",
+        None => "pending",
+    }
+}
+
+fn u64_to_i64_saturating(value: u64) -> i64 {
+    value.min(i64::MAX as u64) as i64
 }
 
 fn limits_status_label(rate_limits: Option<&RateLimitSnapshot>) -> String {
@@ -412,11 +501,11 @@ fn format_compact_with_suffix(value: f64, suffix: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountStatus, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
-        MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
-        build_mcp_summary, build_plugins_summary, build_skills_summary,
-        context_control_option_groups, context_control_options, context_usage_message,
-        full_status_report, session_status_message,
+        AccountStatus, CONTEXT_BRAILLE_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE,
+        CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE,
+        SKILLS_STATUS_VALUE, build_mcp_summary, build_plugins_summary, build_skills_summary,
+        context_control_option_groups, context_control_options, context_usage_braille,
+        context_usage_message, full_status_report, session_status_message,
     };
     use crate::thread::ContextUsageSource;
     use codex_app_server_protocol::{
@@ -468,13 +557,14 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[0].value.0.as_ref(), CONTEXT_STATUS_VALUE);
-        assert_eq!(options[1].value.0.as_ref(), SESSION_STATUS_VALUE);
-        assert_eq!(options[2].value.0.as_ref(), MCP_STATUS_VALUE);
-        assert_eq!(options[3].value.0.as_ref(), SKILLS_STATUS_VALUE);
-        assert_eq!(options[4].value.0.as_ref(), PLUGINS_STATUS_VALUE);
-        assert_eq!(options[5].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
-        assert_eq!(options[6].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
+        assert_eq!(options[0].value.0.as_ref(), CONTEXT_BRAILLE_VALUE);
+        assert_eq!(options[1].value.0.as_ref(), CONTEXT_STATUS_VALUE);
+        assert_eq!(options[2].value.0.as_ref(), SESSION_STATUS_VALUE);
+        assert_eq!(options[3].value.0.as_ref(), MCP_STATUS_VALUE);
+        assert_eq!(options[4].value.0.as_ref(), SKILLS_STATUS_VALUE);
+        assert_eq!(options[5].value.0.as_ref(), PLUGINS_STATUS_VALUE);
+        assert_eq!(options[6].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
+        assert_eq!(options[7].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
     }
 
     #[test]
@@ -500,7 +590,7 @@ mod tests {
             .map(|group| group.name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(names, vec!["Usage", "Limits", "Integrations", "Actions"]);
-        assert_eq!(groups[0].options.len(), 2);
+        assert_eq!(groups[0].options.len(), 3);
         assert_eq!(groups[1].options[0].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
         assert_eq!(groups[2].options.len(), 3);
         assert_eq!(groups[3].options[0].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
@@ -523,13 +613,14 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[0].name, "---");
-        assert_eq!(options[5].name, "5h --");
-        assert_eq!(options[6].name, "Compact now");
+        assert_eq!(options[0].name, "⠀");
+        assert_eq!(options[1].name, "---");
+        assert_eq!(options[6].name, "5h --");
+        assert_eq!(options[7].name, "Compact now");
     }
 
     #[test]
-    fn context_status_shows_percentage_only() {
+    fn context_status_shows_braille_indicator_and_percentage() {
         let empty_summary = empty_summary("none");
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
@@ -545,11 +636,25 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[0].name, "76%");
+        assert_eq!(options[0].name, "⣶");
+        assert_eq!(options[1].name, "76%");
         assert_eq!(
-            options[0].description.as_deref(),
-            Some("Context usage: 195499/258400 tokens.\nSource: cached.")
+            options[1].description.as_deref(),
+            Some("Context: ⣶ 76%\nTokens: 195499/258400\nStatus: cached")
         );
+    }
+
+    #[test]
+    fn context_braille_indicator_uses_eighth_steps() {
+        assert_eq!(context_usage_braille(None, None, Some(0)), "⠀");
+        assert_eq!(context_usage_braille(None, None, Some(12)), "⢀");
+        assert_eq!(context_usage_braille(None, None, Some(25)), "⣀");
+        assert_eq!(context_usage_braille(None, None, Some(38)), "⣄");
+        assert_eq!(context_usage_braille(None, None, Some(50)), "⣤");
+        assert_eq!(context_usage_braille(None, None, Some(63)), "⣦");
+        assert_eq!(context_usage_braille(None, None, Some(75)), "⣶");
+        assert_eq!(context_usage_braille(None, None, Some(88)), "⣷");
+        assert_eq!(context_usage_braille(None, None, Some(100)), "⣿");
     }
 
     #[test]
@@ -586,9 +691,9 @@ mod tests {
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[5].name, "5h 80%");
+        assert_eq!(options[6].name, "5h 80%");
         assert!(
-            options[5]
+            options[6]
                 .description
                 .as_deref()
                 .is_some_and(|description| description.contains("5h 80% · wk 94%"))
@@ -622,9 +727,9 @@ mod tests {
             &super::ContextSelectorSummary::default(),
         );
 
-        assert_eq!(options[1].name, "Status · 9.01M used");
+        assert_eq!(options[2].name, "Status · 9.01M used");
         assert_eq!(
-            options[1].description.as_deref(),
+            options[2].description.as_deref(),
             Some(
                 "Workspace: /tmp/workspace\nAccount: dev@example.com · ChatGPT Plus\nTokens: 9.01M used · 8.97M in · 37.3K out"
             )

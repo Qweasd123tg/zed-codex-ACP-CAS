@@ -1499,16 +1499,19 @@ deleted file mode 100644
     assert_eq!(files[0].old_text, "old\n");
     assert_eq!(files[0].new_text, "new\n");
     assert!(!files[0].is_delete);
+    assert_eq!(files[0].line, Some(0));
 
     assert_eq!(files[1].path, PathBuf::from("src/add.txt"));
     assert_eq!(files[1].old_text, "");
     assert_eq!(files[1].new_text, "added\n");
     assert!(!files[1].is_delete);
+    assert_eq!(files[1].line, Some(0));
 
     assert_eq!(files[2].path, PathBuf::from("src/delete.txt"));
     assert_eq!(files[2].old_text, "removed\n");
     assert_eq!(files[2].new_text, "");
     assert!(files[2].is_delete);
+    assert_eq!(files[2].line, Some(0));
 }
 
 #[test]
@@ -1528,6 +1531,7 @@ diff --git \"a/src/space file.txt\" \"b/src/space file.txt\"
     assert_eq!(files[0].old_text, "before\n");
     assert_eq!(files[0].new_text, "after\n");
     assert!(!files[0].is_delete);
+    assert_eq!(files[0].line, Some(0));
 }
 
 #[test]

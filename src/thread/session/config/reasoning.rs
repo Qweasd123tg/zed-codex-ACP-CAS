@@ -72,6 +72,24 @@ fn reasoning_effort_label(effort: ReasoningEffort) -> &'static str {
     }
 }
 
+pub(in crate::thread) fn reasoning_effort_icon(effort: ReasoningEffort) -> &'static str {
+    match effort {
+        ReasoningEffort::None => "○",
+        ReasoningEffort::Minimal | ReasoningEffort::Low => "◔",
+        ReasoningEffort::Medium => "◑",
+        ReasoningEffort::High => "◕",
+        ReasoningEffort::XHigh => "●",
+    }
+}
+
 pub(in crate::thread) fn reasoning_effort_option_label(effort: ReasoningEffort) -> String {
+    format!(
+        "{} {}",
+        reasoning_effort_icon(effort),
+        reasoning_effort_label(effort)
+    )
+}
+
+pub(in crate::thread) fn reasoning_effort_description_label(effort: ReasoningEffort) -> String {
     reasoning_effort_label(effort).to_string()
 }

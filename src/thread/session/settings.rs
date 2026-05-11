@@ -1,10 +1,11 @@
 //! Обновления runtime-настроек сессии (mode/model/reasoning/context), доступные ACP-клиентам.
 
 use super::session_config::{
-    CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
-    PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, find_model_for_current,
-    normalize_reasoning_effort_for_model, parse_fast_mode_value, parse_model_reasoning_value,
-    parse_model_speed_value, parse_reasoning_effort, reasoning_effort_value,
+    CONTEXT_BRAILLE_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
+    MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
+    find_model_for_current, normalize_reasoning_effort_for_model, parse_fast_mode_value,
+    parse_model_reasoning_value, parse_model_speed_value, parse_reasoning_effort,
+    reasoning_effort_value,
 };
 use super::{
     APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, ContextControlDisplay,
@@ -138,6 +139,17 @@ impl Thread {
         match value.0.as_ref() {
             SESSION_STATUS_VALUE | MCP_STATUS_VALUE | SKILLS_STATUS_VALUE
             | PLUGINS_STATUS_VALUE => Ok(()),
+            CONTEXT_BRAILLE_VALUE => {
+                if inner.context_control_display != ContextControlDisplay::Braille {
+                    inner.context_control_display = ContextControlDisplay::Braille;
+                    notify_options_update = true;
+                }
+                drop(inner);
+                if notify_options_update {
+                    self.notify_config_options_update().await;
+                }
+                Ok(())
+            }
             CONTEXT_STATUS_VALUE => {
                 if inner.context_control_display != ContextControlDisplay::Context {
                     inner.context_control_display = ContextControlDisplay::Context;

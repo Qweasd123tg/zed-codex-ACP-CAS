@@ -194,6 +194,7 @@ enum ContextUsageSource {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ContextControlDisplay {
+    Braille,
     #[default]
     Context,
     FiveHourLimit,

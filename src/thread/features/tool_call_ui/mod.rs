@@ -3,6 +3,8 @@
 
 #[path = "kind.rs"]
 pub(in crate::thread) mod kind;
+#[path = "location.rs"]
+pub(in crate::thread) mod location;
 #[path = "raw.rs"]
 pub(in crate::thread) mod raw;
 #[path = "title.rs"]

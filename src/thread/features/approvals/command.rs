@@ -6,8 +6,8 @@ use agent_client_protocol::{
     Error,
     schema::{
         PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-        SelectedPermissionOutcome, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
-        ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+        SelectedPermissionOutcome, ToolCallContent, ToolCallId, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields, ToolKind,
     },
 };
 use codex_app_server_protocol::{
@@ -19,6 +19,7 @@ use codex_app_server_protocol::{
 use crate::thread::features::tool_call_ui::kind::{
     command_looks_like_verification, extract_inner_shell_command,
 };
+use crate::thread::features::tool_call_ui::location::command_tool_locations;
 use crate::thread::{ALLOW_ONCE, CANCEL_TURN, REJECT_ONCE, SessionClient, ThreadInner};
 
 pub(in crate::thread) struct CommandApprovalPending {
@@ -65,8 +66,11 @@ pub(in crate::thread) fn prepare_command_approval(
         .kind(ToolKind::Execute)
         .status(ToolCallStatus::Pending)
         .content(command_approval_content(&params));
-    if let Some(cwd) = params.cwd.clone() {
-        fields = fields.locations(vec![ToolCallLocation::new(cwd)]);
+    let command = params.command.as_deref().unwrap_or_default();
+    let command_actions = params.command_actions.as_deref().unwrap_or_default();
+    if params.cwd.is_some() || !command.trim().is_empty() || !command_actions.is_empty() {
+        let cwd = params.cwd.as_deref().unwrap_or(&inner.workspace_cwd);
+        fields = fields.locations(command_tool_locations(cwd, command, command_actions));
     }
     fields = fields.raw_input(serde_json::to_value(&params).ok());
 

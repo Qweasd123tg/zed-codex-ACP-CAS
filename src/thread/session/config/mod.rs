@@ -29,6 +29,7 @@ const MODEL_SPEED_VALUE_PREFIX: &str = "speed:";
 impl ContextControlDisplay {
     fn value_id(self) -> &'static str {
         match self {
+            Self::Braille => context::CONTEXT_BRAILLE_VALUE,
             Self::Context => context::CONTEXT_STATUS_VALUE,
             Self::FiveHourLimit => context::CONTEXT_LIMITS_VALUE,
         }
@@ -221,6 +222,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         .description(context_selector_description(
             current_used_tokens,
             current_context_window_size,
+            current_usage_percent,
             current_context_usage_source,
             current_account_rate_limits,
             compaction_in_progress,
@@ -253,6 +255,47 @@ fn model_speed_value(value: &str) -> String {
     format!("{MODEL_SPEED_VALUE_PREFIX}{value}")
 }
 
+fn compact_current_model_label(
+    current_model_entry: Option<&AppModel>,
+    current_model_id: &str,
+    current_reasoning_effort: ReasoningEffort,
+    current_service_tier: Option<ServiceTier>,
+) -> String {
+    let mut parts = vec![
+        compact_model_name(current_model_entry, current_model_id),
+        reasoning::reasoning_effort_icon(current_reasoning_effort).to_string(),
+    ];
+    if let Some(speed_marker) = fast_mode_short_marker(current_service_tier) {
+        parts.push(speed_marker.to_string());
+    }
+    parts.join(" ")
+}
+
+fn compact_model_name(current_model_entry: Option<&AppModel>, current_model_id: &str) -> String {
+    let raw = current_model_entry
+        .map(|model| model.display_name.as_str())
+        .unwrap_or(current_model_id)
+        .trim();
+    let trimmed = raw
+        .strip_prefix("GPT-")
+        .or_else(|| raw.strip_prefix("gpt-"))
+        .unwrap_or(raw);
+
+    trimmed
+        .replace("-Mini", "m")
+        .replace("-mini", "m")
+        .replace("-Codex", "c")
+        .replace("-codex", "c")
+}
+
+fn fast_mode_short_marker(service_tier: Option<ServiceTier>) -> Option<&'static str> {
+    match service_tier {
+        Some(ServiceTier::Fast) => Some("⚡"),
+        Some(ServiceTier::Flex) => Some("~"),
+        None => None,
+    }
+}
+
 fn model_option_groups(
     models: &[AppModel],
     current_model_entry: Option<&AppModel>,
@@ -263,22 +306,30 @@ fn model_option_groups(
     let mut model_options = Vec::with_capacity(models.len() + 1);
     let mut has_current_model = false;
     let current_effort_label = reasoning::reasoning_effort_option_label(current_reasoning_effort);
+    let current_effort_description_label =
+        reasoning::reasoning_effort_description_label(current_reasoning_effort);
     let current_speed_value = fast_mode::fast_mode_value(current_service_tier);
     let current_speed_label = fast_mode_label(current_service_tier);
+    let current_model_label = compact_current_model_label(
+        current_model_entry,
+        current_model_id,
+        current_reasoning_effort,
+        current_service_tier,
+    );
     for model in models {
         if model.id == current_model_id {
             has_current_model = true;
         }
         let is_current_model = model.id == current_model_id;
         let model_name = if is_current_model {
-            format!("★ {}", model.display_name)
+            current_model_label.clone()
         } else {
             model.display_name.clone()
         };
         let description = if is_current_model {
             format!(
                 "{}\nSelected: reasoning {}, speed {}.",
-                model.description, current_effort_label, current_speed_label
+                model.description, current_effort_description_label, current_speed_label
             )
         } else {
             model.description.clone()
@@ -291,7 +342,7 @@ fn model_option_groups(
     if !has_current_model {
         model_options.push(SessionConfigSelectOption::new(
             current_model_id.to_string(),
-            format!("★ {current_model_id}"),
+            current_model_label,
         ));
     }
 
@@ -332,10 +383,11 @@ fn model_option_groups(
         .into_iter()
         .map(|option| {
             let value = option.value.0.to_string();
+            let label = speed_option_label(&option.name, &value);
             let name = if value == current_speed_value {
-                format!("★ {}", option.name)
+                format!("★ {label}")
             } else {
-                option.name
+                label
             };
             SessionConfigSelectOption::new(model_speed_value(&value), name)
                 .description(option.description)
@@ -347,6 +399,14 @@ fn model_option_groups(
         SessionConfigSelectGroup::new("reasoning", "Reasoning", reasoning_options),
         SessionConfigSelectGroup::new("speed", "Speed", speed_options),
     ]
+}
+
+fn speed_option_label(name: &str, value: &str) -> String {
+    match value {
+        "fast" => format!("⚡ {name}"),
+        "flex" => format!("~ {name}"),
+        _ => name.to_string(),
+    }
 }
 
 fn fast_mode_label(service_tier: Option<ServiceTier>) -> &'static str {
@@ -393,7 +453,8 @@ fn model_selector_description(
     current_reasoning_effort: ReasoningEffort,
     current_service_tier: Option<ServiceTier>,
 ) -> String {
-    let current_effort_label = reasoning::reasoning_effort_option_label(current_reasoning_effort);
+    let current_effort_label =
+        reasoning::reasoning_effort_description_label(current_reasoning_effort);
     let current_speed_label = fast_mode_label(current_service_tier);
     match current_model_entry {
         Some(model) => format!(
@@ -409,12 +470,19 @@ fn model_selector_description(
 fn context_selector_description(
     used: Option<u64>,
     size: Option<u64>,
+    usage_percent: Option<u64>,
     usage_source: Option<ContextUsageSource>,
     rate_limits: Option<&codex_app_server_protocol::RateLimitSnapshot>,
     compaction_in_progress: bool,
 ) -> String {
     let mut sections = vec![
-        context::context_usage_message(used, size, usage_source),
+        context::context_status_description(
+            used,
+            size,
+            usage_percent,
+            usage_source,
+            compaction_in_progress,
+        ),
         limits::limits_status_description(rate_limits),
     ];
 
@@ -426,10 +494,10 @@ fn context_selector_description(
 }
 
 pub(super) use context::{
-    AccountStatus, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
-    ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE,
-    SKILLS_STATUS_VALUE, build_account_status, build_mcp_summary, build_plugins_summary,
-    build_skills_summary, full_status_report,
+    AccountStatus, CONTEXT_BRAILLE_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE,
+    CONTEXT_STATUS_VALUE, ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE,
+    SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, build_account_status, build_mcp_summary,
+    build_plugins_summary, build_skills_summary, full_status_report,
 };
 pub(super) use fast_mode::{
     parse_fast_mode_value, service_tier_override_from_config, service_tier_override_from_session,
@@ -556,22 +624,25 @@ mod tests {
             vec!["Models", "Reasoning", "Speed"]
         );
         assert!(groups[0].options.iter().any(|option| {
-            option.name == "★ GPT-5.5"
+            option.name == "5.5 ◕ ⚡"
                 && option
                     .description
                     .as_deref()
                     .is_some_and(|description| description.contains("reasoning High, speed Fast"))
         }));
         assert!(
-            groups[1].options.iter().any(
-                |option| option.value.0.as_ref() == "reasoning:high" && option.name == "★ High"
-            )
+            groups[1]
+                .options
+                .iter()
+                .any(|option| option.value.0.as_ref() == "reasoning:high"
+                    && option.name == "★ ◕ High")
         );
         assert!(
             groups[2]
                 .options
                 .iter()
-                .any(|option| option.value.0.as_ref() == "speed:fast" && option.name == "★ Fast")
+                .any(|option| option.value.0.as_ref() == "speed:fast"
+                    && option.name == "★ ⚡ Fast")
         );
     }
 
@@ -642,8 +713,9 @@ mod tests {
             .expect("context selector exists");
         assert_eq!(context.name, "Context");
         assert!(context.description.as_deref().is_some_and(|description| {
-            description.contains("Context usage: 195499/258400 tokens.")
-                && description.contains("Source: live.")
+            description.contains("Context: ⣶ 76%")
+                && description.contains("Tokens: 195499/258400")
+                && description.contains("Status: live")
                 && description.contains("5h 80% · wk 94%")
                 && description.contains("5-hour: resets -")
                 && description.contains("Weekly: resets -")
@@ -737,8 +809,9 @@ mod tests {
             .find(|option| option.id.0.as_ref() == "context_control")
             .expect("context selector exists");
         assert!(context.description.as_deref().is_some_and(|description| {
-            description.contains("Context usage: 1000/2000 tokens.")
-                && description.contains("Source: cached.")
+            description.contains("Context: ⣤ 50%")
+                && description.contains("Tokens: 1000/2000")
+                && description.contains("Status: compacting")
                 && description.contains("Context compaction is currently running.")
         }));
     }
