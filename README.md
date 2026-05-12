@@ -196,7 +196,7 @@ Download the artifact for your platform from the releases page.
 
 Current release artifacts are plain binaries plus `.sha256` files:
 
-- `codex-acp-linux-x86_64-unknown-linux-gnu`
+- `codex-acp-linux-x86_64-gnu`
 - `codex-acp-macos-aarch64-apple-darwin`
 - `codex-acp-windows-x86_64-pc-windows-msvc.exe`
 - matching `.sha256` files
@@ -207,7 +207,7 @@ Linux/macOS example:
 
 ```bash
 mkdir -p "$HOME/.local/bin"
-mv codex-acp-linux-x86_64-unknown-linux-gnu "$HOME/.local/bin/codex-acp"
+mv codex-acp-linux-x86_64-gnu "$HOME/.local/bin/codex-acp"
 chmod +x "$HOME/.local/bin/codex-acp"
 ```
 
@@ -270,6 +270,26 @@ pointing Zed at `.build/codex-acp-current` and rebuilding with:
 ```bash
 bash script/build_local_release.sh
 ```
+
+Use `--sweep` after checks to ask `cargo-sweep` to prune stale Cargo artifacts without dropping
+the whole dev cache:
+
+```bash
+cargo install cargo-sweep
+bash script/build_local_release.sh --sweep
+```
+
+If `cargo-sweep` is not installed, the script keeps the build and prints the install command.
+Set `CARGO_SWEEP_ARGS` to override the default `--installed` sweep mode.
+
+Use `--clean-dev` when disk space matters more than the next local check speed:
+
+```bash
+bash script/build_local_release.sh --clean-dev
+```
+
+That keeps `.build/codex-acp-current` and the release profile, but removes Cargo's dev-profile
+artifacts from `target/debug`.
 
 That script rotates `.build/codex-acp-current` and `.build/codex-acp-previous`. Rebuilding only
 `target/release/codex-acp` does not update the binary path if Zed is already configured to use

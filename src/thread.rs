@@ -150,9 +150,13 @@ struct ThreadInner {
     current_model_provider: String,
     service_tier: Option<ServiceTier>,
     reasoning_effort: ReasoningEffort,
+    reasoning_effort_display_style: ReasoningEffortDisplayStyle,
+    model_display_style: ModelDisplayStyle,
     agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
     compaction_in_progress: bool,
     context_control_display: ContextControlDisplay,
+    context_display_style: ContextDisplayStyle,
+    limits_display_style: LimitsDisplayStyle,
     last_used_tokens: Option<u64>,
     total_token_usage: Option<AppTokenUsageBreakdown>,
     context_window_size: Option<u64>,
@@ -194,10 +198,39 @@ enum ContextUsageSource {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ContextControlDisplay {
-    Braille,
     #[default]
     Context,
-    FiveHourLimit,
+    Limits,
+    ContextAndLimits,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ContextDisplayStyle {
+    #[default]
+    Percent,
+    Braille,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum LimitsDisplayStyle {
+    #[default]
+    Text,
+    Bars,
+    Block,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ReasoningEffortDisplayStyle {
+    #[default]
+    Circle,
+    Text,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ModelDisplayStyle {
+    #[default]
+    WithPrefix,
+    WithoutPrefix,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

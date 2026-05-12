@@ -8,7 +8,10 @@ use codex_protocol::account::PlanType;
 use super::limits::{
     combined_limits_reset_message, five_hour_status_label, limits_status_description,
 };
-use crate::thread::{ContextUsageSource, SessionConfigSelectGroup, SessionConfigSelectOption};
+use crate::thread::{
+    ContextDisplayStyle, ContextUsageSource, LimitsDisplayStyle, SessionConfigSelectGroup,
+    SessionConfigSelectOption,
+};
 
 #[path = "context/mcp.rs"]
 mod mcp;
@@ -23,11 +26,16 @@ pub(in crate::thread) use skills::build_skills_summary;
 
 pub(in crate::thread) const SESSION_STATUS_VALUE: &str = "session_status";
 pub(in crate::thread) const CONTEXT_BRAILLE_VALUE: &str = "context_braille_status";
+pub(in crate::thread) const CONTEXT_PERCENT_VALUE: &str = "context_percent_status";
 pub(in crate::thread) const CONTEXT_STATUS_VALUE: &str = "context_status";
 pub(in crate::thread) const MCP_STATUS_VALUE: &str = "mcp_status";
 pub(in crate::thread) const SKILLS_STATUS_VALUE: &str = "skills_status";
 pub(in crate::thread) const PLUGINS_STATUS_VALUE: &str = "plugins_status";
 pub(in crate::thread) const CONTEXT_LIMITS_VALUE: &str = "limits_status";
+pub(in crate::thread) const CONTEXT_LIMITS_TEXT_VALUE: &str = "limits_text_status";
+pub(in crate::thread) const CONTEXT_LIMITS_BARS_VALUE: &str = "limits_bars_status";
+pub(in crate::thread) const CONTEXT_LIMITS_BLOCK_VALUE: &str = "limits_block_status";
+pub(in crate::thread) const CONTEXT_COMBINED_VALUE: &str = "context_limits_status";
 pub(in crate::thread) const CONTEXT_COMPACT_VALUE: &str = "compact_now";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -61,6 +69,8 @@ pub(in crate::thread) fn context_control_options(
     size: Option<u64>,
     usage_percent: Option<u64>,
     usage_source: Option<ContextUsageSource>,
+    context_display_style: ContextDisplayStyle,
+    limits_display_style: LimitsDisplayStyle,
     rate_limits: Option<&RateLimitSnapshot>,
     compaction_in_progress: bool,
     mcp_summary: &ContextSelectorSummary,
@@ -76,8 +86,14 @@ pub(in crate::thread) fn context_control_options(
 
     vec![
         SessionConfigSelectOption::new(
-            CONTEXT_BRAILLE_VALUE,
-            context_braille_label(used, size, usage_percent),
+            CONTEXT_STATUS_VALUE,
+            context_display_label(
+                used,
+                size,
+                usage_percent,
+                compaction_in_progress,
+                context_display_style,
+            ),
         )
         .description(context_status_description(
             used,
@@ -87,16 +103,55 @@ pub(in crate::thread) fn context_control_options(
             compaction_in_progress,
         )),
         SessionConfigSelectOption::new(
-            CONTEXT_STATUS_VALUE,
-            context_status_label(used, size, usage_percent, compaction_in_progress),
+            CONTEXT_LIMITS_VALUE,
+            limits_display_label(rate_limits, limits_display_style),
         )
-        .description(context_status_description(
+        .description(limits_status_description(rate_limits)),
+        SessionConfigSelectOption::new(
+            CONTEXT_COMBINED_VALUE,
+            combined_context_limits_label(
+                used,
+                size,
+                usage_percent,
+                compaction_in_progress,
+                context_display_style,
+                limits_display_style,
+                rate_limits,
+            ),
+        )
+        .description(combined_context_limits_description(
             used,
             size,
             usage_percent,
             usage_source,
             compaction_in_progress,
+            rate_limits,
         )),
+        SessionConfigSelectOption::new(
+            CONTEXT_PERCENT_VALUE,
+            context_style_option_label(ContextDisplayStyle::Percent, used, size, usage_percent),
+        )
+        .description(context_style_description(ContextDisplayStyle::Percent)),
+        SessionConfigSelectOption::new(
+            CONTEXT_BRAILLE_VALUE,
+            context_style_option_label(ContextDisplayStyle::Braille, used, size, usage_percent),
+        )
+        .description(context_style_description(ContextDisplayStyle::Braille)),
+        SessionConfigSelectOption::new(
+            CONTEXT_LIMITS_TEXT_VALUE,
+            limits_style_option_label(LimitsDisplayStyle::Text, rate_limits),
+        )
+        .description(limits_style_description(LimitsDisplayStyle::Text)),
+        SessionConfigSelectOption::new(
+            CONTEXT_LIMITS_BARS_VALUE,
+            limits_style_option_label(LimitsDisplayStyle::Bars, rate_limits),
+        )
+        .description(limits_style_description(LimitsDisplayStyle::Bars)),
+        SessionConfigSelectOption::new(
+            CONTEXT_LIMITS_BLOCK_VALUE,
+            limits_style_option_label(LimitsDisplayStyle::Block, rate_limits),
+        )
+        .description(limits_style_description(LimitsDisplayStyle::Block)),
         SessionConfigSelectOption::new(SESSION_STATUS_VALUE, status_summary.label)
             .description(status_summary.description),
         SessionConfigSelectOption::new(MCP_STATUS_VALUE, &mcp_summary.label)
@@ -105,8 +160,6 @@ pub(in crate::thread) fn context_control_options(
             .description(skills_summary.description.clone()),
         SessionConfigSelectOption::new(PLUGINS_STATUS_VALUE, &plugins_summary.label)
             .description(plugins_summary.description.clone()),
-        SessionConfigSelectOption::new(CONTEXT_LIMITS_VALUE, limits_status_label(rate_limits))
-            .description(limits_status_description(rate_limits)),
         SessionConfigSelectOption::new(CONTEXT_COMPACT_VALUE, "Compact now")
             .description("Summarize the conversation to free context window"),
     ]
@@ -121,6 +174,8 @@ pub(in crate::thread) fn context_control_option_groups(
     size: Option<u64>,
     usage_percent: Option<u64>,
     usage_source: Option<ContextUsageSource>,
+    context_display_style: ContextDisplayStyle,
+    limits_display_style: LimitsDisplayStyle,
     rate_limits: Option<&RateLimitSnapshot>,
     compaction_in_progress: bool,
     mcp_summary: &ContextSelectorSummary,
@@ -135,6 +190,8 @@ pub(in crate::thread) fn context_control_option_groups(
         size,
         usage_percent,
         usage_source,
+        context_display_style,
+        limits_display_style,
         rate_limits,
         compaction_in_progress,
         mcp_summary,
@@ -143,24 +200,34 @@ pub(in crate::thread) fn context_control_option_groups(
     )
     .into_iter();
 
-    let usage_options = vec![
-        options.next().expect("context usage option should exist"),
+    let display_options = vec![
+        options.next().expect("context display option should exist"),
+        options.next().expect("limits display option should exist"),
         options
             .next()
-            .expect("context percentage option should exist"),
-        options.next().expect("session status option should exist"),
+            .expect("combined display option should exist"),
+    ];
+    let context_style_options = vec![
+        options.next().expect("context percent option should exist"),
+        options.next().expect("context braille option should exist"),
+    ];
+    let limit_style_options = vec![
+        options.next().expect("limits text option should exist"),
+        options.next().expect("limits bars option should exist"),
+        options.next().expect("limits block option should exist"),
     ];
     let integration_options = vec![
+        options.next().expect("session status option should exist"),
         options.next().expect("MCP status option should exist"),
         options.next().expect("skills status option should exist"),
         options.next().expect("plugins status option should exist"),
     ];
-    let limit_options = vec![options.next().expect("limits option should exist")];
     let action_options = vec![options.next().expect("compact option should exist")];
 
     vec![
-        SessionConfigSelectGroup::new("usage", "Usage", usage_options),
-        SessionConfigSelectGroup::new("limits", "Limits", limit_options),
+        SessionConfigSelectGroup::new("display", "Display", display_options),
+        SessionConfigSelectGroup::new("context", "Context", context_style_options),
+        SessionConfigSelectGroup::new("limits", "Limits", limit_style_options),
         SessionConfigSelectGroup::new("integrations", "Integrations", integration_options),
         SessionConfigSelectGroup::new("actions", "Actions", action_options),
     ]
@@ -313,12 +380,74 @@ fn context_status_label(
     }
 }
 
+fn context_display_label(
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_percent: Option<u64>,
+    compaction_in_progress: bool,
+    style: ContextDisplayStyle,
+) -> String {
+    match style {
+        ContextDisplayStyle::Percent => {
+            context_status_label(used, size, usage_percent, compaction_in_progress)
+        }
+        ContextDisplayStyle::Braille => {
+            if compaction_in_progress {
+                "Compacting...".to_string()
+            } else {
+                context_braille_label(used, size, usage_percent).to_string()
+            }
+        }
+    }
+}
+
 fn context_braille_label(
     used: Option<u64>,
     size: Option<u64>,
     usage_percent: Option<u64>,
 ) -> &'static str {
     context_usage_braille(used, size, usage_percent)
+}
+
+fn context_style_option_label(
+    style: ContextDisplayStyle,
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_percent: Option<u64>,
+) -> String {
+    match style {
+        ContextDisplayStyle::Percent => format!(
+            "Percent {}",
+            context_display_label(
+                used,
+                size,
+                usage_percent,
+                false,
+                ContextDisplayStyle::Percent,
+            )
+        ),
+        ContextDisplayStyle::Braille => format!(
+            "Braille {}",
+            context_display_label(
+                used,
+                size,
+                usage_percent,
+                false,
+                ContextDisplayStyle::Braille,
+            )
+        ),
+    }
+}
+
+fn context_style_description(style: ContextDisplayStyle) -> &'static str {
+    match style {
+        ContextDisplayStyle::Percent => {
+            "Show context usage as a compact percentage in the lower selector."
+        }
+        ContextDisplayStyle::Braille => {
+            "Show context usage as a single braille cell in eighth-step buckets."
+        }
+    }
 }
 
 pub(in crate::thread) fn context_status_description(
@@ -378,6 +507,120 @@ fn u64_to_i64_saturating(value: u64) -> i64 {
 
 fn limits_status_label(rate_limits: Option<&RateLimitSnapshot>) -> String {
     five_hour_status_label(rate_limits)
+}
+
+fn limits_bars_label(rate_limits: Option<&RateLimitSnapshot>) -> String {
+    five_hour_limit_bars(rate_limits)
+}
+
+fn limits_block_label(rate_limits: Option<&RateLimitSnapshot>) -> String {
+    five_hour_limit_block(rate_limits)
+}
+
+fn limits_display_label(
+    rate_limits: Option<&RateLimitSnapshot>,
+    style: LimitsDisplayStyle,
+) -> String {
+    match style {
+        LimitsDisplayStyle::Text => limits_status_label(rate_limits),
+        LimitsDisplayStyle::Bars => limits_bars_label(rate_limits),
+        LimitsDisplayStyle::Block => limits_block_label(rate_limits),
+    }
+}
+
+fn limits_style_option_label(
+    style: LimitsDisplayStyle,
+    rate_limits: Option<&RateLimitSnapshot>,
+) -> String {
+    match style {
+        LimitsDisplayStyle::Text => format!("Text {}", limits_status_label(rate_limits)),
+        LimitsDisplayStyle::Bars => format!("Bars {}", limits_bars_label(rate_limits)),
+        LimitsDisplayStyle::Block => format!("Block {}", limits_block_label(rate_limits)),
+    }
+}
+
+fn limits_style_description(style: LimitsDisplayStyle) -> &'static str {
+    match style {
+        LimitsDisplayStyle::Text => "Show remaining 5-hour quota as text, for example `5h 80%`.",
+        LimitsDisplayStyle::Bars => {
+            "Show remaining 5-hour quota as five cells: `▰▰▰▰▰` is full, `▱▱▱▱▱` is empty."
+        }
+        LimitsDisplayStyle::Block => "Show remaining 5-hour quota as one block from `▁` to `█`.",
+    }
+}
+
+fn combined_context_limits_label(
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_percent: Option<u64>,
+    compaction_in_progress: bool,
+    context_style: ContextDisplayStyle,
+    limits_style: LimitsDisplayStyle,
+    rate_limits: Option<&RateLimitSnapshot>,
+) -> String {
+    format!(
+        "{} {}",
+        context_display_label(
+            used,
+            size,
+            usage_percent,
+            compaction_in_progress,
+            context_style
+        ),
+        limits_display_label(rate_limits, limits_style),
+    )
+}
+
+fn combined_context_limits_description(
+    used: Option<u64>,
+    size: Option<u64>,
+    usage_percent: Option<u64>,
+    usage_source: Option<ContextUsageSource>,
+    compaction_in_progress: bool,
+    rate_limits: Option<&RateLimitSnapshot>,
+) -> String {
+    format!(
+        "{}\n\n{}",
+        context_status_description(
+            used,
+            size,
+            usage_percent,
+            usage_source,
+            compaction_in_progress
+        ),
+        limits_status_description(rate_limits)
+    )
+}
+
+fn five_hour_limit_bars(rate_limits: Option<&RateLimitSnapshot>) -> String {
+    match rate_limits
+        .and_then(|snapshot| snapshot.primary.as_ref())
+        .map(|window| window.used_percent.clamp(0, 100))
+    {
+        Some(used_percent) => limit_bars_for_remaining_percent(100 - used_percent),
+        None => "▱▱▱▱▱".to_string(),
+    }
+}
+
+fn five_hour_limit_block(rate_limits: Option<&RateLimitSnapshot>) -> String {
+    match rate_limits
+        .and_then(|snapshot| snapshot.primary.as_ref())
+        .map(|window| window.used_percent.clamp(0, 100))
+    {
+        Some(used_percent) => limit_block_for_remaining_percent(100 - used_percent).to_string(),
+        None => "▁".to_string(),
+    }
+}
+
+fn limit_bars_for_remaining_percent(remaining_percent: i32) -> String {
+    let filled = ((remaining_percent.clamp(0, 100) + 19) / 20).clamp(0, 5) as usize;
+    format!("{}{}", "▰".repeat(filled), "▱".repeat(5 - filled))
+}
+
+fn limit_block_for_remaining_percent(remaining_percent: i32) -> &'static str {
+    const BLOCKS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+    let bucket = ((remaining_percent.clamp(0, 100) * 7 + 50) / 100).clamp(0, 7) as usize;
+    BLOCKS[bucket]
 }
 
 fn status_label(
@@ -501,13 +744,15 @@ fn format_compact_with_suffix(value: f64, suffix: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountStatus, CONTEXT_BRAILLE_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE,
-        CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE,
-        SKILLS_STATUS_VALUE, build_mcp_summary, build_plugins_summary, build_skills_summary,
-        context_control_option_groups, context_control_options, context_usage_braille,
-        context_usage_message, full_status_report, session_status_message,
+        AccountStatus, CONTEXT_BRAILLE_VALUE, CONTEXT_COMBINED_VALUE, CONTEXT_COMPACT_VALUE,
+        CONTEXT_LIMITS_BARS_VALUE, CONTEXT_LIMITS_BLOCK_VALUE, CONTEXT_LIMITS_TEXT_VALUE,
+        CONTEXT_LIMITS_VALUE, CONTEXT_PERCENT_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
+        PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, build_mcp_summary,
+        build_plugins_summary, build_skills_summary, context_control_option_groups,
+        context_control_options, context_usage_braille, context_usage_message, full_status_report,
+        session_status_message,
     };
-    use crate::thread::ContextUsageSource;
+    use crate::thread::{ContextDisplayStyle, ContextUsageSource, LimitsDisplayStyle};
     use codex_app_server_protocol::{
         PluginInterface, PluginListResponse, PluginMarketplaceEntry, PluginSource, PluginSummary,
         RateLimitSnapshot, RateLimitWindow, TokenUsageBreakdown,
@@ -551,20 +796,27 @@ mod tests {
             Some(258_400),
             Some(61),
             Some(ContextUsageSource::Live),
+            ContextDisplayStyle::Percent,
+            LimitsDisplayStyle::Text,
             None,
             false,
             &empty_summary,
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[0].value.0.as_ref(), CONTEXT_BRAILLE_VALUE);
-        assert_eq!(options[1].value.0.as_ref(), CONTEXT_STATUS_VALUE);
-        assert_eq!(options[2].value.0.as_ref(), SESSION_STATUS_VALUE);
-        assert_eq!(options[3].value.0.as_ref(), MCP_STATUS_VALUE);
-        assert_eq!(options[4].value.0.as_ref(), SKILLS_STATUS_VALUE);
-        assert_eq!(options[5].value.0.as_ref(), PLUGINS_STATUS_VALUE);
-        assert_eq!(options[6].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
-        assert_eq!(options[7].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
+        assert_eq!(options[0].value.0.as_ref(), CONTEXT_STATUS_VALUE);
+        assert_eq!(options[1].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
+        assert_eq!(options[2].value.0.as_ref(), CONTEXT_COMBINED_VALUE);
+        assert_eq!(options[3].value.0.as_ref(), CONTEXT_PERCENT_VALUE);
+        assert_eq!(options[4].value.0.as_ref(), CONTEXT_BRAILLE_VALUE);
+        assert_eq!(options[5].value.0.as_ref(), CONTEXT_LIMITS_TEXT_VALUE);
+        assert_eq!(options[6].value.0.as_ref(), CONTEXT_LIMITS_BARS_VALUE);
+        assert_eq!(options[7].value.0.as_ref(), CONTEXT_LIMITS_BLOCK_VALUE);
+        assert_eq!(options[8].value.0.as_ref(), SESSION_STATUS_VALUE);
+        assert_eq!(options[9].value.0.as_ref(), MCP_STATUS_VALUE);
+        assert_eq!(options[10].value.0.as_ref(), SKILLS_STATUS_VALUE);
+        assert_eq!(options[11].value.0.as_ref(), PLUGINS_STATUS_VALUE);
+        assert_eq!(options[12].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
     }
 
     #[test]
@@ -578,6 +830,8 @@ mod tests {
             Some(258_400),
             Some(61),
             Some(ContextUsageSource::Live),
+            ContextDisplayStyle::Percent,
+            LimitsDisplayStyle::Text,
             None,
             false,
             &empty_summary,
@@ -589,11 +843,33 @@ mod tests {
             .iter()
             .map(|group| group.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["Usage", "Limits", "Integrations", "Actions"]);
+        assert_eq!(
+            names,
+            vec!["Display", "Context", "Limits", "Integrations", "Actions"]
+        );
         assert_eq!(groups[0].options.len(), 3);
-        assert_eq!(groups[1].options[0].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
-        assert_eq!(groups[2].options.len(), 3);
-        assert_eq!(groups[3].options[0].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
+        assert_eq!(groups[0].options[0].value.0.as_ref(), CONTEXT_STATUS_VALUE);
+        assert_eq!(groups[0].options[1].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
+        assert_eq!(
+            groups[0].options[2].value.0.as_ref(),
+            CONTEXT_COMBINED_VALUE
+        );
+        assert_eq!(groups[1].options[0].value.0.as_ref(), CONTEXT_PERCENT_VALUE);
+        assert_eq!(groups[1].options[1].value.0.as_ref(), CONTEXT_BRAILLE_VALUE);
+        assert_eq!(
+            groups[2].options[0].value.0.as_ref(),
+            CONTEXT_LIMITS_TEXT_VALUE
+        );
+        assert_eq!(
+            groups[2].options[1].value.0.as_ref(),
+            CONTEXT_LIMITS_BARS_VALUE
+        );
+        assert_eq!(
+            groups[2].options[2].value.0.as_ref(),
+            CONTEXT_LIMITS_BLOCK_VALUE
+        );
+        assert_eq!(groups[3].options.len(), 4);
+        assert_eq!(groups[4].options[0].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
     }
 
     #[test]
@@ -607,16 +883,23 @@ mod tests {
             None,
             None,
             None,
+            ContextDisplayStyle::Percent,
+            LimitsDisplayStyle::Text,
             None,
             false,
             &empty_summary,
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[0].name, "⠀");
-        assert_eq!(options[1].name, "---");
-        assert_eq!(options[6].name, "5h --");
-        assert_eq!(options[7].name, "Compact now");
+        assert_eq!(options[0].name, "---");
+        assert_eq!(options[1].name, "5h --");
+        assert_eq!(options[2].name, "--- 5h --");
+        assert_eq!(options[3].name, "Percent ---");
+        assert_eq!(options[4].name, "Braille ⠀");
+        assert_eq!(options[5].name, "Text 5h --");
+        assert_eq!(options[6].name, "Bars ▱▱▱▱▱");
+        assert_eq!(options[7].name, "Block ▁");
+        assert_eq!(options[12].name, "Compact now");
     }
 
     #[test]
@@ -630,6 +913,8 @@ mod tests {
             Some(258_400),
             Some(76),
             Some(ContextUsageSource::Cached),
+            ContextDisplayStyle::Braille,
+            LimitsDisplayStyle::Text,
             None,
             false,
             &empty_summary,
@@ -637,9 +922,14 @@ mod tests {
             &empty_summary,
         );
         assert_eq!(options[0].name, "⣶");
-        assert_eq!(options[1].name, "76%");
+        assert_eq!(options[3].name, "Percent 76%");
+        assert_eq!(options[4].name, "Braille ⣶");
         assert_eq!(
-            options[1].description.as_deref(),
+            options[4].description.as_deref(),
+            Some("Show context usage as a single braille cell in eighth-step buckets.")
+        );
+        assert_eq!(
+            options[0].description.as_deref(),
             Some("Context: ⣶ 76%\nTokens: 195499/258400\nStatus: cached")
         );
     }
@@ -685,15 +975,24 @@ mod tests {
             Some(258_400),
             Some(76),
             Some(ContextUsageSource::Live),
+            ContextDisplayStyle::Percent,
+            LimitsDisplayStyle::Bars,
             Some(&snapshot),
             false,
             &empty_summary,
             &empty_summary,
             &empty_summary,
         );
-        assert_eq!(options[6].name, "5h 80%");
+        assert_eq!(options[1].name, "▰▰▰▰▱");
+        assert_eq!(options[2].name, "76% ▰▰▰▰▱");
+        assert_eq!(options[6].name, "Bars ▰▰▰▰▱");
+        assert_eq!(options[7].name, "Block ▇");
+        assert_eq!(
+            options[6].description.as_deref(),
+            Some("Show remaining 5-hour quota as five cells: `▰▰▰▰▰` is full, `▱▱▱▱▱` is empty.")
+        );
         assert!(
-            options[6]
+            options[1]
                 .description
                 .as_deref()
                 .is_some_and(|description| description.contains("5h 80% · wk 94%"))
@@ -720,6 +1019,8 @@ mod tests {
             Some(258_400),
             Some(76),
             Some(ContextUsageSource::Live),
+            ContextDisplayStyle::Percent,
+            LimitsDisplayStyle::Text,
             None,
             false,
             &super::ContextSelectorSummary::default(),
@@ -727,9 +1028,9 @@ mod tests {
             &super::ContextSelectorSummary::default(),
         );
 
-        assert_eq!(options[2].name, "Status · 9.01M used");
+        assert_eq!(options[8].name, "Status · 9.01M used");
         assert_eq!(
-            options[2].description.as_deref(),
+            options[8].description.as_deref(),
             Some(
                 "Workspace: /tmp/workspace\nAccount: dev@example.com · ChatGPT Plus\nTokens: 9.01M used · 8.97M in · 37.3K out"
             )

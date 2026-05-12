@@ -7,20 +7,44 @@ cd "$ROOT_DIR"
 usage() {
   cat <<'EOF'
 Usage:
-  bash script/build_local_release.sh
+  bash script/build_local_release.sh [--sweep] [--clean-dev]
 
 Behavior:
   - builds `cargo build --release`
   - rotates `.build/codex-acp-current` -> `.build/codex-acp-previous`
   - copies the fresh binary into `.build/codex-acp-current`
   - writes matching build-info files for rollback/debugging
+
+Options:
+  --sweep        Run `cargo sweep --installed` after copying the release binary, if available.
+  --clean-dev    Remove Cargo dev-profile artifacts after copying the release binary.
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+CARGO_SWEEP_ARGS="${CARGO_SWEEP_ARGS:---installed}"
+SWEEP=0
+CLEAN_DEV=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --sweep)
+      SWEEP=1
+      shift
+      ;;
+    --clean-dev)
+      CLEAN_DEV=1
+      shift
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 echo "[build] cargo build --release"
 cargo build --release
@@ -71,3 +95,19 @@ if [[ -f "$PREVIOUS_BIN" ]]; then
   echo "[done] previous: $PREVIOUS_BIN"
 fi
 echo "[done] build info: $CURRENT_INFO"
+
+if [[ "$SWEEP" == "1" ]]; then
+  if command -v cargo-sweep >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    echo "[sweep] cargo sweep $CARGO_SWEEP_ARGS"
+    # shellcheck disable=SC2086
+    cargo sweep $CARGO_SWEEP_ARGS
+  else
+    echo "[sweep] cargo-sweep is not installed; run: cargo install cargo-sweep" >&2
+  fi
+fi
+
+if [[ "$CLEAN_DEV" == "1" ]]; then
+  echo "[clean] cargo clean --profile dev"
+  cargo clean --profile dev
+fi

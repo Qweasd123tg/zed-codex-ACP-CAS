@@ -68,15 +68,15 @@ jobs:
         include:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            binary_name: codex-acp-linux-x86_64-unknown-linux-gnu
+            artifact_suffix: linux-x86_64-gnu
             binary_path: target/x86_64-unknown-linux-gnu/release/codex-acp
           - os: macos-14
             target: aarch64-apple-darwin
-            binary_name: codex-acp-macos-aarch64-apple-darwin
+            artifact_suffix: macos-aarch64-apple-darwin
             binary_path: target/aarch64-apple-darwin/release/codex-acp
           - os: windows-2022
             target: x86_64-pc-windows-msvc
-            binary_name: codex-acp-windows-x86_64-pc-windows-msvc.exe
+            artifact_suffix: windows-x86_64-pc-windows-msvc
             binary_path: target/x86_64-pc-windows-msvc/release/codex-acp.exe
 
     steps:
@@ -106,25 +106,26 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          cp "${{ matrix.binary_path }}" "${{ matrix.binary_name }}"
-          shasum -a 256 "${{ matrix.binary_name }}" > "${{ matrix.binary_name }}.sha256"
+          release_binary="${BINARY_NAME}-${{ matrix.artifact_suffix }}"
+          cp "${{ matrix.binary_path }}" "$release_binary"
+          shasum -a 256 "$release_binary" > "$release_binary.sha256"
 
       - name: Prepare Windows release files
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Copy-Item "${{ matrix.binary_path }}" "${{ matrix.binary_name }}"
-          $hash = (Get-FileHash -Algorithm SHA256 "${{ matrix.binary_name }}").Hash.ToLowerInvariant()
-          "$hash  ${{ matrix.binary_name }}" | Out-File -Encoding ascii "${{ matrix.binary_name }}.sha256"
+          $releaseBinary = "${env:BINARY_NAME}-${{ matrix.artifact_suffix }}.exe"
+          Copy-Item "${{ matrix.binary_path }}" $releaseBinary
+          $hash = (Get-FileHash -Algorithm SHA256 $releaseBinary).Hash.ToLowerInvariant()
+          "$hash  $releaseBinary" | Out-File -Encoding ascii "$releaseBinary.sha256"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:
-          name: binary-${{ matrix.target }}
+          name: codex-acp-${{ matrix.artifact_suffix }}
           if-no-files-found: error
           path: |
-            ${{ matrix.binary_name }}
-            ${{ matrix.binary_name }}.sha256
+            codex-acp-${{ matrix.artifact_suffix }}*
           retention-days: 7
 
   create-release:
@@ -146,7 +147,7 @@ jobs:
         with:
           tag_name: ${{ needs.get-version.outputs.tag_name }}
           target_commitish: ${{ github.sha }}
-          name: Release ${{ needs.get-version.outputs.version }}
+          name: codex-acp v${{ needs.get-version.outputs.version }}
           draft: false
           prerelease: false
           generate_release_notes: true

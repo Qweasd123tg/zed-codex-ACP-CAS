@@ -1,8 +1,9 @@
 //! Маппинг конфигурации сессии между ACP-опциями и runtime-настройками Codex app-server.
 
 use crate::thread::{
-    AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextUsageSource,
-    EditApprovalMode, ModeKind, PLAN_SESSION_MODE_ID, ReasoningEffort, ServiceTier,
+    AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
+    ContextUsageSource, EditApprovalMode, LimitsDisplayStyle, ModeKind, ModelDisplayStyle,
+    PLAN_SESSION_MODE_ID, ReasoningEffort, ReasoningEffortDisplayStyle, ServiceTier,
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectGroup,
     SessionConfigSelectOption, ThreadInner,
 };
@@ -25,13 +26,14 @@ pub(super) use modes::{
 
 const MODEL_REASONING_VALUE_PREFIX: &str = "reasoning:";
 const MODEL_SPEED_VALUE_PREFIX: &str = "speed:";
+const MODEL_DISPLAY_VALUE_PREFIX: &str = "display:";
 
 impl ContextControlDisplay {
     fn value_id(self) -> &'static str {
         match self {
-            Self::Braille => context::CONTEXT_BRAILLE_VALUE,
             Self::Context => context::CONTEXT_STATUS_VALUE,
-            Self::FiveHourLimit => context::CONTEXT_LIMITS_VALUE,
+            Self::Limits => context::CONTEXT_LIMITS_VALUE,
+            Self::ContextAndLimits => context::CONTEXT_COMBINED_VALUE,
         }
     }
 }
@@ -44,11 +46,15 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) current_model: &'a str,
     pub(in crate::thread) current_service_tier: Option<ServiceTier>,
     pub(in crate::thread) current_reasoning_effort: ReasoningEffort,
+    pub(in crate::thread) current_reasoning_effort_display_style: ReasoningEffortDisplayStyle,
+    pub(in crate::thread) current_model_display_style: ModelDisplayStyle,
     pub(in crate::thread) current_used_tokens: Option<u64>,
     pub(in crate::thread) current_context_window_size: Option<u64>,
     pub(in crate::thread) current_usage_percent: Option<u64>,
     pub(in crate::thread) current_context_usage_source: Option<ContextUsageSource>,
     pub(in crate::thread) current_context_display: ContextControlDisplay,
+    pub(in crate::thread) current_context_display_style: ContextDisplayStyle,
+    pub(in crate::thread) current_limits_display_style: LimitsDisplayStyle,
     pub(in crate::thread) current_account_rate_limits:
         Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
     pub(in crate::thread) compaction_in_progress: bool,
@@ -71,11 +77,15 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         current_model: &inner.current_model,
         current_service_tier: inner.service_tier,
         current_reasoning_effort: inner.reasoning_effort,
+        current_reasoning_effort_display_style: inner.reasoning_effort_display_style,
+        current_model_display_style: inner.model_display_style,
         current_used_tokens: inner.last_used_tokens,
         current_context_window_size: inner.context_window_size,
         current_usage_percent: usage_percent(inner.last_used_tokens, inner.context_window_size),
         current_context_usage_source: inner.context_usage_source,
         current_context_display: inner.context_control_display,
+        current_context_display_style: inner.context_display_style,
+        current_limits_display_style: inner.limits_display_style,
         current_account_rate_limits: inner.account_rate_limits.as_ref(),
         compaction_in_progress: inner.compaction_in_progress,
         approval: inner.approval_policy,
@@ -97,11 +107,15 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         current_model,
         current_service_tier,
         current_reasoning_effort,
+        current_reasoning_effort_display_style,
+        current_model_display_style,
         current_used_tokens,
         current_context_window_size,
         current_usage_percent,
         current_context_usage_source,
         current_context_display,
+        current_context_display_style,
+        current_limits_display_style,
         current_account_rate_limits,
         compaction_in_progress,
         approval,
@@ -187,6 +201,8 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 current_model_entry,
                 &current_model_id,
                 current_reasoning_effort,
+                current_reasoning_effort_display_style,
+                current_model_display_style,
                 current_service_tier,
             ),
         )
@@ -195,6 +211,8 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             current_model_entry,
             &current_model_id,
             current_reasoning_effort,
+            current_reasoning_effort_display_style,
+            current_model_display_style,
             current_service_tier,
         )),
     );
@@ -212,6 +230,8 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 current_context_window_size,
                 current_usage_percent,
                 current_context_usage_source,
+                current_context_display_style,
+                current_limits_display_style,
                 current_account_rate_limits,
                 compaction_in_progress,
                 session_mcp_summary,
@@ -244,6 +264,12 @@ pub(super) fn parse_model_speed_value(value: &str) -> Option<Option<ServiceTier>
         .and_then(parse_fast_mode_value)
 }
 
+pub(super) fn parse_model_display_value(value: &str) -> Option<ModelDisplayStyle> {
+    value
+        .strip_prefix(MODEL_DISPLAY_VALUE_PREFIX)
+        .and_then(parse_model_display_style)
+}
+
 fn model_reasoning_value(effort: ReasoningEffort) -> String {
     format!(
         "{MODEL_REASONING_VALUE_PREFIX}{}",
@@ -255,15 +281,62 @@ fn model_speed_value(value: &str) -> String {
     format!("{MODEL_SPEED_VALUE_PREFIX}{value}")
 }
 
-fn compact_current_model_label(
+fn model_display_value(style: ModelDisplayStyle) -> &'static str {
+    match style {
+        ModelDisplayStyle::WithPrefix => "with-prefix",
+        ModelDisplayStyle::WithoutPrefix => "without-prefix",
+    }
+}
+
+fn model_display_style_label(style: ModelDisplayStyle) -> &'static str {
+    match style {
+        ModelDisplayStyle::WithPrefix => "With gpt",
+        ModelDisplayStyle::WithoutPrefix => "Without gpt",
+    }
+}
+
+fn parse_model_display_style(value: &str) -> Option<ModelDisplayStyle> {
+    match value {
+        "with-prefix" => Some(ModelDisplayStyle::WithPrefix),
+        "without-prefix" => Some(ModelDisplayStyle::WithoutPrefix),
+        _ => None,
+    }
+}
+
+fn model_label_for_style(
+    current_model_entry: Option<&AppModel>,
+    current_model_id: &str,
+    style: ModelDisplayStyle,
+) -> String {
+    let raw = current_model_entry
+        .map(|model| model.display_name.as_str())
+        .unwrap_or(current_model_id)
+        .trim()
+        .to_ascii_lowercase();
+    match style {
+        ModelDisplayStyle::WithPrefix => raw,
+        ModelDisplayStyle::WithoutPrefix => compact_model_name(&raw),
+    }
+}
+
+fn current_model_label_for_style(
     current_model_entry: Option<&AppModel>,
     current_model_id: &str,
     current_reasoning_effort: ReasoningEffort,
+    current_reasoning_effort_display_style: ReasoningEffortDisplayStyle,
     current_service_tier: Option<ServiceTier>,
+    current_model_display_style: ModelDisplayStyle,
 ) -> String {
     let mut parts = vec![
-        compact_model_name(current_model_entry, current_model_id),
-        reasoning::reasoning_effort_icon(current_reasoning_effort).to_string(),
+        model_label_for_style(
+            current_model_entry,
+            current_model_id,
+            current_model_display_style,
+        ),
+        reasoning::reasoning_effort_option_label(
+            current_reasoning_effort,
+            current_reasoning_effort_display_style,
+        ),
     ];
     if let Some(speed_marker) = fast_mode_short_marker(current_service_tier) {
         parts.push(speed_marker.to_string());
@@ -271,21 +344,10 @@ fn compact_current_model_label(
     parts.join(" ")
 }
 
-fn compact_model_name(current_model_entry: Option<&AppModel>, current_model_id: &str) -> String {
-    let raw = current_model_entry
-        .map(|model| model.display_name.as_str())
-        .unwrap_or(current_model_id)
-        .trim();
-    let trimmed = raw
-        .strip_prefix("GPT-")
-        .or_else(|| raw.strip_prefix("gpt-"))
-        .unwrap_or(raw);
+fn compact_model_name(raw: &str) -> String {
+    let trimmed = raw.strip_prefix("gpt-").unwrap_or(raw);
 
-    trimmed
-        .replace("-Mini", "m")
-        .replace("-mini", "m")
-        .replace("-Codex", "c")
-        .replace("-codex", "c")
+    trimmed.replace("-mini", "m").replace("-codex", "c")
 }
 
 fn fast_mode_short_marker(service_tier: Option<ServiceTier>) -> Option<&'static str> {
@@ -301,20 +363,21 @@ fn model_option_groups(
     current_model_entry: Option<&AppModel>,
     current_model_id: &str,
     current_reasoning_effort: ReasoningEffort,
+    current_reasoning_effort_display_style: ReasoningEffortDisplayStyle,
+    current_model_display_style: ModelDisplayStyle,
     current_service_tier: Option<ServiceTier>,
 ) -> Vec<SessionConfigSelectGroup> {
     let mut model_options = Vec::with_capacity(models.len() + 1);
     let mut has_current_model = false;
-    let current_effort_label = reasoning::reasoning_effort_option_label(current_reasoning_effort);
-    let current_effort_description_label =
-        reasoning::reasoning_effort_description_label(current_reasoning_effort);
     let current_speed_value = fast_mode::fast_mode_value(current_service_tier);
     let current_speed_label = fast_mode_label(current_service_tier);
-    let current_model_label = compact_current_model_label(
+    let current_model_label = current_model_label_for_style(
         current_model_entry,
         current_model_id,
         current_reasoning_effort,
+        current_reasoning_effort_display_style,
         current_service_tier,
+        current_model_display_style,
     );
     for model in models {
         if model.id == current_model_id {
@@ -324,12 +387,15 @@ fn model_option_groups(
         let model_name = if is_current_model {
             current_model_label.clone()
         } else {
-            model.display_name.clone()
+            model_label_for_style(Some(model), &model.id, current_model_display_style)
         };
         let description = if is_current_model {
             format!(
-                "{}\nSelected: reasoning {}, speed {}.",
-                model.description, current_effort_description_label, current_speed_label
+                "{}\nSelected: model label {}, reasoning effort {}, speed {}.",
+                model.description,
+                model_display_style_label(current_model_display_style),
+                reasoning::reasoning_effort_description_label(current_reasoning_effort),
+                current_speed_label
             )
         } else {
             model.description.clone()
@@ -346,39 +412,14 @@ fn model_option_groups(
         ));
     }
 
-    let current_effort_value = reasoning_effort_value(current_reasoning_effort);
-    let mut reasoning_options = Vec::new();
-    let mut has_current_effort = false;
-    if let Some(model) = current_model_entry {
-        reasoning_options.reserve(model.supported_reasoning_efforts.len() + 1);
-        for option in &model.supported_reasoning_efforts {
-            let effort_value = reasoning_effort_value(option.reasoning_effort);
-            has_current_effort |= effort_value == current_effort_value;
-            let label = reasoning::reasoning_effort_option_label(option.reasoning_effort);
-            let name = if effort_value == current_effort_value {
-                format!("★ {label}")
-            } else {
-                label
-            };
-            reasoning_options.push(
-                SessionConfigSelectOption::new(
-                    model_reasoning_value(option.reasoning_effort),
-                    name,
-                )
-                .description(option.description.clone()),
-            );
-        }
-    } else {
-        reasoning_options.reserve(1);
-    }
-
-    if reasoning_options.is_empty() || !has_current_effort {
-        reasoning_options.push(SessionConfigSelectOption::new(
-            model_reasoning_value(current_reasoning_effort),
-            format!("★ {current_effort_label}"),
-        ));
-    }
-
+    let reasoning_options = reasoning_effort_option_groups(
+        current_model_entry,
+        current_reasoning_effort,
+        current_reasoning_effort_display_style,
+    );
+    let model_display_options = model_display_style_option_groups(current_model_display_style);
+    let display_options =
+        reasoning_effort_style_option_groups(current_reasoning_effort_display_style);
     let speed_options = fast_mode::fast_mode_options(current_service_tier)
         .into_iter()
         .map(|option| {
@@ -396,9 +437,114 @@ fn model_option_groups(
 
     vec![
         SessionConfigSelectGroup::new("models", "Models", model_options),
-        SessionConfigSelectGroup::new("reasoning", "Reasoning", reasoning_options),
+        SessionConfigSelectGroup::new("labels", "Labels", model_display_options),
+        SessionConfigSelectGroup::new("effort", "Effort", reasoning_options),
+        SessionConfigSelectGroup::new("display", "Display", display_options),
         SessionConfigSelectGroup::new("speed", "Speed", speed_options),
     ]
+}
+
+fn reasoning_effort_option_groups(
+    current_model_entry: Option<&AppModel>,
+    current_reasoning_effort: ReasoningEffort,
+    current_reasoning_effort_display_style: ReasoningEffortDisplayStyle,
+) -> Vec<SessionConfigSelectOption> {
+    let current_effort_value = reasoning_effort_value(current_reasoning_effort);
+    let mut effort_options = Vec::new();
+    let mut has_current_effort = false;
+    if let Some(model) = current_model_entry {
+        effort_options.reserve(model.supported_reasoning_efforts.len() + 1);
+        for option in &model.supported_reasoning_efforts {
+            let effort_value = reasoning_effort_value(option.reasoning_effort);
+            has_current_effort |= effort_value == current_effort_value;
+            let label = reasoning::reasoning_effort_option_label(
+                option.reasoning_effort,
+                current_reasoning_effort_display_style,
+            );
+            let name = if effort_value == current_effort_value {
+                format!("★ {label}")
+            } else {
+                label
+            };
+            effort_options.push(
+                SessionConfigSelectOption::new(
+                    model_reasoning_value(option.reasoning_effort),
+                    name,
+                )
+                .description(option.description.clone()),
+            );
+        }
+    } else {
+        effort_options.reserve(1);
+    }
+
+    if effort_options.is_empty() || !has_current_effort {
+        effort_options.push(SessionConfigSelectOption::new(
+            model_reasoning_value(current_reasoning_effort),
+            format!(
+                "★ {}",
+                reasoning::reasoning_effort_option_label(
+                    current_reasoning_effort,
+                    current_reasoning_effort_display_style,
+                )
+            ),
+        ));
+    }
+
+    effort_options
+}
+
+fn model_display_style_option_groups(
+    current_style: ModelDisplayStyle,
+) -> Vec<SessionConfigSelectOption> {
+    [
+        ModelDisplayStyle::WithPrefix,
+        ModelDisplayStyle::WithoutPrefix,
+    ]
+    .into_iter()
+    .map(|style| {
+        let label = model_display_style_label(style).to_string();
+        let name = if style == current_style {
+            format!("★ {label}")
+        } else {
+            label
+        };
+        let description = match style {
+            ModelDisplayStyle::WithPrefix => "Show the gpt model prefix.".to_string(),
+            ModelDisplayStyle::WithoutPrefix => "Hide the gpt model prefix.".to_string(),
+        };
+        SessionConfigSelectOption::new(
+            format!("{MODEL_DISPLAY_VALUE_PREFIX}{}", model_display_value(style)),
+            name,
+        )
+        .description(description)
+    })
+    .collect()
+}
+
+fn reasoning_effort_style_option_groups(
+    current_style: ReasoningEffortDisplayStyle,
+) -> Vec<SessionConfigSelectOption> {
+    [
+        ReasoningEffortDisplayStyle::Text,
+        ReasoningEffortDisplayStyle::Circle,
+    ]
+    .into_iter()
+    .map(|style| {
+        let label = reasoning::reasoning_effort_style_option_label(style);
+        let name = if style == current_style {
+            format!("★ {label}")
+        } else {
+            label
+        };
+        let description = match style {
+            ReasoningEffortDisplayStyle::Text => "Show reasoning effort as words.".to_string(),
+            ReasoningEffortDisplayStyle::Circle => "Show reasoning effort as circles.".to_string(),
+        };
+        SessionConfigSelectOption::new(reasoning_effort_display_style_value(style), name)
+            .description(description)
+    })
+    .collect()
 }
 
 fn speed_option_label(name: &str, value: &str) -> String {
@@ -451,20 +597,24 @@ fn model_selector_description(
     current_model_entry: Option<&AppModel>,
     current_model_id: &str,
     current_reasoning_effort: ReasoningEffort,
+    current_reasoning_effort_display_style: ReasoningEffortDisplayStyle,
+    current_model_display_style: ModelDisplayStyle,
     current_service_tier: Option<ServiceTier>,
 ) -> String {
     let current_effort_label =
         reasoning::reasoning_effort_description_label(current_reasoning_effort);
+    let current_style_label =
+        reasoning::reasoning_effort_style_option_label(current_reasoning_effort_display_style);
+    let current_model_label = model_display_style_label(current_model_display_style);
+    let current_model_name = model_label_for_style(
+        current_model_entry,
+        current_model_id,
+        current_model_display_style,
+    );
     let current_speed_label = fast_mode_label(current_service_tier);
-    match current_model_entry {
-        Some(model) => format!(
-            "{}\nReasoning: {current_effort_label}\nSpeed: {current_speed_label}",
-            model.display_name
-        ),
-        None => format!(
-            "{current_model_id}\nReasoning: {current_effort_label}\nSpeed: {current_speed_label}"
-        ),
-    }
+    format!(
+        "{current_model_name}\nModel label: {current_model_label}\nReasoning effort: {current_effort_label}\nEffort style: {current_style_label}\nSpeed: {current_speed_label}"
+    )
 }
 
 fn context_selector_description(
@@ -494,10 +644,12 @@ fn context_selector_description(
 }
 
 pub(super) use context::{
-    AccountStatus, CONTEXT_BRAILLE_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE,
-    CONTEXT_STATUS_VALUE, ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE,
-    SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, build_account_status, build_mcp_summary,
-    build_plugins_summary, build_skills_summary, full_status_report,
+    AccountStatus, CONTEXT_BRAILLE_VALUE, CONTEXT_COMBINED_VALUE, CONTEXT_COMPACT_VALUE,
+    CONTEXT_LIMITS_BARS_VALUE, CONTEXT_LIMITS_BLOCK_VALUE, CONTEXT_LIMITS_TEXT_VALUE,
+    CONTEXT_LIMITS_VALUE, CONTEXT_PERCENT_VALUE, CONTEXT_STATUS_VALUE, ContextSelectorSummary,
+    MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
+    build_account_status, build_mcp_summary, build_plugins_summary, build_skills_summary,
+    full_status_report,
 };
 pub(super) use fast_mode::{
     parse_fast_mode_value, service_tier_override_from_config, service_tier_override_from_session,
@@ -507,6 +659,7 @@ pub(super) use limits::{
 };
 pub(super) use reasoning::{
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
+    parse_reasoning_effort_display_style, reasoning_effort_display_style_value,
     reasoning_effort_value, resolve_reasoning_effort,
 };
 
@@ -529,8 +682,9 @@ mod tests {
         parse_model_reasoning_value, parse_model_speed_value,
     };
     use crate::thread::{
-        AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextUsageSource,
-        EditApprovalMode, ModeKind, ReasoningEffort, ServiceTier,
+        AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
+        ContextUsageSource, EditApprovalMode, LimitsDisplayStyle, ModeKind, ModelDisplayStyle,
+        ReasoningEffort, ReasoningEffortDisplayStyle, ServiceTier,
     };
     use agent_client_protocol::schema::{
         SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
@@ -539,7 +693,7 @@ mod tests {
     use codex_protocol::account::PlanType;
 
     #[test]
-    fn model_selector_groups_model_reasoning_and_speed() {
+    fn model_selector_lowercases_model_names_by_default() {
         let account_status = super::AccountStatus::default();
         let mcp_summary = super::ContextSelectorSummary::default();
         let skills_summary = super::ContextSelectorSummary::default();
@@ -569,11 +723,15 @@ mod tests {
             current_model: "gpt-5.5",
             current_service_tier: Some(ServiceTier::Fast),
             current_reasoning_effort: ReasoningEffort::High,
+            current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Circle,
+            current_model_display_style: ModelDisplayStyle::WithPrefix,
             current_used_tokens: None,
             current_context_window_size: None,
             current_usage_percent: None,
             current_context_usage_source: None::<ContextUsageSource>,
             current_context_display: ContextControlDisplay::Context,
+            current_context_display_style: ContextDisplayStyle::Percent,
+            current_limits_display_style: LimitsDisplayStyle::Text,
             current_account_rate_limits: None,
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
@@ -592,11 +750,6 @@ mod tests {
         assert!(
             options
                 .iter()
-                .all(|option| option.id.0.as_ref() != "reasoning_effort")
-        );
-        assert!(
-            options
-                .iter()
                 .all(|option| option.id.0.as_ref() != "fast_mode")
         );
 
@@ -607,7 +760,9 @@ mod tests {
         assert_eq!(model.category, Some(SessionConfigOptionCategory::Model));
         assert_eq!(
             model.description.as_deref(),
-            Some("GPT-5.5\nReasoning: High\nSpeed: Fast")
+            Some(
+                "gpt-5.5\nModel label: With gpt\nReasoning effort: High\nEffort style: Circle\nSpeed: Fast"
+            )
         );
         let SessionConfigKind::Select(select) = &model.kind else {
             panic!("model selector should be a select config option");
@@ -621,28 +776,123 @@ mod tests {
                 .iter()
                 .map(|group| group.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["Models", "Reasoning", "Speed"]
+            vec!["Models", "Labels", "Effort", "Display", "Speed"]
         );
         assert!(groups[0].options.iter().any(|option| {
-            option.name == "5.5 ◕ ⚡"
-                && option
-                    .description
-                    .as_deref()
-                    .is_some_and(|description| description.contains("reasoning High, speed Fast"))
+            option.name == "gpt-5.5 ◕ ⚡"
+                && option.description.as_deref().is_some_and(|description| {
+                    description.contains("model label With gpt")
+                        && description.contains("reasoning effort High, speed Fast")
+                })
         }));
         assert!(
             groups[1]
                 .options
                 .iter()
-                .any(|option| option.value.0.as_ref() == "reasoning:high"
-                    && option.name == "★ ◕ High")
+                .any(|option| option.value.0.as_ref() == "display:with-prefix"
+                    && option.name == "★ With gpt")
         );
+        assert!(groups[2].options.iter().any(|option| {
+            option.value.0.as_ref() == "reasoning:high" && option.name == "★ ◕"
+        }));
         assert!(
-            groups[2]
+            groups[3]
                 .options
                 .iter()
-                .any(|option| option.value.0.as_ref() == "speed:fast"
-                    && option.name == "★ ⚡ Fast")
+                .any(|option| option.value.0.as_ref() == "circle" && option.name == "★ Circle")
+        );
+        assert!(groups[4].options.iter().any(|option| {
+            option.value.0.as_ref() == "speed:fast" && option.name == "★ ⚡ Fast"
+        }));
+    }
+
+    #[test]
+    fn model_selector_can_hide_gpt_prefix() {
+        let account_status = super::AccountStatus::default();
+        let mcp_summary = super::ContextSelectorSummary::default();
+        let skills_summary = super::ContextSelectorSummary::default();
+        let plugins_summary = super::ContextSelectorSummary::default();
+        let models = vec![AppModel {
+            id: "gpt-5.5".to_string(),
+            model: "gpt-5.5".to_string(),
+            upgrade: None,
+            upgrade_info: None,
+            availability_nux: None,
+            display_name: "GPT-5.5".to_string(),
+            description: "Frontier model".to_string(),
+            hidden: false,
+            supported_reasoning_efforts: vec![ReasoningEffortOption {
+                reasoning_effort: ReasoningEffort::High,
+                description: "Deeper reasoning".to_string(),
+            }],
+            default_reasoning_effort: ReasoningEffort::High,
+            input_modalities: Vec::new(),
+            supports_personality: false,
+            is_default: true,
+        }];
+
+        let options = config_options(ConfigOptionsInput {
+            workspace_cwd: std::path::Path::new("/tmp"),
+            models: &models,
+            current_model: "gpt-5.5",
+            current_service_tier: Some(ServiceTier::Fast),
+            current_reasoning_effort: ReasoningEffort::High,
+            current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Text,
+            current_model_display_style: ModelDisplayStyle::WithoutPrefix,
+            current_used_tokens: None,
+            current_context_window_size: None,
+            current_usage_percent: None,
+            current_context_usage_source: None::<ContextUsageSource>,
+            current_context_display: ContextControlDisplay::Context,
+            current_context_display_style: ContextDisplayStyle::Percent,
+            current_limits_display_style: LimitsDisplayStyle::Text,
+            current_account_rate_limits: None,
+            compaction_in_progress: false,
+            approval: AppAskForApproval::OnRequest,
+            sandbox: AppSandboxMode::WorkspaceWrite,
+            edit_approval_mode: EditApprovalMode::AskEveryEdit,
+            collaboration_mode_kind: ModeKind::Default,
+            account_status: &account_status,
+            total_token_usage: None,
+            session_mcp_summary: &mcp_summary,
+            session_skills_summary: &skills_summary,
+            session_plugins_summary: &plugins_summary,
+        });
+
+        let model = options
+            .iter()
+            .find(|option| option.id.0.as_ref() == "model")
+            .expect("model selector exists");
+        assert_eq!(
+            model.description.as_deref(),
+            Some(
+                "5.5\nModel label: Without gpt\nReasoning effort: High\nEffort style: Text\nSpeed: Fast"
+            )
+        );
+        let SessionConfigKind::Select(select) = &model.kind else {
+            panic!("model selector should be a select config option");
+        };
+        let SessionConfigSelectOptions::Grouped(groups) = &select.options else {
+            panic!("model selector should use grouped options");
+        };
+        assert_eq!(groups[0].options[0].name, "5.5 High ⚡");
+        assert!(
+            groups[1]
+                .options
+                .iter()
+                .any(|option| option.value.0.as_ref() == "display:without-prefix"
+                    && option.name == "★ Without gpt")
+        );
+        assert!(
+            groups[2].options.iter().any(
+                |option| option.value.0.as_ref() == "reasoning:high" && option.name == "★ High"
+            )
+        );
+        assert!(
+            groups[3]
+                .options
+                .iter()
+                .any(|option| option.value.0.as_ref() == "text" && option.name == "★ Text")
         );
     }
 
@@ -689,11 +939,15 @@ mod tests {
             current_model: "gpt-5.5",
             current_service_tier: None,
             current_reasoning_effort: ReasoningEffort::High,
+            current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Circle,
+            current_model_display_style: ModelDisplayStyle::WithPrefix,
             current_used_tokens: Some(195_499),
             current_context_window_size: Some(258_400),
             current_usage_percent: Some(76),
             current_context_usage_source: Some(ContextUsageSource::Live),
-            current_context_display: ContextControlDisplay::FiveHourLimit,
+            current_context_display: ContextControlDisplay::Limits,
+            current_context_display_style: ContextDisplayStyle::Percent,
+            current_limits_display_style: LimitsDisplayStyle::Text,
             current_account_rate_limits: Some(&rate_limits),
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
@@ -749,11 +1003,15 @@ mod tests {
             current_model: "gpt-5.5",
             current_service_tier: None,
             current_reasoning_effort: ReasoningEffort::High,
+            current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Circle,
+            current_model_display_style: ModelDisplayStyle::WithPrefix,
             current_used_tokens: Some(1_000),
             current_context_window_size: Some(2_000),
             current_usage_percent: Some(50),
             current_context_usage_source: Some(ContextUsageSource::Cached),
             current_context_display: ContextControlDisplay::Context,
+            current_context_display_style: ContextDisplayStyle::Percent,
+            current_limits_display_style: LimitsDisplayStyle::Text,
             current_account_rate_limits: None,
             compaction_in_progress: true,
             approval: AppAskForApproval::Never,

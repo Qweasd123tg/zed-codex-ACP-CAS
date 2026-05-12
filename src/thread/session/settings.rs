@@ -1,16 +1,19 @@
 //! Обновления runtime-настроек сессии (mode/model/reasoning/context), доступные ACP-клиентам.
 
 use super::session_config::{
-    CONTEXT_BRAILLE_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
-    MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
-    find_model_for_current, normalize_reasoning_effort_for_model, parse_fast_mode_value,
+    CONTEXT_BRAILLE_VALUE, CONTEXT_COMBINED_VALUE, CONTEXT_COMPACT_VALUE,
+    CONTEXT_LIMITS_BARS_VALUE, CONTEXT_LIMITS_BLOCK_VALUE, CONTEXT_LIMITS_TEXT_VALUE,
+    CONTEXT_LIMITS_VALUE, CONTEXT_PERCENT_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
+    PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, find_model_for_current,
+    normalize_reasoning_effort_for_model, parse_fast_mode_value, parse_model_display_value,
     parse_model_reasoning_value, parse_model_speed_value, parse_reasoning_effort,
-    reasoning_effort_value,
+    parse_reasoning_effort_display_style, reasoning_effort_value,
 };
 use super::{
     APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, ContextControlDisplay,
-    DEFAULT_SESSION_MODE_ID, EditApprovalMode, Error, ModeKind, ModelId, PLAN_SESSION_MODE_ID,
-    ReasoningEffort, SessionConfigId, SessionModeId, Thread, replay,
+    ContextDisplayStyle, DEFAULT_SESSION_MODE_ID, EditApprovalMode, Error, LimitsDisplayStyle,
+    ModeKind, ModelDisplayStyle, ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort,
+    ReasoningEffortDisplayStyle, SessionConfigId, SessionModeId, Thread, replay,
 };
 use crate::thread::features::{
     collab::{remember_agent_label, warm_agent_labels_for_turns},
@@ -124,6 +127,27 @@ impl Thread {
         Ok(())
     }
 
+    pub async fn set_reasoning_effort_display_style(
+        &self,
+        style: ReasoningEffortDisplayStyle,
+    ) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+        if inner.reasoning_effort_display_style == style {
+            return Ok(());
+        }
+        inner.reasoning_effort_display_style = style;
+        Ok(())
+    }
+
+    pub async fn set_model_display_style(&self, style: ModelDisplayStyle) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+        if inner.model_display_style == style {
+            return Ok(());
+        }
+        inner.model_display_style = style;
+        Ok(())
+    }
+
     pub async fn set_fast_mode(
         &self,
         service_tier: Option<codex_protocol::config_types::ServiceTier>,
@@ -139,17 +163,6 @@ impl Thread {
         match value.0.as_ref() {
             SESSION_STATUS_VALUE | MCP_STATUS_VALUE | SKILLS_STATUS_VALUE
             | PLUGINS_STATUS_VALUE => Ok(()),
-            CONTEXT_BRAILLE_VALUE => {
-                if inner.context_control_display != ContextControlDisplay::Braille {
-                    inner.context_control_display = ContextControlDisplay::Braille;
-                    notify_options_update = true;
-                }
-                drop(inner);
-                if notify_options_update {
-                    self.notify_config_options_update().await;
-                }
-                Ok(())
-            }
             CONTEXT_STATUS_VALUE => {
                 if inner.context_control_display != ContextControlDisplay::Context {
                     inner.context_control_display = ContextControlDisplay::Context;
@@ -162,8 +175,74 @@ impl Thread {
                 Ok(())
             }
             CONTEXT_LIMITS_VALUE => {
-                if inner.context_control_display != ContextControlDisplay::FiveHourLimit {
-                    inner.context_control_display = ContextControlDisplay::FiveHourLimit;
+                if inner.context_control_display != ContextControlDisplay::Limits {
+                    inner.context_control_display = ContextControlDisplay::Limits;
+                    notify_options_update = true;
+                }
+                drop(inner);
+                if notify_options_update {
+                    self.notify_config_options_update().await;
+                }
+                Ok(())
+            }
+            CONTEXT_COMBINED_VALUE => {
+                if inner.context_control_display != ContextControlDisplay::ContextAndLimits {
+                    inner.context_control_display = ContextControlDisplay::ContextAndLimits;
+                    notify_options_update = true;
+                }
+                drop(inner);
+                if notify_options_update {
+                    self.notify_config_options_update().await;
+                }
+                Ok(())
+            }
+            CONTEXT_PERCENT_VALUE => {
+                if inner.context_display_style != ContextDisplayStyle::Percent {
+                    inner.context_display_style = ContextDisplayStyle::Percent;
+                    notify_options_update = true;
+                }
+                drop(inner);
+                if notify_options_update {
+                    self.notify_config_options_update().await;
+                }
+                Ok(())
+            }
+            CONTEXT_BRAILLE_VALUE => {
+                if inner.context_display_style != ContextDisplayStyle::Braille {
+                    inner.context_display_style = ContextDisplayStyle::Braille;
+                    notify_options_update = true;
+                }
+                drop(inner);
+                if notify_options_update {
+                    self.notify_config_options_update().await;
+                }
+                Ok(())
+            }
+            CONTEXT_LIMITS_TEXT_VALUE => {
+                if inner.limits_display_style != LimitsDisplayStyle::Text {
+                    inner.limits_display_style = LimitsDisplayStyle::Text;
+                    notify_options_update = true;
+                }
+                drop(inner);
+                if notify_options_update {
+                    self.notify_config_options_update().await;
+                }
+                Ok(())
+            }
+            CONTEXT_LIMITS_BARS_VALUE => {
+                if inner.limits_display_style != LimitsDisplayStyle::Bars {
+                    inner.limits_display_style = LimitsDisplayStyle::Bars;
+                    notify_options_update = true;
+                }
+                drop(inner);
+                if notify_options_update {
+                    self.notify_config_options_update().await;
+                }
+                Ok(())
+            }
+            CONTEXT_LIMITS_BLOCK_VALUE => {
+                if inner.limits_display_style != LimitsDisplayStyle::Block {
+                    inner.limits_display_style = LimitsDisplayStyle::Block;
                     notify_options_update = true;
                 }
                 drop(inner);
@@ -219,6 +298,14 @@ impl Thread {
                     self.set_fast_mode(service_tier).await?;
                     self.notify_config_options_update().await;
                     Ok(())
+                } else if let Some(style) = parse_reasoning_effort_display_style(&value.0) {
+                    self.set_reasoning_effort_display_style(style).await?;
+                    self.notify_config_options_update().await;
+                    Ok(())
+                } else if let Some(style) = parse_model_display_value(&value.0) {
+                    self.set_model_display_style(style).await?;
+                    self.notify_config_options_update().await;
+                    Ok(())
                 } else {
                     self.set_model(ModelId::new(value.0)).await
                 }
@@ -231,7 +318,17 @@ impl Thread {
             "reasoning_effort" => {
                 let effort = parse_reasoning_effort(&value.0)
                     .ok_or_else(|| Error::invalid_params().data("Unsupported reasoning effort"))?;
-                self.set_reasoning_effort(effort).await
+                self.set_reasoning_effort(effort).await?;
+                self.notify_config_options_update().await;
+                Ok(())
+            }
+            "reasoning_effort_style" => {
+                let style = parse_reasoning_effort_display_style(&value.0).ok_or_else(|| {
+                    Error::invalid_params().data("Unsupported reasoning effort style")
+                })?;
+                self.set_reasoning_effort_display_style(style).await?;
+                self.notify_config_options_update().await;
+                Ok(())
             }
             "context_control" => self.set_context_control(value).await,
             _ => Err(Error::invalid_params().data("Unsupported config option")),
