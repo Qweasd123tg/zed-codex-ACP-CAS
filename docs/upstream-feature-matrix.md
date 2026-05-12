@@ -137,6 +137,10 @@
 - `Follow`: продолжать улучшать `ToolCallLocation` там, где app-server дает точные пути. Для search/list command actions использовать директорию поиска, включая `"." -> cwd`, а для shell fallback оставлять только очевидные одиночные read/write paths.
 - `/status`: постепенно привести текст отчета к той же структуре, что hover у selectors: `Context`, `Limits`, `Session`, `Integrations`, чтобы status и нижняя панель говорили на одном языке.
 
+Already applied from this backlog:
+
+- Command approval cards no longer use generic `Details` when the app-server asks for command permission. The adapter now reuses command-title heuristics for approval cards, including `Network access: host` for `curl`/`wget`/`iwr` style commands and `Create file: name` / `Create folder: name` / `Delete path: name` for obvious file operations. This matters because Zed collapses the approval body after completion and leaves the title as the durable visible text.
+
 ## 4.2 Текущие Ограничения Zed UI
 
 Ниже то, что уже проверено на практике и не стоит пытаться "чинить" только силами адаптера:

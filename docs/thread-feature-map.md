@@ -318,6 +318,7 @@ Startup/resume/thread-switch snapshots account rate limits должны толь
 Риск: держать `ThreadInner` mutex через весь `request_permission(...)` think-time пользователя. Для file-change approval текущая безопасная граница теперь такая: snapshot prompt payload под lock, сам ACP permission prompt вне lock, потом короткий relock только на ответ в `app-server`.
 Для command approval есть дополнительная инварианта: это live gate на выполнение shell-команды, поэтому `request_permission(...)` нельзя просто await-ить внутри message branch. Текущая безопасная схема в `turn/execution.rs`: parked pending approval state внутри active-turn loop, чтобы `cancel` и reconnect watchdog не умирали, пока пользователь думает.
 Command tool-call и command approval locations для Zed Follow собираются в `src/thread/features/tool_call_ui/location.rs`: сначала из structured `CommandAction` (`Read`, `ListFiles`, `Search`), затем из очень консервативного fallback для одиночных shell read/write команд, и только потом из `cwd`.
+Command approval title не должен оставаться generic `Details` / `Run shell command`, потому что Zed сворачивает body после выбора пользователя и оставляет только заголовок карточки. `src/thread/features/approvals/command.rs` переиспользует `tool_call_ui/title.rs`: network approvals показывают `Network access: host`, очевидные file operations показывают `Create file: name`, `Create folder: name`, `Delete path: name`, а остальные команды продолжают идти через общие read/search/git/test эвристики.
 
 ### Collab/Subagents
 - `src/thread/features/collab/*`

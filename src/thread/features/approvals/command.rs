@@ -20,6 +20,7 @@ use crate::thread::features::tool_call_ui::kind::{
     command_looks_like_verification, extract_inner_shell_command,
 };
 use crate::thread::features::tool_call_ui::location::command_tool_locations;
+use crate::thread::features::tool_call_ui::title::command_tool_title;
 use crate::thread::{ALLOW_ONCE, CANCEL_TURN, REJECT_ONCE, SessionClient, ThreadInner};
 
 pub(in crate::thread) struct CommandApprovalPending {
@@ -61,13 +62,14 @@ pub(in crate::thread) fn prepare_command_approval(
 ) -> Box<CommandApprovalPending> {
     let tool_call_id = ToolCallId::new(params.item_id.clone());
 
+    let command = params.command.as_deref().unwrap_or_default();
+    let command_actions = params.command_actions.as_deref().unwrap_or_default();
+
     let mut fields = ToolCallUpdateFields::new()
-        .title("Details")
+        .title(command_approval_title(&params, command, command_actions))
         .kind(ToolKind::Execute)
         .status(ToolCallStatus::Pending)
         .content(command_approval_content(&params));
-    let command = params.command.as_deref().unwrap_or_default();
-    let command_actions = params.command_actions.as_deref().unwrap_or_default();
     if params.cwd.is_some() || !command.trim().is_empty() || !command_actions.is_empty() {
         let cwd = params.cwd.as_deref().unwrap_or(&inner.workspace_cwd);
         fields = fields.locations(command_tool_locations(cwd, command, command_actions));
@@ -83,6 +85,34 @@ pub(in crate::thread) fn prepare_command_approval(
         options,
         decisions_by_option_id,
     })
+}
+
+fn command_approval_title(
+    params: &CommandExecutionRequestApprovalParams,
+    command: &str,
+    command_actions: &[codex_app_server_protocol::CommandAction],
+) -> String {
+    if let Some(network) = params.network_approval_context.as_ref() {
+        return format!("Network access: {}", network.host);
+    }
+
+    if !command.trim().is_empty() || !command_actions.is_empty() {
+        return command_tool_title(command, command_actions);
+    }
+    params
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .map(|reason| {
+            let preview = reason.chars().take(80).collect::<String>();
+            if preview.len() < reason.len() {
+                format!("{preview}...")
+            } else {
+                preview
+            }
+        })
+        .unwrap_or_else(|| "Command approval".to_string())
 }
 
 pub(in crate::thread) fn command_approval_decision_from_outcome(
@@ -321,6 +351,7 @@ fn indented(text: &str) -> String {
 mod tests {
     use super::{
         command_approval_decision_from_outcome, command_approval_lines, command_approval_options,
+        command_approval_title,
     };
     use agent_client_protocol::schema::{
         PermissionOptionKind, RequestPermissionOutcome, SelectedPermissionOutcome,
@@ -357,6 +388,60 @@ mod tests {
         assert!(joined.contains("pwd && ls -la"));
         assert!(!joined.contains("/bin/bash -lc"));
         assert!(joined.contains("Working directory: `/tmp/workspace`"));
+    }
+
+    #[test]
+    fn command_approval_title_uses_command_actions_instead_of_generic_details() {
+        let params: CommandExecutionRequestApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "threadId": "thread_1",
+                "turnId": "turn_1",
+                "itemId": "item_1",
+                "reason": "Need to inspect the workspace",
+                "command": "/bin/bash -lc 'git status --short'",
+                "cwd": "/tmp/workspace",
+                "commandActions": [
+                    {
+                        "type": "unknown",
+                        "command": "git status --short"
+                    }
+                ]
+            }))
+            .expect("valid command approval params");
+
+        assert_eq!(
+            command_approval_title(
+                &params,
+                params.command.as_deref().unwrap_or_default(),
+                params.command_actions.as_deref().unwrap_or_default(),
+            ),
+            "Inspect git state"
+        );
+    }
+
+    #[test]
+    fn command_approval_title_prefers_network_context() {
+        let params: CommandExecutionRequestApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "threadId": "thread_1",
+                "turnId": "turn_1",
+                "itemId": "item_1",
+                "command": "curl -I https://example.com",
+                "networkApprovalContext": {
+                    "host": "example.com",
+                    "protocol": "https"
+                }
+            }))
+            .expect("valid command approval params");
+
+        assert_eq!(
+            command_approval_title(
+                &params,
+                params.command.as_deref().unwrap_or_default(),
+                params.command_actions.as_deref().unwrap_or_default(),
+            ),
+            "Network access: example.com"
+        );
     }
 
     #[test]

@@ -872,6 +872,43 @@ fn command_title_maps_common_shell_search_and_check_commands() {
 }
 
 #[test]
+fn command_title_maps_common_network_commands() {
+    assert_eq!(
+        command_tool_title("/bin/bash -lc 'curl -I https://example.com'", &[]),
+        "Network access: example.com"
+    );
+    assert_eq!(
+        command_tool_title(
+            r#"pwsh.exe -NoProfile -Command "iwr https://example.com/path""#,
+            &[]
+        ),
+        "Network access: example.com"
+    );
+}
+
+#[test]
+fn command_title_maps_common_file_operation_commands() {
+    assert_eq!(
+        command_tool_title(
+            "/bin/bash -lc 'touch /home/qweasd123tg/codex-acp-outside-workspace-test.txt'",
+            &[]
+        ),
+        "Create file: codex-acp-outside-workspace-test.txt"
+    );
+    assert_eq!(
+        command_tool_title("/bin/bash -lc 'mkdir -p /tmp/codex-acp-test-dir'", &[]),
+        "Create folder: codex-acp-test-dir"
+    );
+    assert_eq!(
+        command_tool_title(
+            "/bin/bash -lc 'rm -f /tmp/codex-acp-test-dir/file.txt'",
+            &[]
+        ),
+        "Delete path: file.txt"
+    );
+}
+
+#[test]
 fn command_title_falls_back_for_unknown_commands() {
     assert_eq!(
         command_tool_title("/bin/bash -lc 'echo done'", &[]),

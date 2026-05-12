@@ -75,6 +75,12 @@ fn command_title_from_shell(command: &str) -> String {
     let inner_command = super::kind::extract_inner_shell_command(command);
     let normalized = inner_command.to_ascii_lowercase();
 
+    if let Some(host) = network_host_from_shell_command(&inner_command) {
+        return format!("Network access: {host}");
+    }
+    if let Some(title) = file_operation_title_from_shell_command(&inner_command) {
+        return title;
+    }
     if super::kind::command_looks_like_verification(&inner_command) {
         return "Run tests and checks".to_string();
     }
@@ -92,4 +98,94 @@ fn command_title_from_shell(command: &str) -> String {
     }
 
     "Run shell command".to_string()
+}
+
+fn network_host_from_shell_command(command: &str) -> Option<String> {
+    let parts = shlex::split(command)?;
+    let program = parts
+        .first()
+        .map(|part| command_name(part).to_ascii_lowercase())?;
+    if !matches!(
+        program.as_str(),
+        "curl" | "wget" | "http" | "https" | "xh" | "invoke-webrequest" | "iwr"
+    ) {
+        return None;
+    }
+
+    parts
+        .iter()
+        .skip(1)
+        .filter(|part| !part.starts_with('-'))
+        .find_map(|part| url_host(part))
+}
+
+fn command_name(program: &str) -> String {
+    std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(program)
+        .to_string()
+}
+
+fn url_host(value: &str) -> Option<String> {
+    let rest = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))?;
+    let host = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_matches(['[', ']']);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+fn file_operation_title_from_shell_command(command: &str) -> Option<String> {
+    let parts = shlex::split(command)?;
+    let program = parts
+        .first()
+        .map(|part| command_name(part).to_ascii_lowercase())?;
+    match program.as_str() {
+        "touch" => last_path_arg(&parts[1..]).map(|path| format!("Create file: {path}")),
+        "mkdir" => last_path_arg(&parts[1..]).map(|path| format!("Create folder: {path}")),
+        "rm" | "unlink" => last_path_arg(&parts[1..]).map(|path| format!("Delete path: {path}")),
+        "mv" => Some("Move path".to_string()),
+        "cp" => Some("Copy path".to_string()),
+        "chmod" | "chown" => {
+            last_path_arg(&parts[1..]).map(|path| format!("Change file permissions: {path}"))
+        }
+        "truncate" => last_path_arg(&parts[1..]).map(|path| format!("Modify file: {path}")),
+        _ => None,
+    }
+}
+
+fn last_path_arg(args: &[String]) -> Option<String> {
+    args.iter()
+        .rev()
+        .find(|arg| is_path_like_arg(arg))
+        .map(|path| path_display_name(path))
+}
+
+fn is_path_like_arg(arg: &str) -> bool {
+    let trimmed = arg.trim();
+    !trimmed.is_empty()
+        && trimmed != "-"
+        && !trimmed.starts_with('-')
+        && !trimmed.contains('*')
+        && !trimmed.contains('?')
+}
+
+fn path_display_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or(path)
+        .to_string()
 }
