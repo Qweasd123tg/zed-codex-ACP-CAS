@@ -31,6 +31,7 @@ use codex_protocol::config_types::{ModeKind, ServiceTier};
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::{AskForApproval, SandboxPolicy};
 use codex_utils_approval_presets::{ApprovalPreset, builtin_approval_presets};
+use serde::{Deserialize, Serialize};
 pub(super) use tracing::warn;
 
 use crate::app_server::AppServerProcess;
@@ -59,6 +60,8 @@ mod session_client;
 mod session_config;
 #[path = "thread/session/lifecycle.rs"]
 mod session_lifecycle;
+#[path = "thread/session/selector_preferences.rs"]
+mod session_selector_preferences;
 #[path = "thread/session/settings.rs"]
 mod session_settings;
 #[path = "thread/session/usage_cache.rs"]
@@ -134,6 +137,7 @@ struct ThreadInner {
     bundled_skills_enabled: bool,
     thread_id: String,
     context_usage_cache_path: PathBuf,
+    selector_preferences_path: PathBuf,
     session_mcp_config_overrides: Option<HashMap<String, serde_json::Value>>,
     session_mcp_summary: session_config::ContextSelectorSummary,
     session_skills_summary: session_config::ContextSelectorSummary,
@@ -196,7 +200,8 @@ enum ContextUsageSource {
     Cached,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 enum ContextControlDisplay {
     #[default]
     Context,
@@ -204,14 +209,16 @@ enum ContextControlDisplay {
     ContextAndLimits,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 enum ContextDisplayStyle {
     #[default]
     Percent,
     Braille,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 enum LimitsDisplayStyle {
     #[default]
     Text,
@@ -219,14 +226,16 @@ enum LimitsDisplayStyle {
     Block,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum ReasoningEffortDisplayStyle {
     #[default]
     Circle,
     Text,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum ModelDisplayStyle {
     #[default]
     WithPrefix,

@@ -295,6 +295,16 @@ That script rotates `.build/codex-acp-current` and `.build/codex-acp-previous`. 
 `target/release/codex-acp` does not update the binary path if Zed is already configured to use
 `.build/codex-acp-current`.
 
+Nested selector styles are persisted by the adapter because ACP/Zed only exposes one
+`currentValue` per selector. The file lives under:
+
+```text
+$CODEX_HOME/memories/codex-acp/selector-preferences.json
+```
+
+This preserves choices such as context display mode, context percent/braille style, limits
+text/bars/block style, model label style, and reasoning effort display style across restarts.
+
 Example:
 
 ```json

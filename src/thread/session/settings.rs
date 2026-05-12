@@ -21,12 +21,23 @@ use crate::thread::features::{
         clear_visible_plan_state, has_visible_plan_state, should_clear_visible_plan_for_mode_change,
     },
 };
+use crate::thread::session_selector_preferences::persist_selector_preferences;
 use agent_client_protocol::schema::SessionConfigValueId;
 use codex_app_server_protocol::ThreadRollbackParams;
 use tracing::warn;
 
 const COMPACTION_SELECTOR_DRAIN_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(100);
+
+fn persist_selector_preferences_or_warn(inner: &crate::thread::ThreadInner) {
+    if let Err(error) = persist_selector_preferences(inner) {
+        warn!(
+            %error,
+            path = %inner.selector_preferences_path.display(),
+            "failed to persist selector preferences"
+        );
+    }
+}
 
 impl Thread {
     pub async fn set_mode(&self, mode: SessionModeId) -> Result<(), Error> {
@@ -136,6 +147,7 @@ impl Thread {
             return Ok(());
         }
         inner.reasoning_effort_display_style = style;
+        persist_selector_preferences_or_warn(&inner);
         Ok(())
     }
 
@@ -145,6 +157,7 @@ impl Thread {
             return Ok(());
         }
         inner.model_display_style = style;
+        persist_selector_preferences_or_warn(&inner);
         Ok(())
     }
 
@@ -166,6 +179,7 @@ impl Thread {
             CONTEXT_STATUS_VALUE => {
                 if inner.context_control_display != ContextControlDisplay::Context {
                     inner.context_control_display = ContextControlDisplay::Context;
+                    persist_selector_preferences_or_warn(&inner);
                     notify_options_update = true;
                 }
                 drop(inner);
@@ -177,6 +191,7 @@ impl Thread {
             CONTEXT_LIMITS_VALUE => {
                 if inner.context_control_display != ContextControlDisplay::Limits {
                     inner.context_control_display = ContextControlDisplay::Limits;
+                    persist_selector_preferences_or_warn(&inner);
                     notify_options_update = true;
                 }
                 drop(inner);
@@ -188,6 +203,7 @@ impl Thread {
             CONTEXT_COMBINED_VALUE => {
                 if inner.context_control_display != ContextControlDisplay::ContextAndLimits {
                     inner.context_control_display = ContextControlDisplay::ContextAndLimits;
+                    persist_selector_preferences_or_warn(&inner);
                     notify_options_update = true;
                 }
                 drop(inner);
@@ -199,6 +215,7 @@ impl Thread {
             CONTEXT_PERCENT_VALUE => {
                 if inner.context_display_style != ContextDisplayStyle::Percent {
                     inner.context_display_style = ContextDisplayStyle::Percent;
+                    persist_selector_preferences_or_warn(&inner);
                     notify_options_update = true;
                 }
                 drop(inner);
@@ -210,6 +227,7 @@ impl Thread {
             CONTEXT_BRAILLE_VALUE => {
                 if inner.context_display_style != ContextDisplayStyle::Braille {
                     inner.context_display_style = ContextDisplayStyle::Braille;
+                    persist_selector_preferences_or_warn(&inner);
                     notify_options_update = true;
                 }
                 drop(inner);
@@ -221,6 +239,7 @@ impl Thread {
             CONTEXT_LIMITS_TEXT_VALUE => {
                 if inner.limits_display_style != LimitsDisplayStyle::Text {
                     inner.limits_display_style = LimitsDisplayStyle::Text;
+                    persist_selector_preferences_or_warn(&inner);
                     notify_options_update = true;
                 }
                 drop(inner);
@@ -232,6 +251,7 @@ impl Thread {
             CONTEXT_LIMITS_BARS_VALUE => {
                 if inner.limits_display_style != LimitsDisplayStyle::Bars {
                     inner.limits_display_style = LimitsDisplayStyle::Bars;
+                    persist_selector_preferences_or_warn(&inner);
                     notify_options_update = true;
                 }
                 drop(inner);
@@ -243,6 +263,7 @@ impl Thread {
             CONTEXT_LIMITS_BLOCK_VALUE => {
                 if inner.limits_display_style != LimitsDisplayStyle::Block {
                     inner.limits_display_style = LimitsDisplayStyle::Block;
+                    persist_selector_preferences_or_warn(&inner);
                     notify_options_update = true;
                 }
                 drop(inner);
