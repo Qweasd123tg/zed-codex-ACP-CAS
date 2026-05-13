@@ -138,6 +138,7 @@ struct ThreadInner {
     thread_id: String,
     context_usage_cache_path: PathBuf,
     selector_preferences_path: PathBuf,
+    selector_layout: session_selector_preferences::SelectorLayoutPreferences,
     session_mcp_config_overrides: Option<HashMap<String, serde_json::Value>>,
     session_mcp_summary: session_config::ContextSelectorSummary,
     session_skills_summary: session_config::ContextSelectorSummary,

@@ -207,15 +207,11 @@ pub(in crate::thread) fn context_control_option_groups(
             .next()
             .expect("combined display option should exist"),
     ];
-    let context_style_options = vec![
-        options.next().expect("context percent option should exist"),
-        options.next().expect("context braille option should exist"),
-    ];
-    let limit_style_options = vec![
-        options.next().expect("limits text option should exist"),
-        options.next().expect("limits bars option should exist"),
-        options.next().expect("limits block option should exist"),
-    ];
+    let _context_percent_option = options.next().expect("context percent option should exist");
+    let _context_braille_option = options.next().expect("context braille option should exist");
+    let _limits_text_option = options.next().expect("limits text option should exist");
+    let _limits_bars_option = options.next().expect("limits bars option should exist");
+    let _limits_block_option = options.next().expect("limits block option should exist");
     let integration_options = vec![
         options.next().expect("session status option should exist"),
         options.next().expect("MCP status option should exist"),
@@ -226,8 +222,6 @@ pub(in crate::thread) fn context_control_option_groups(
 
     vec![
         SessionConfigSelectGroup::new("display", "Display", display_options),
-        SessionConfigSelectGroup::new("context", "Context", context_style_options),
-        SessionConfigSelectGroup::new("limits", "Limits", limit_style_options),
         SessionConfigSelectGroup::new("integrations", "Integrations", integration_options),
         SessionConfigSelectGroup::new("actions", "Actions", action_options),
     ]
@@ -843,10 +837,7 @@ mod tests {
             .iter()
             .map(|group| group.name.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            vec!["Display", "Context", "Limits", "Integrations", "Actions"]
-        );
+        assert_eq!(names, vec!["Display", "Integrations", "Actions"]);
         assert_eq!(groups[0].options.len(), 3);
         assert_eq!(groups[0].options[0].value.0.as_ref(), CONTEXT_STATUS_VALUE);
         assert_eq!(groups[0].options[1].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
@@ -854,22 +845,8 @@ mod tests {
             groups[0].options[2].value.0.as_ref(),
             CONTEXT_COMBINED_VALUE
         );
-        assert_eq!(groups[1].options[0].value.0.as_ref(), CONTEXT_PERCENT_VALUE);
-        assert_eq!(groups[1].options[1].value.0.as_ref(), CONTEXT_BRAILLE_VALUE);
-        assert_eq!(
-            groups[2].options[0].value.0.as_ref(),
-            CONTEXT_LIMITS_TEXT_VALUE
-        );
-        assert_eq!(
-            groups[2].options[1].value.0.as_ref(),
-            CONTEXT_LIMITS_BARS_VALUE
-        );
-        assert_eq!(
-            groups[2].options[2].value.0.as_ref(),
-            CONTEXT_LIMITS_BLOCK_VALUE
-        );
-        assert_eq!(groups[3].options.len(), 4);
-        assert_eq!(groups[4].options[0].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
+        assert_eq!(groups[1].options.len(), 4);
+        assert_eq!(groups[2].options[0].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
     }
 
     #[test]

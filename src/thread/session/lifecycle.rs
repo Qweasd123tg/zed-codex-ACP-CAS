@@ -28,7 +28,8 @@ use super::{
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::session_selector_preferences::{
-    apply_selector_preferences, restore_selector_preferences, selector_preferences_path,
+    apply_selector_preferences, legacy_selector_preferences_path, persist_selector_preferences,
+    restore_selector_preferences, selector_preferences_path,
 };
 use crate::thread::session_usage_cache::{context_usage_cache_path, restore_cached_context_usage};
 use codex_app_server_protocol::{
@@ -446,7 +447,11 @@ impl Thread {
         );
 
         let selector_preferences_path = selector_preferences_path(&codex_home);
-        let selector_preferences = restore_selector_preferences(&selector_preferences_path);
+        let legacy_selector_preferences_path = legacy_selector_preferences_path(&codex_home);
+        let selector_preferences = restore_selector_preferences(
+            &selector_preferences_path,
+            &legacy_selector_preferences_path,
+        );
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
         let mut inner = ThreadInner {
             session_id: session_id.clone(),
@@ -456,6 +461,7 @@ impl Thread {
             thread_id,
             context_usage_cache_path: context_usage_cache_path(&codex_home),
             selector_preferences_path,
+            selector_layout: Default::default(),
             session_mcp_config_overrides,
             session_mcp_summary,
             session_skills_summary,
@@ -512,6 +518,13 @@ impl Thread {
             turn_reconnect_retry_limit_hit: false,
         };
         apply_selector_preferences(&mut inner, selector_preferences);
+        if let Err(error) = persist_selector_preferences(&inner) {
+            warn!(
+                %error,
+                path = %inner.selector_preferences_path.display(),
+                "failed to materialize selector preferences"
+            );
+        }
         Thread {
             inner: Arc::new(tokio::sync::Mutex::new(inner)),
             cancel_tx,

@@ -1,5 +1,6 @@
 //! Маппинг конфигурации сессии между ACP-опциями и runtime-настройками Codex app-server.
 
+use crate::thread::session_selector_preferences::{SelectorLayoutEntry, SelectorLayoutPreferences};
 use crate::thread::{
     AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
     ContextUsageSource, EditApprovalMode, LimitsDisplayStyle, ModeKind, ModelDisplayStyle,
@@ -68,6 +69,7 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) session_mcp_summary: &'a context::ContextSelectorSummary,
     pub(in crate::thread) session_skills_summary: &'a context::ContextSelectorSummary,
     pub(in crate::thread) session_plugins_summary: &'a context::ContextSelectorSummary,
+    pub(in crate::thread) selector_layout: &'a SelectorLayoutPreferences,
 }
 
 pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOptionsInput<'_> {
@@ -97,6 +99,7 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         session_mcp_summary: &inner.session_mcp_summary,
         session_skills_summary: &inner.session_skills_summary,
         session_plugins_summary: &inner.session_plugins_summary,
+        selector_layout: &inner.selector_layout,
     }
 }
 
@@ -127,6 +130,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         session_mcp_summary,
         session_skills_summary,
         session_plugins_summary,
+        selector_layout,
     } = input;
 
     let current_permissions_id = current_permission_mode_id(approval, sandbox, edit_approval_mode);
@@ -176,12 +180,13 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             bypass_permission_options,
         ));
     }
-    options.push(
+    options.push((
+        "permissions",
         SessionConfigOption::select(
             "permissions",
-            "Permissions",
+            selector_name(selector_layout, "permissions", "Permissions"),
             current_permissions_value,
-            permission_groups,
+            apply_group_layout(selector_layout, "permissions", permission_groups),
         )
         .description(current_permission_description(
             approval,
@@ -189,21 +194,26 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             edit_approval_mode,
             collaboration_mode_kind,
         )),
-    );
+    ));
 
-    options.push(
+    options.push((
+        "model",
         SessionConfigOption::select(
             "model",
-            "Model",
+            selector_name(selector_layout, "model", "Model"),
             current_model_id.clone(),
-            model_option_groups(
-                models,
-                current_model_entry,
-                &current_model_id,
-                current_reasoning_effort,
-                current_reasoning_effort_display_style,
-                current_model_display_style,
-                current_service_tier,
+            apply_group_layout(
+                selector_layout,
+                "model",
+                model_option_groups(
+                    models,
+                    current_model_entry,
+                    &current_model_id,
+                    current_reasoning_effort,
+                    current_reasoning_effort_display_style,
+                    current_model_display_style,
+                    current_service_tier,
+                ),
             ),
         )
         .category(SessionConfigOptionCategory::Model)
@@ -215,28 +225,33 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             current_model_display_style,
             current_service_tier,
         )),
-    );
+    ));
 
-    options.push(
+    options.push((
+        "context_control",
         SessionConfigOption::select(
             "context_control",
-            "Context",
+            selector_name(selector_layout, "context_control", "Context"),
             current_context_display.value_id(),
-            context::context_control_option_groups(
-                workspace_cwd,
-                account_status,
-                total_token_usage,
-                current_used_tokens,
-                current_context_window_size,
-                current_usage_percent,
-                current_context_usage_source,
-                current_context_display_style,
-                current_limits_display_style,
-                current_account_rate_limits,
-                compaction_in_progress,
-                session_mcp_summary,
-                session_skills_summary,
-                session_plugins_summary,
+            apply_group_layout(
+                selector_layout,
+                "context_control",
+                context::context_control_option_groups(
+                    workspace_cwd,
+                    account_status,
+                    total_token_usage,
+                    current_used_tokens,
+                    current_context_window_size,
+                    current_usage_percent,
+                    current_context_usage_source,
+                    current_context_display_style,
+                    current_limits_display_style,
+                    current_account_rate_limits,
+                    compaction_in_progress,
+                    session_mcp_summary,
+                    session_skills_summary,
+                    session_plugins_summary,
+                ),
             ),
         )
         .description(context_selector_description(
@@ -247,9 +262,86 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             current_account_rate_limits,
             compaction_in_progress,
         )),
-    );
+    ));
 
-    options
+    apply_selector_order(selector_layout, options)
+}
+
+fn selector_name(
+    layout: &SelectorLayoutPreferences,
+    selector_id: &str,
+    default_name: &str,
+) -> String {
+    layout
+        .entry(selector_id)
+        .and_then(|entry| entry.name.as_deref())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(default_name)
+        .to_string()
+}
+
+fn selector_visible(layout: &SelectorLayoutPreferences, selector_id: &str) -> bool {
+    layout
+        .entry(selector_id)
+        .and_then(|entry| entry.visible)
+        .unwrap_or(true)
+}
+
+fn apply_group_layout(
+    layout: &SelectorLayoutPreferences,
+    selector_id: &str,
+    groups: Vec<SessionConfigSelectGroup>,
+) -> Vec<SessionConfigSelectGroup> {
+    let Some(SelectorLayoutEntry {
+        groups: Some(group_order),
+        ..
+    }) = layout.entry(selector_id)
+    else {
+        return groups;
+    };
+    let mut remaining = groups;
+    let mut ordered = Vec::new();
+
+    for group_id in group_order {
+        if let Some(index) = remaining
+            .iter()
+            .position(|group| group.group.0.as_ref() == group_id.as_str())
+        {
+            ordered.push(remaining.remove(index));
+        }
+    }
+
+    if ordered.is_empty() {
+        remaining
+    } else {
+        ordered
+    }
+}
+
+fn apply_selector_order(
+    layout: &SelectorLayoutPreferences,
+    options: Vec<(&'static str, SessionConfigOption)>,
+) -> Vec<SessionConfigOption> {
+    let mut remaining = options
+        .into_iter()
+        .filter(|(selector_id, _)| selector_visible(layout, selector_id))
+        .collect::<Vec<_>>();
+    let mut ordered = Vec::with_capacity(remaining.len());
+
+    if let Some(selector_order) = &layout.order {
+        for selector_id in selector_order {
+            if let Some(index) = remaining
+                .iter()
+                .position(|(candidate_id, _)| *candidate_id == selector_id.as_str())
+            {
+                ordered.push(remaining.remove(index).1);
+            }
+        }
+    }
+
+    ordered.extend(remaining.into_iter().map(|(_, option)| option));
+    ordered
 }
 
 pub(super) fn parse_model_reasoning_value(value: &str) -> Option<ReasoningEffort> {
@@ -279,13 +371,6 @@ fn model_reasoning_value(effort: ReasoningEffort) -> String {
 
 fn model_speed_value(value: &str) -> String {
     format!("{MODEL_SPEED_VALUE_PREFIX}{value}")
-}
-
-fn model_display_value(style: ModelDisplayStyle) -> &'static str {
-    match style {
-        ModelDisplayStyle::WithPrefix => "with-prefix",
-        ModelDisplayStyle::WithoutPrefix => "without-prefix",
-    }
 }
 
 fn model_display_style_label(style: ModelDisplayStyle) -> &'static str {
@@ -417,9 +502,6 @@ fn model_option_groups(
         current_reasoning_effort,
         current_reasoning_effort_display_style,
     );
-    let model_display_options = model_display_style_option_groups(current_model_display_style);
-    let display_options =
-        reasoning_effort_style_option_groups(current_reasoning_effort_display_style);
     let speed_options = fast_mode::fast_mode_options(current_service_tier)
         .into_iter()
         .map(|option| {
@@ -437,9 +519,7 @@ fn model_option_groups(
 
     vec![
         SessionConfigSelectGroup::new("models", "Models", model_options),
-        SessionConfigSelectGroup::new("labels", "Labels", model_display_options),
         SessionConfigSelectGroup::new("effort", "Effort", reasoning_options),
-        SessionConfigSelectGroup::new("display", "Display", display_options),
         SessionConfigSelectGroup::new("speed", "Speed", speed_options),
     ]
 }
@@ -492,59 +572,6 @@ fn reasoning_effort_option_groups(
     }
 
     effort_options
-}
-
-fn model_display_style_option_groups(
-    current_style: ModelDisplayStyle,
-) -> Vec<SessionConfigSelectOption> {
-    [
-        ModelDisplayStyle::WithPrefix,
-        ModelDisplayStyle::WithoutPrefix,
-    ]
-    .into_iter()
-    .map(|style| {
-        let label = model_display_style_label(style).to_string();
-        let name = if style == current_style {
-            format!("★ {label}")
-        } else {
-            label
-        };
-        let description = match style {
-            ModelDisplayStyle::WithPrefix => "Show the gpt model prefix.".to_string(),
-            ModelDisplayStyle::WithoutPrefix => "Hide the gpt model prefix.".to_string(),
-        };
-        SessionConfigSelectOption::new(
-            format!("{MODEL_DISPLAY_VALUE_PREFIX}{}", model_display_value(style)),
-            name,
-        )
-        .description(description)
-    })
-    .collect()
-}
-
-fn reasoning_effort_style_option_groups(
-    current_style: ReasoningEffortDisplayStyle,
-) -> Vec<SessionConfigSelectOption> {
-    [
-        ReasoningEffortDisplayStyle::Text,
-        ReasoningEffortDisplayStyle::Circle,
-    ]
-    .into_iter()
-    .map(|style| {
-        let label = reasoning::reasoning_effort_style_option_label(style);
-        let name = if style == current_style {
-            format!("★ {label}")
-        } else {
-            label
-        };
-        let description = match style {
-            ReasoningEffortDisplayStyle::Text => "Show reasoning effort as words.".to_string(),
-            ReasoningEffortDisplayStyle::Circle => "Show reasoning effort as circles.".to_string(),
-        };
-        SessionConfigSelectOption::new(reasoning_effort_display_style_value(style), name)
-            .description(description)
-    })
-    .collect()
 }
 
 fn speed_option_label(name: &str, value: &str) -> String {
@@ -659,8 +686,7 @@ pub(super) use limits::{
 };
 pub(super) use reasoning::{
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
-    parse_reasoning_effort_display_style, reasoning_effort_display_style_value,
-    reasoning_effort_value, resolve_reasoning_effort,
+    parse_reasoning_effort_display_style, reasoning_effort_value, resolve_reasoning_effort,
 };
 
 pub(super) fn usage_percent(used: Option<u64>, size: Option<u64>) -> Option<u64> {
@@ -681,6 +707,9 @@ mod tests {
         ConfigOptionsInput, config_options, model_reasoning_value, model_speed_value,
         parse_model_reasoning_value, parse_model_speed_value,
     };
+    use crate::thread::session_selector_preferences::{
+        SelectorLayoutEntry, SelectorLayoutPreferences,
+    };
     use crate::thread::{
         AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
         ContextUsageSource, EditApprovalMode, LimitsDisplayStyle, ModeKind, ModelDisplayStyle,
@@ -698,6 +727,7 @@ mod tests {
         let mcp_summary = super::ContextSelectorSummary::default();
         let skills_summary = super::ContextSelectorSummary::default();
         let plugins_summary = super::ContextSelectorSummary::default();
+        let selector_layout = SelectorLayoutPreferences::default();
         let models = vec![AppModel {
             id: "gpt-5.5".to_string(),
             model: "gpt-5.5".to_string(),
@@ -743,6 +773,7 @@ mod tests {
             session_mcp_summary: &mcp_summary,
             session_skills_summary: &skills_summary,
             session_plugins_summary: &plugins_summary,
+            selector_layout: &selector_layout,
         });
 
         assert_eq!(options.len(), 3);
@@ -776,7 +807,7 @@ mod tests {
                 .iter()
                 .map(|group| group.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["Models", "Labels", "Effort", "Display", "Speed"]
+            vec!["Models", "Effort", "Speed"]
         );
         assert!(groups[0].options.iter().any(|option| {
             option.name == "gpt-5.5 ◕ ⚡"
@@ -785,23 +816,10 @@ mod tests {
                         && description.contains("reasoning effort High, speed Fast")
                 })
         }));
-        assert!(
-            groups[1]
-                .options
-                .iter()
-                .any(|option| option.value.0.as_ref() == "display:with-prefix"
-                    && option.name == "★ With gpt")
-        );
-        assert!(groups[2].options.iter().any(|option| {
+        assert!(groups[1].options.iter().any(|option| {
             option.value.0.as_ref() == "reasoning:high" && option.name == "★ ◕"
         }));
-        assert!(
-            groups[3]
-                .options
-                .iter()
-                .any(|option| option.value.0.as_ref() == "circle" && option.name == "★ Circle")
-        );
-        assert!(groups[4].options.iter().any(|option| {
+        assert!(groups[2].options.iter().any(|option| {
             option.value.0.as_ref() == "speed:fast" && option.name == "★ ⚡ Fast"
         }));
     }
@@ -812,6 +830,7 @@ mod tests {
         let mcp_summary = super::ContextSelectorSummary::default();
         let skills_summary = super::ContextSelectorSummary::default();
         let plugins_summary = super::ContextSelectorSummary::default();
+        let selector_layout = SelectorLayoutPreferences::default();
         let models = vec![AppModel {
             id: "gpt-5.5".to_string(),
             model: "gpt-5.5".to_string(),
@@ -857,6 +876,7 @@ mod tests {
             session_mcp_summary: &mcp_summary,
             session_skills_summary: &skills_summary,
             session_plugins_summary: &plugins_summary,
+            selector_layout: &selector_layout,
         });
 
         let model = options
@@ -877,22 +897,9 @@ mod tests {
         };
         assert_eq!(groups[0].options[0].name, "5.5 High ⚡");
         assert!(
-            groups[1]
-                .options
-                .iter()
-                .any(|option| option.value.0.as_ref() == "display:without-prefix"
-                    && option.name == "★ Without gpt")
-        );
-        assert!(
-            groups[2].options.iter().any(
+            groups[1].options.iter().any(
                 |option| option.value.0.as_ref() == "reasoning:high" && option.name == "★ High"
             )
-        );
-        assert!(
-            groups[3]
-                .options
-                .iter()
-                .any(|option| option.value.0.as_ref() == "text" && option.name == "★ Text")
         );
     }
 
@@ -916,6 +923,7 @@ mod tests {
         let mcp_summary = super::ContextSelectorSummary::default();
         let skills_summary = super::ContextSelectorSummary::default();
         let plugins_summary = super::ContextSelectorSummary::default();
+        let selector_layout = SelectorLayoutPreferences::default();
         let rate_limits = RateLimitSnapshot {
             limit_id: Some("codex".to_string()),
             limit_name: None,
@@ -959,6 +967,7 @@ mod tests {
             session_mcp_summary: &mcp_summary,
             session_skills_summary: &skills_summary,
             session_plugins_summary: &plugins_summary,
+            selector_layout: &selector_layout,
         });
 
         let context = options
@@ -996,6 +1005,7 @@ mod tests {
         let mcp_summary = super::ContextSelectorSummary::default();
         let skills_summary = super::ContextSelectorSummary::default();
         let plugins_summary = super::ContextSelectorSummary::default();
+        let selector_layout = SelectorLayoutPreferences::default();
 
         let options = config_options(ConfigOptionsInput {
             workspace_cwd: std::path::Path::new("/tmp"),
@@ -1023,6 +1033,7 @@ mod tests {
             session_mcp_summary: &mcp_summary,
             session_skills_summary: &skills_summary,
             session_plugins_summary: &plugins_summary,
+            selector_layout: &selector_layout,
         });
 
         let permissions = options
@@ -1072,5 +1083,102 @@ mod tests {
                 && description.contains("Status: compacting")
                 && description.contains("Context compaction is currently running.")
         }));
+    }
+
+    #[test]
+    fn selector_layout_can_rename_reorder_hide_and_filter_groups() {
+        let account_status = super::AccountStatus::default();
+        let mcp_summary = super::ContextSelectorSummary::default();
+        let skills_summary = super::ContextSelectorSummary::default();
+        let plugins_summary = super::ContextSelectorSummary::default();
+        let selector_layout = SelectorLayoutPreferences {
+            order: Some(vec![
+                "context_control".to_string(),
+                "permissions".to_string(),
+                "model".to_string(),
+            ]),
+            permissions: Some(SelectorLayoutEntry {
+                visible: Some(true),
+                name: Some("Mode".to_string()),
+                groups: Some(vec!["guarded".to_string(), "workflow".to_string()]),
+            }),
+            model: Some(SelectorLayoutEntry {
+                visible: Some(false),
+                name: None,
+                groups: None,
+            }),
+            context_control: Some(SelectorLayoutEntry {
+                visible: Some(true),
+                name: Some("Ctx".to_string()),
+                groups: Some(vec!["actions".to_string(), "display".to_string()]),
+            }),
+        };
+
+        let options = config_options(ConfigOptionsInput {
+            workspace_cwd: std::path::Path::new("/tmp"),
+            models: &[],
+            current_model: "gpt-5.5",
+            current_service_tier: None,
+            current_reasoning_effort: ReasoningEffort::High,
+            current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Circle,
+            current_model_display_style: ModelDisplayStyle::WithPrefix,
+            current_used_tokens: Some(1_000),
+            current_context_window_size: Some(2_000),
+            current_usage_percent: Some(50),
+            current_context_usage_source: Some(ContextUsageSource::Cached),
+            current_context_display: ContextControlDisplay::Context,
+            current_context_display_style: ContextDisplayStyle::Percent,
+            current_limits_display_style: LimitsDisplayStyle::Text,
+            current_account_rate_limits: None,
+            compaction_in_progress: false,
+            approval: AppAskForApproval::OnRequest,
+            sandbox: AppSandboxMode::WorkspaceWrite,
+            edit_approval_mode: EditApprovalMode::AskEveryEdit,
+            collaboration_mode_kind: ModeKind::Default,
+            account_status: &account_status,
+            total_token_usage: None,
+            session_mcp_summary: &mcp_summary,
+            session_skills_summary: &skills_summary,
+            session_plugins_summary: &plugins_summary,
+            selector_layout: &selector_layout,
+        });
+
+        assert_eq!(
+            options
+                .iter()
+                .map(|option| option.id.0.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["context_control", "permissions"]
+        );
+        assert_eq!(options[0].name, "Ctx");
+        let SessionConfigKind::Select(context_select) = &options[0].kind else {
+            panic!("context selector should be a select config option");
+        };
+        let SessionConfigSelectOptions::Grouped(context_groups) = &context_select.options else {
+            panic!("context selector should use grouped options");
+        };
+        assert_eq!(
+            context_groups
+                .iter()
+                .map(|group| group.group.0.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["actions", "display"]
+        );
+
+        assert_eq!(options[1].name, "Mode");
+        let SessionConfigKind::Select(permissions_select) = &options[1].kind else {
+            panic!("permissions selector should be a select config option");
+        };
+        let SessionConfigSelectOptions::Grouped(permission_groups) = &permissions_select.options
+        else {
+            panic!("permissions selector should use grouped options");
+        };
+        assert_eq!(
+            permission_groups
+                .iter()
+                .map(|group| group.group.0.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["guarded", "workflow"]
+        );
     }
 }

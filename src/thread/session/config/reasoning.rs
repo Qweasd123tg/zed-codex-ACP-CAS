@@ -71,15 +71,6 @@ pub(in crate::thread) fn parse_reasoning_effort_display_style(
     }
 }
 
-pub(in crate::thread) fn reasoning_effort_display_style_value(
-    style: ReasoningEffortDisplayStyle,
-) -> &'static str {
-    match style {
-        ReasoningEffortDisplayStyle::Circle => "circle",
-        ReasoningEffortDisplayStyle::Text => "text",
-    }
-}
-
 fn reasoning_effort_display_style_label(style: ReasoningEffortDisplayStyle) -> &'static str {
     match style {
         ReasoningEffortDisplayStyle::Circle => "Circle",

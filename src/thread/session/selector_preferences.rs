@@ -18,9 +18,42 @@ pub(in crate::thread) struct SelectorPreferences {
     pub(in crate::thread) limits_display_style: Option<LimitsDisplayStyle>,
     pub(in crate::thread) model_display_style: Option<ModelDisplayStyle>,
     pub(in crate::thread) reasoning_effort_display_style: Option<ReasoningEffortDisplayStyle>,
+    pub(in crate::thread) layout: Option<SelectorLayoutPreferences>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::thread) struct SelectorLayoutPreferences {
+    pub(in crate::thread) order: Option<Vec<String>>,
+    pub(in crate::thread) permissions: Option<SelectorLayoutEntry>,
+    pub(in crate::thread) model: Option<SelectorLayoutEntry>,
+    pub(in crate::thread) context_control: Option<SelectorLayoutEntry>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::thread) struct SelectorLayoutEntry {
+    pub(in crate::thread) visible: Option<bool>,
+    pub(in crate::thread) name: Option<String>,
+    pub(in crate::thread) groups: Option<Vec<String>>,
+}
+
+impl SelectorLayoutPreferences {
+    pub(in crate::thread) fn entry(&self, selector_id: &str) -> Option<&SelectorLayoutEntry> {
+        match selector_id {
+            "permissions" => self.permissions.as_ref(),
+            "model" => self.model.as_ref(),
+            "context_control" => self.context_control.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 pub(in crate::thread) fn selector_preferences_path(codex_home: &Path) -> PathBuf {
+    codex_home
+        .join("codex-acp")
+        .join("selector-preferences.json")
+}
+
+pub(in crate::thread) fn legacy_selector_preferences_path(codex_home: &Path) -> PathBuf {
     codex_home
         .join("memories")
         .join("codex-acp")
@@ -29,8 +62,13 @@ pub(in crate::thread) fn selector_preferences_path(codex_home: &Path) -> PathBuf
 
 pub(in crate::thread) fn restore_selector_preferences(
     preferences_path: &Path,
+    legacy_preferences_path: &Path,
 ) -> SelectorPreferences {
-    read_selector_preferences(preferences_path).unwrap_or_default()
+    if preferences_path.exists() {
+        read_selector_preferences(preferences_path).unwrap_or_default()
+    } else {
+        read_selector_preferences(legacy_preferences_path).unwrap_or_default()
+    }
 }
 
 pub(in crate::thread) fn apply_selector_preferences(
@@ -52,6 +90,9 @@ pub(in crate::thread) fn apply_selector_preferences(
     if let Some(value) = preferences.reasoning_effort_display_style {
         inner.reasoning_effort_display_style = value;
     }
+    if let Some(value) = preferences.layout {
+        inner.selector_layout = value;
+    }
 }
 
 pub(in crate::thread) fn persist_selector_preferences(inner: &ThreadInner) -> std::io::Result<()> {
@@ -61,8 +102,64 @@ pub(in crate::thread) fn persist_selector_preferences(inner: &ThreadInner) -> st
         limits_display_style: Some(inner.limits_display_style),
         model_display_style: Some(inner.model_display_style),
         reasoning_effort_display_style: Some(inner.reasoning_effort_display_style),
+        layout: Some(materialized_selector_layout(&inner.selector_layout)),
     };
     write_selector_preferences(&inner.selector_preferences_path, &preferences)
+}
+
+fn materialized_selector_layout(layout: &SelectorLayoutPreferences) -> SelectorLayoutPreferences {
+    SelectorLayoutPreferences {
+        order: Some(layout.order.clone().unwrap_or_else(default_selector_order)),
+        permissions: Some(materialized_selector_entry(
+            layout.permissions.as_ref(),
+            "Permissions",
+            &["workflow", "guarded", "bypass"],
+        )),
+        model: Some(materialized_selector_entry(
+            layout.model.as_ref(),
+            "Model",
+            &["models", "effort", "speed"],
+        )),
+        context_control: Some(materialized_selector_entry(
+            layout.context_control.as_ref(),
+            "Context",
+            &["display", "integrations", "actions"],
+        )),
+    }
+}
+
+fn materialized_selector_entry(
+    entry: Option<&SelectorLayoutEntry>,
+    default_name: &str,
+    default_groups: &[&str],
+) -> SelectorLayoutEntry {
+    SelectorLayoutEntry {
+        visible: Some(entry.and_then(|entry| entry.visible).unwrap_or(true)),
+        name: Some(
+            entry
+                .and_then(|entry| entry.name.clone())
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| default_name.to_string()),
+        ),
+        groups: Some(
+            entry
+                .and_then(|entry| entry.groups.clone())
+                .filter(|groups| !groups.is_empty())
+                .unwrap_or_else(|| {
+                    default_groups
+                        .iter()
+                        .map(|group| group.to_string())
+                        .collect()
+                }),
+        ),
+    }
+}
+
+fn default_selector_order() -> Vec<String> {
+    ["permissions", "model", "context_control"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 fn read_selector_preferences(preferences_path: &Path) -> std::io::Result<SelectorPreferences> {
@@ -93,7 +190,9 @@ fn write_selector_preferences(
 #[cfg(test)]
 mod tests {
     use super::{
-        restore_selector_preferences, selector_preferences_path, write_selector_preferences,
+        SelectorLayoutEntry, SelectorLayoutPreferences, legacy_selector_preferences_path,
+        materialized_selector_layout, restore_selector_preferences, selector_preferences_path,
+        write_selector_preferences,
     };
     use crate::thread::{
         ContextControlDisplay, ContextDisplayStyle, LimitsDisplayStyle, ModelDisplayStyle,
@@ -106,6 +205,12 @@ mod tests {
         let path = selector_preferences_path(Path::new("/tmp/codex-home"));
         assert_eq!(
             path,
+            Path::new("/tmp/codex-home")
+                .join("codex-acp")
+                .join("selector-preferences.json")
+        );
+        assert_eq!(
+            legacy_selector_preferences_path(Path::new("/tmp/codex-home")),
             Path::new("/tmp/codex-home")
                 .join("memories")
                 .join("codex-acp")
@@ -126,10 +231,28 @@ mod tests {
             limits_display_style: Some(LimitsDisplayStyle::Block),
             model_display_style: Some(ModelDisplayStyle::WithoutPrefix),
             reasoning_effort_display_style: Some(ReasoningEffortDisplayStyle::Text),
+            layout: Some(SelectorLayoutPreferences {
+                order: Some(vec![
+                    "context_control".to_string(),
+                    "model".to_string(),
+                    "permissions".to_string(),
+                ]),
+                permissions: Some(SelectorLayoutEntry {
+                    visible: Some(true),
+                    name: Some("Mode".to_string()),
+                    groups: Some(vec!["workflow".to_string(), "guarded".to_string()]),
+                }),
+                model: None,
+                context_control: Some(SelectorLayoutEntry {
+                    visible: Some(false),
+                    name: None,
+                    groups: None,
+                }),
+            }),
         };
 
         write_selector_preferences(&path, &preferences).unwrap();
-        let restored = restore_selector_preferences(&path);
+        let restored = restore_selector_preferences(&path, Path::new("/tmp/missing-legacy.json"));
 
         assert_eq!(
             restored.context_control_display,
@@ -151,7 +274,99 @@ mod tests {
             restored.reasoning_effort_display_style,
             Some(ReasoningEffortDisplayStyle::Text)
         );
+        let layout = restored.layout.expect("layout should restore");
+        assert_eq!(
+            layout.order,
+            Some(vec![
+                "context_control".to_string(),
+                "model".to_string(),
+                "permissions".to_string()
+            ])
+        );
+        assert_eq!(
+            layout.permissions.and_then(|entry| entry.name),
+            Some("Mode".to_string())
+        );
+        assert_eq!(
+            layout.context_control.and_then(|entry| entry.visible),
+            Some(false)
+        );
 
         drop(std::fs::remove_file(path));
+    }
+
+    #[test]
+    fn restores_legacy_preferences_when_new_file_is_missing() {
+        let mut legacy_path = std::env::temp_dir();
+        legacy_path.push(format!(
+            "codex-acp-selector-preferences-legacy-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let preferences = super::SelectorPreferences {
+            context_control_display: Some(ContextControlDisplay::ContextAndLimits),
+            ..Default::default()
+        };
+
+        write_selector_preferences(&legacy_path, &preferences).unwrap();
+        let restored =
+            restore_selector_preferences(Path::new("/tmp/missing-new.json"), &legacy_path);
+
+        assert_eq!(
+            restored.context_control_display,
+            Some(ContextControlDisplay::ContextAndLimits)
+        );
+
+        drop(std::fs::remove_file(legacy_path));
+    }
+
+    #[test]
+    fn materialized_layout_fills_defaults_for_manual_config_template() {
+        let layout = materialized_selector_layout(&SelectorLayoutPreferences {
+            order: None,
+            permissions: Some(SelectorLayoutEntry {
+                visible: Some(false),
+                name: Some("Mode".to_string()),
+                groups: None,
+            }),
+            model: None,
+            context_control: Some(SelectorLayoutEntry {
+                visible: None,
+                name: None,
+                groups: Some(vec!["actions".to_string(), "display".to_string()]),
+            }),
+        });
+
+        assert_eq!(
+            layout.order,
+            Some(vec![
+                "permissions".to_string(),
+                "model".to_string(),
+                "context_control".to_string()
+            ])
+        );
+        assert_eq!(
+            layout.permissions,
+            Some(SelectorLayoutEntry {
+                visible: Some(false),
+                name: Some("Mode".to_string()),
+                groups: Some(vec![
+                    "workflow".to_string(),
+                    "guarded".to_string(),
+                    "bypass".to_string()
+                ])
+            })
+        );
+        assert_eq!(
+            layout.model.and_then(|entry| entry.groups),
+            Some(vec![
+                "models".to_string(),
+                "effort".to_string(),
+                "speed".to_string()
+            ])
+        );
+        assert_eq!(
+            layout.context_control.and_then(|entry| entry.groups),
+            Some(vec!["actions".to_string(), "display".to_string()])
+        );
     }
 }

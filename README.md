@@ -295,15 +295,76 @@ That script rotates `.build/codex-acp-current` and `.build/codex-acp-previous`. 
 `target/release/codex-acp` does not update the binary path if Zed is already configured to use
 `.build/codex-acp-current`.
 
-Nested selector styles are persisted by the adapter because ACP/Zed only exposes one
-`currentValue` per selector. The file lives under:
+Nested selector styles and layout preferences are persisted by the adapter because ACP/Zed only
+exposes one `currentValue` per selector. The file lives under:
 
 ```text
-$CODEX_HOME/memories/codex-acp/selector-preferences.json
+$CODEX_HOME/codex-acp/selector-preferences.json
 ```
 
-This preserves choices such as context display mode, context percent/braille style, limits
-text/bars/block style, model label style, and reasoning effort display style across restarts.
+The adapter creates this file on session startup if it is missing. This preserves choices such as
+context display mode, context percent/braille style, limits text/bars/block style, model label
+style, and reasoning effort display style across restarts. It also keeps visual style controls out
+of the lower selector menus and allows a conservative layout override over known selectors.
+
+Default config:
+
+```json
+{
+  "context_control_display": "context",
+  "context_display_style": "percent",
+  "limits_display_style": "text",
+  "model_display_style": "with_prefix",
+  "reasoning_effort_display_style": "circle",
+  "layout": {
+    "order": ["permissions", "model", "context_control"],
+    "permissions": {
+      "visible": true,
+      "name": "Permissions",
+      "groups": ["workflow", "guarded", "bypass"]
+    },
+    "model": {
+      "visible": true,
+      "name": "Model",
+      "groups": ["models", "effort", "speed"]
+    },
+    "context_control": {
+      "visible": true,
+      "name": "Context",
+      "groups": ["display", "integrations", "actions"]
+    }
+  }
+}
+```
+
+Fields:
+
+- `context_control_display`: what the lower `Context` selector button shows.
+  Values: `context`, `limits`, `context_and_limits`.
+- `context_display_style`: compact context usage style.
+  Values: `percent`, `braille`.
+- `limits_display_style`: 5-hour limit style.
+  Values: `text`, `bars`, `block`.
+- `model_display_style`: model label style in the lower `Model` selector.
+  Values: `with_prefix`, `without_prefix`.
+- `reasoning_effort_display_style`: effort label style.
+  Values: `text`, `circle`.
+- `layout.order`: order of lower selectors.
+  Known ids: `permissions`, `model`, `context_control`.
+- `layout.<selector>.visible`: show or hide a selector.
+  Values: `true`, `false`.
+- `layout.<selector>.name`: selector title shown by Zed.
+- `layout.<selector>.groups`: whitelist and order of known groups inside that selector.
+
+Known groups:
+
+- `permissions`: `workflow`, `guarded`, `bypass`.
+- `model`: `models`, `effort`, `speed`.
+- `context_control`: `display`, `integrations`, `actions`.
+
+Unknown selector/group ids are ignored; if a group override matches nothing, the adapter keeps the
+default groups to avoid rendering an empty selector. The old
+`$CODEX_HOME/memories/codex-acp/selector-preferences.json` path is still read as a fallback.
 
 Example:
 
@@ -429,6 +490,20 @@ User-facing documentation stays in this README. Deeper project notes are kept se
 - [AGENTS.md](AGENTS.md)
 
 Current Zed-specific UI caveats are tracked in [docs/upstream-feature-matrix.md](docs/upstream-feature-matrix.md), especially around approval-card layout and command/review/session UX that the adapter alone cannot fully control.
+
+If Zed's agent input area or lower selector toolbar looks squeezed, enable Zed's content-width
+limit:
+
+```jsonc
+// zed://settings/agent.limit_content_width
+{
+  "agent": {
+    "limit_content_width": true
+  }
+}
+```
+
+That is a Zed panel layout setting, not an ACP adapter option.
 
 ## Roadmap
 
