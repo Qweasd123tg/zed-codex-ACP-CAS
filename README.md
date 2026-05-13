@@ -333,6 +333,21 @@ Default config:
       "name": "Context",
       "groups": ["display", "integrations", "actions"]
     }
+  },
+  "slash_commands": {
+    "init": true,
+    "status": true,
+    "review": true,
+    "threads": true,
+    "resume": true,
+    "fork": true,
+    "archive": true,
+    "unarchive": true,
+    "compact": true,
+    "undo": true,
+    "plan": true,
+    "rename": true,
+    "diff": true
   }
 }
 ```
@@ -355,12 +370,20 @@ Fields:
   Values: `true`, `false`.
 - `layout.<selector>.name`: selector title shown by Zed.
 - `layout.<selector>.groups`: whitelist and order of known groups inside that selector.
+- `slash_commands.<command>`: show and allow a slash command.
+  Values: `true`, `false`. Disabled commands are hidden from Zed's command list and rejected when
+  typed manually.
 
 Known groups:
 
 - `permissions`: `workflow`, `guarded`, `bypass`.
 - `model`: `models`, `effort`, `speed`.
 - `context_control`: `display`, `integrations`, `actions`.
+
+Known slash commands:
+
+- `init`, `status`, `review`, `threads`, `resume`, `fork`, `archive`, `unarchive`, `compact`, `undo`, `plan`, `rename`, `diff`.
+- `/delete` is a hidden compatibility alias for `/archive`; setting `"archive": false` disables both.
 
 Unknown selector/group ids are ignored; if a group override matches nothing, the adapter keeps the
 default groups to avoid rendering an empty selector. The old

@@ -47,6 +47,22 @@ impl Thread {
                     .await;
                 return Ok(StopReason::EndTurn);
             }
+            if let Some(command) = command.as_ref() {
+                let command_name = prompt_commands::session_command_name(command);
+                if !inner.slash_commands.is_enabled(command_name) {
+                    inner
+                        .client
+                        .send_system_message(
+                            "status",
+                            "Slash command disabled",
+                            format!(
+                                "`/{command_name}` is disabled by codex-acp selector preferences."
+                            ),
+                        )
+                        .await;
+                    return Ok(StopReason::EndTurn);
+                }
+            }
         }
         if should_drain_background_notifications(command.as_ref()) {
             let drain_outcome = self.drain_background_notifications_ext().await?;

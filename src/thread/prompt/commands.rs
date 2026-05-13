@@ -4,6 +4,7 @@ use std::path::Path;
 
 use super::{DiffScope, Error, SessionCommand, StopReason, ThreadInner};
 use crate::thread::features::{plan::parse_collaboration_mode, resume, session};
+use crate::thread::session_selector_preferences::SlashCommandPreferences;
 use agent_client_protocol::schema::{
     AvailableCommand, AvailableCommandInput, ContentBlock, EmbeddedResource,
     EmbeddedResourceResource, ResourceLink, TextResourceContents, UnstructuredCommandInput,
@@ -337,6 +338,24 @@ pub(super) async fn dispatch_session_command(
     }
 }
 
+pub(super) fn session_command_name(command: &SessionCommand) -> &'static str {
+    match command {
+        SessionCommand::Init { .. } => "init",
+        SessionCommand::Status { .. } => "status",
+        SessionCommand::Threads => "threads",
+        SessionCommand::Review { .. } => "review",
+        SessionCommand::Resume { .. } => "resume",
+        SessionCommand::Archive { .. } => "archive",
+        SessionCommand::Unarchive { .. } => "unarchive",
+        SessionCommand::Compact => "compact",
+        SessionCommand::Undo { .. } => "undo",
+        SessionCommand::PlanMode { .. } | SessionCommand::PlanPrompt { .. } => "plan",
+        SessionCommand::Fork { .. } => "fork",
+        SessionCommand::Rename { .. } => "rename",
+        SessionCommand::Diff { .. } => "diff",
+    }
+}
+
 pub(super) fn normalize_preview(preview: &str) -> String {
     let compact = preview.split_whitespace().collect::<Vec<_>>().join(" ");
     if compact.is_empty() {
@@ -349,8 +368,8 @@ pub(super) fn normalize_preview(preview: &str) -> String {
     }
 }
 
-pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
-    vec![
+pub(super) fn builtin_commands(slash_commands: &SlashCommandPreferences) -> Vec<AvailableCommand> {
+    [
         AvailableCommand::new(
             "init",
             "Create an AGENTS.md file with instructions for Codex",
@@ -419,6 +438,9 @@ pub(super) fn builtin_commands() -> Vec<AvailableCommand> {
             UnstructuredCommandInput::new("optional flags and/or path filters"),
         )),
     ]
+    .into_iter()
+    .filter(|command| slash_commands.is_enabled(command.name.as_str()))
+    .collect()
 }
 
 fn slash_command_rest<'a>(text: &'a str, command: &str) -> Option<&'a str> {

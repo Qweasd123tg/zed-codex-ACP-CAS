@@ -5,9 +5,7 @@ use std::path::Path;
 use codex_app_server_protocol::{Account, RateLimitSnapshot, TokenUsageBreakdown};
 use codex_protocol::account::PlanType;
 
-use super::limits::{
-    combined_limits_reset_message, five_hour_status_label, limits_status_description,
-};
+use super::limits::{five_hour_status_label, limits_status_description};
 use crate::thread::{
     ContextDisplayStyle, ContextUsageSource, LimitsDisplayStyle, SessionConfigSelectGroup,
     SessionConfigSelectOption,
@@ -234,10 +232,13 @@ pub(in crate::thread) fn session_status_message(
     rate_limits: Option<&RateLimitSnapshot>,
 ) -> String {
     format!(
-        "Chat status\n\nWorkspace: {}\nAccount: {}\nTokens: {}",
-        workspace_cwd.display(),
-        account_detail(account_status, rate_limits),
-        token_usage_summary_line(total_token_usage)
+        "Chat status\n\n{}",
+        session_status_detail(
+            workspace_cwd,
+            account_status,
+            total_token_usage,
+            rate_limits
+        )
     )
 }
 
@@ -255,25 +256,61 @@ pub(in crate::thread) fn full_status_report(
     skills_summary: &ContextSelectorSummary,
     plugins_summary: &ContextSelectorSummary,
 ) -> String {
-    let mut sections = vec![
-        session_status_message(
-            workspace_cwd,
-            account_status,
-            total_token_usage,
-            rate_limits,
-        ),
-        context_usage_message(used, size, usage_source),
-        combined_limits_reset_message(rate_limits),
-        mcp_summary.report.clone(),
-        skills_summary.report.clone(),
-        plugins_summary.report.clone(),
-    ];
-
+    let mut context_section = context_status_description(
+        used,
+        size,
+        status_report_usage_percent(used, size),
+        usage_source,
+        compaction_in_progress,
+    );
     if compaction_in_progress {
-        sections.push("Context compaction is currently running.".to_string());
+        context_section.push_str("\nContext compaction is currently running.");
     }
 
+    let sections = [
+        format!("Context\n{context_section}"),
+        format!("Limits\n{}", limits_status_description(rate_limits)),
+        format!(
+            "Session\n{}",
+            session_status_detail(
+                workspace_cwd,
+                account_status,
+                total_token_usage,
+                rate_limits
+            )
+        ),
+        format!(
+            "Integrations\n\n{}\n\n{}\n\n{}",
+            mcp_summary.report, skills_summary.report, plugins_summary.report
+        ),
+    ];
+
     sections.join("\n\n")
+}
+
+fn session_status_detail(
+    workspace_cwd: &Path,
+    account_status: &AccountStatus,
+    total_token_usage: Option<&TokenUsageBreakdown>,
+    rate_limits: Option<&RateLimitSnapshot>,
+) -> String {
+    format!(
+        "Workspace: {}\nAccount: {}\nTokens: {}",
+        workspace_cwd.display(),
+        account_detail(account_status, rate_limits),
+        token_usage_summary_line(total_token_usage)
+    )
+}
+
+fn status_report_usage_percent(used: Option<u64>, size: Option<u64>) -> Option<u64> {
+    let used = used?;
+    let size = size?;
+    if size == 0 {
+        return None;
+    }
+    let clamped = used.min(size);
+    let numerator = clamped.saturating_mul(100).saturating_add(size / 2);
+    Some(numerator / size)
 }
 
 pub(in crate::thread) fn build_account_status(account: Option<Account>) -> AccountStatus {
@@ -289,30 +326,6 @@ pub(in crate::thread) fn build_account_status(account: Option<Account>) -> Accou
             plan_type: None,
         },
         None => AccountStatus::default(),
-    }
-}
-
-pub(in crate::thread) fn context_usage_message(
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_source: Option<ContextUsageSource>,
-) -> String {
-    match (used, size) {
-        (Some(used), Some(size)) if size > 0 => {
-            format!(
-                "Context usage: {used}/{size} tokens.\nSource: {}.",
-                context_usage_source_label(usage_source)
-            )
-        }
-        (Some(used), None) => {
-            format!(
-                "Context usage: {used} tokens (window size is not available yet).\nSource: {}.",
-                context_usage_source_label(usage_source)
-            )
-        }
-        _ => {
-            "Context usage is not available yet. App-server reports it after the first completed model turn, and resume restores the last cached value when available.".to_string()
-        }
     }
 }
 
@@ -341,14 +354,6 @@ fn session_status_summary(
             total_token_usage,
             rate_limits,
         ),
-    }
-}
-
-fn context_usage_source_label(source: Option<ContextUsageSource>) -> &'static str {
-    match source {
-        Some(ContextUsageSource::Live) => "live",
-        Some(ContextUsageSource::Cached) => "cached",
-        None => "---",
     }
 }
 
@@ -743,8 +748,7 @@ mod tests {
         CONTEXT_LIMITS_VALUE, CONTEXT_PERCENT_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
         PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, build_mcp_summary,
         build_plugins_summary, build_skills_summary, context_control_option_groups,
-        context_control_options, context_usage_braille, context_usage_message, full_status_report,
-        session_status_message,
+        context_control_options, context_usage_braille, full_status_report, session_status_message,
     };
     use crate::thread::{ContextDisplayStyle, ContextUsageSource, LimitsDisplayStyle};
     use codex_app_server_protocol::{
@@ -769,14 +773,6 @@ mod tests {
 
     fn empty_summary(label: &str) -> super::ContextSelectorSummary {
         summary(label, "none", "none")
-    }
-
-    #[test]
-    fn context_messages_include_usage() {
-        assert_eq!(
-            context_usage_message(Some(157_835), Some(258_400), Some(ContextUsageSource::Live)),
-            "Context usage: 157835/258400 tokens.\nSource: live."
-        );
     }
 
     #[test]
@@ -1225,11 +1221,45 @@ mod tests {
             &summary("Plugins · none", "none", "Plugins report"),
         );
 
-        assert!(report.contains("Chat status"));
-        assert!(report.contains("Context usage: 1000/2000 tokens."));
+        assert!(report.starts_with("Context\n"));
+        assert!(report.contains("Context: ⣤ 50%"));
+        assert!(report.contains("Tokens: 1000/2000"));
+        assert!(report.contains("Status: compacting"));
+        assert!(report.contains("Limits\n5h -- · wk --"));
+        assert!(report.contains("Session\nWorkspace: /tmp/workspace"));
+        assert!(report.contains("Integrations\n\nMCP report"));
         assert!(report.contains("MCP report"));
         assert!(report.contains("Skills report"));
         assert!(report.contains("Plugins report"));
         assert!(report.contains("Context compaction is currently running."));
+
+        let context_index = report.find("Context\n").unwrap();
+        let limits_index = report.find("\n\nLimits\n").unwrap();
+        let session_index = report.find("\n\nSession\n").unwrap();
+        let integrations_index = report.find("\n\nIntegrations\n").unwrap();
+        assert!(context_index < limits_index);
+        assert!(limits_index < session_index);
+        assert!(session_index < integrations_index);
+    }
+
+    #[test]
+    fn full_status_report_handles_pending_context_usage() {
+        let report = full_status_report(
+            PathBuf::from("/tmp/workspace").as_path(),
+            &AccountStatus::default(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            &summary("MCP · none", "none", "MCP report"),
+            &summary("Skills · none", "none", "Skills report"),
+            &summary("Plugins · none", "none", "Plugins report"),
+        );
+
+        assert!(report.contains("Context\nContext: ⠀ --"));
+        assert!(report.contains("Tokens: waiting for usage update"));
+        assert!(report.contains("Status: pending"));
     }
 }

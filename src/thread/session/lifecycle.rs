@@ -462,6 +462,7 @@ impl Thread {
             context_usage_cache_path: context_usage_cache_path(&codex_home),
             selector_preferences_path,
             selector_layout: Default::default(),
+            slash_commands: Default::default(),
             session_mcp_config_overrides,
             session_mcp_summary,
             session_skills_summary,

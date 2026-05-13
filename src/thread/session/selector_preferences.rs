@@ -19,6 +19,7 @@ pub(in crate::thread) struct SelectorPreferences {
     pub(in crate::thread) model_display_style: Option<ModelDisplayStyle>,
     pub(in crate::thread) reasoning_effort_display_style: Option<ReasoningEffortDisplayStyle>,
     pub(in crate::thread) layout: Option<SelectorLayoutPreferences>,
+    pub(in crate::thread) slash_commands: Option<SlashCommandPreferences>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +46,81 @@ impl SelectorLayoutPreferences {
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::thread) struct SlashCommandPreferences {
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) init: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) status: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) review: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) threads: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) resume: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) fork: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) archive: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) unarchive: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) compact: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) undo: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) plan: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) rename: bool,
+    #[serde(default = "default_enabled")]
+    pub(in crate::thread) diff: bool,
+}
+
+impl Default for SlashCommandPreferences {
+    fn default() -> Self {
+        Self {
+            init: true,
+            status: true,
+            review: true,
+            threads: true,
+            resume: true,
+            fork: true,
+            archive: true,
+            unarchive: true,
+            compact: true,
+            undo: true,
+            plan: true,
+            rename: true,
+            diff: true,
+        }
+    }
+}
+
+impl SlashCommandPreferences {
+    pub(in crate::thread) fn is_enabled(&self, command: &str) -> bool {
+        match command {
+            "init" => self.init,
+            "status" => self.status,
+            "review" => self.review,
+            "threads" => self.threads,
+            "resume" => self.resume,
+            "fork" => self.fork,
+            "archive" | "delete" => self.archive,
+            "unarchive" => self.unarchive,
+            "compact" => self.compact,
+            "undo" => self.undo,
+            "plan" => self.plan,
+            "rename" => self.rename,
+            "diff" => self.diff,
+            _ => true,
+        }
+    }
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 pub(in crate::thread) fn selector_preferences_path(codex_home: &Path) -> PathBuf {
@@ -93,6 +169,9 @@ pub(in crate::thread) fn apply_selector_preferences(
     if let Some(value) = preferences.layout {
         inner.selector_layout = value;
     }
+    if let Some(value) = preferences.slash_commands {
+        inner.slash_commands = value;
+    }
 }
 
 pub(in crate::thread) fn persist_selector_preferences(inner: &ThreadInner) -> std::io::Result<()> {
@@ -103,6 +182,7 @@ pub(in crate::thread) fn persist_selector_preferences(inner: &ThreadInner) -> st
         model_display_style: Some(inner.model_display_style),
         reasoning_effort_display_style: Some(inner.reasoning_effort_display_style),
         layout: Some(materialized_selector_layout(&inner.selector_layout)),
+        slash_commands: Some(inner.slash_commands.clone()),
     };
     write_selector_preferences(&inner.selector_preferences_path, &preferences)
 }
@@ -190,9 +270,9 @@ fn write_selector_preferences(
 #[cfg(test)]
 mod tests {
     use super::{
-        SelectorLayoutEntry, SelectorLayoutPreferences, legacy_selector_preferences_path,
-        materialized_selector_layout, restore_selector_preferences, selector_preferences_path,
-        write_selector_preferences,
+        SelectorLayoutEntry, SelectorLayoutPreferences, SlashCommandPreferences,
+        legacy_selector_preferences_path, materialized_selector_layout,
+        restore_selector_preferences, selector_preferences_path, write_selector_preferences,
     };
     use crate::thread::{
         ContextControlDisplay, ContextDisplayStyle, LimitsDisplayStyle, ModelDisplayStyle,
@@ -249,6 +329,11 @@ mod tests {
                     groups: None,
                 }),
             }),
+            slash_commands: Some(SlashCommandPreferences {
+                review: false,
+                archive: false,
+                ..Default::default()
+            }),
         };
 
         write_selector_preferences(&path, &preferences).unwrap();
@@ -291,6 +376,13 @@ mod tests {
             layout.context_control.and_then(|entry| entry.visible),
             Some(false)
         );
+        let slash_commands = restored
+            .slash_commands
+            .expect("slash commands should restore");
+        assert!(!slash_commands.review);
+        assert!(!slash_commands.archive);
+        assert!(slash_commands.status);
+        assert!(!slash_commands.is_enabled("delete"));
 
         drop(std::fs::remove_file(path));
     }

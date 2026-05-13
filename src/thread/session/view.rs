@@ -119,13 +119,13 @@ impl Thread {
     }
 
     pub async fn notify_available_commands(&self) {
-        let client = {
+        let (client, slash_commands) = {
             let inner = self.inner.lock().await;
-            inner.client.clone()
+            (inner.client.clone(), inner.slash_commands.clone())
         };
         client
             .send_notification(SessionUpdate::AvailableCommandsUpdate(
-                AvailableCommandsUpdate::new(prompt_commands::builtin_commands()),
+                AvailableCommandsUpdate::new(prompt_commands::builtin_commands(&slash_commands)),
             ))
             .await;
     }

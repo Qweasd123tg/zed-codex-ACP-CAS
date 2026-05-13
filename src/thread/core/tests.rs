@@ -32,6 +32,7 @@ use super::{
     EditApprovalMode, FallbackPlanPhase, FallbackPlanState, MAX_VISIBLE_PLAN_ENTRIES,
     NONE_OF_THE_ABOVE, PLAN_SESSION_MODE_ID, SessionCommand,
 };
+use crate::thread::session_selector_preferences::SlashCommandPreferences;
 use agent_client_protocol::schema::{
     Content, ContentBlock, PermissionOptionKind, Plan, PlanEntry, PlanEntryPriority,
     PlanEntryStatus, ResourceLink, ToolCallContent, ToolCallStatus, ToolKind,
@@ -468,7 +469,7 @@ fn parses_plan_command_with_unknown_single_word_as_prompt() {
 
 #[test]
 fn builtin_commands_include_review_and_fork() {
-    let names = builtin_commands()
+    let names = builtin_commands(&SlashCommandPreferences::default())
         .into_iter()
         .map(|command| command.name)
         .collect::<Vec<_>>();
@@ -477,6 +478,24 @@ fn builtin_commands_include_review_and_fork() {
     assert!(names.contains(&"status".to_string()));
     assert!(names.contains(&"review".to_string()));
     assert!(names.contains(&"fork".to_string()));
+}
+
+#[test]
+fn builtin_commands_honor_slash_command_preferences() {
+    let slash_commands = SlashCommandPreferences {
+        review: false,
+        archive: false,
+        ..Default::default()
+    };
+    let names = builtin_commands(&slash_commands)
+        .into_iter()
+        .map(|command| command.name)
+        .collect::<Vec<_>>();
+
+    assert!(names.contains(&"status".to_string()));
+    assert!(!names.contains(&"review".to_string()));
+    assert!(!names.contains(&"archive".to_string()));
+    assert!(names.contains(&"unarchive".to_string()));
 }
 
 #[test]
