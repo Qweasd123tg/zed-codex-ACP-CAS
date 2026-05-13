@@ -7,19 +7,8 @@ use std::path::{Path, PathBuf};
 use codex_app_server_protocol::{FileUpdateChange, PatchChangeKind};
 
 use crate::thread::{
-    Diff, EditApprovalMode, ModeKind, ToolCallLocation, apply_unified_diff_to_text,
-    first_hunk_line, unified_diff_to_old_new,
+    Diff, ToolCallLocation, apply_unified_diff_to_text, first_hunk_line, unified_diff_to_old_new,
 };
-
-pub(in crate::thread) fn should_prompt_file_change_approval(
-    collaboration_mode_kind: ModeKind,
-    edit_approval_mode: EditApprovalMode,
-) -> bool {
-    if collaboration_mode_kind == ModeKind::Plan {
-        return true;
-    }
-    matches!(edit_approval_mode, EditApprovalMode::AskEveryEdit)
-}
 
 pub(in crate::thread) fn resolve_workspace_path(workspace_cwd: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {

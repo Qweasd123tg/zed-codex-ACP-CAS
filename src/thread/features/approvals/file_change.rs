@@ -12,19 +12,10 @@ use codex_app_server_protocol::{
     FileChangeApprovalDecision, FileChangeRequestApprovalParams, FileChangeRequestApprovalResponse,
 };
 
-use crate::thread::features::file::changes::should_prompt_file_change_approval;
 use crate::thread::{
     ALLOW_ONCE, REJECT_ONCE, SessionClient, Thread, ThreadInner, file_change_to_preview_diff,
     file_change_tool_location,
 };
-
-enum PreparedFileChangeApproval {
-    Immediate {
-        request_id: codex_app_server_protocol::RequestId,
-        decision: FileChangeApprovalDecision,
-    },
-    Pending(Box<FileChangeApprovalPending>),
-}
 
 struct FileChangeApprovalPending {
     client: SessionClient,
@@ -44,22 +35,12 @@ impl Thread {
             prepare_file_change_approval(&inner, request_id, params)
         };
 
-        let (request_id, decision) = match prepared {
-            PreparedFileChangeApproval::Immediate {
-                request_id,
-                decision,
-            } => (request_id, decision),
-            PreparedFileChangeApproval::Pending(pending) => {
-                let outcome = pending
-                    .client
-                    .request_permission(pending.tool_call, pending.options)
-                    .await?;
-                (
-                    pending.request_id,
-                    file_change_approval_decision_from_outcome(outcome),
-                )
-            }
-        };
+        let outcome = prepared
+            .client
+            .request_permission(prepared.tool_call, prepared.options)
+            .await?;
+        let request_id = prepared.request_id;
+        let decision = file_change_approval_decision_from_outcome(outcome);
 
         let inner = self.inner.lock().await;
         inner
@@ -79,22 +60,13 @@ pub(in crate::thread) async fn handle_file_change_approval(
     request_id: codex_app_server_protocol::RequestId,
     params: FileChangeRequestApprovalParams,
 ) -> Result<(), Error> {
-    let (request_id, decision) = match prepare_file_change_approval(inner, request_id, params) {
-        PreparedFileChangeApproval::Immediate {
-            request_id,
-            decision,
-        } => (request_id, decision),
-        PreparedFileChangeApproval::Pending(pending) => {
-            let outcome = pending
-                .client
-                .request_permission(pending.tool_call, pending.options)
-                .await?;
-            (
-                pending.request_id,
-                file_change_approval_decision_from_outcome(outcome),
-            )
-        }
-    };
+    let pending = prepare_file_change_approval(inner, request_id, params);
+    let outcome = pending
+        .client
+        .request_permission(pending.tool_call, pending.options)
+        .await?;
+    let request_id = pending.request_id;
+    let decision = file_change_approval_decision_from_outcome(outcome);
 
     inner
         .app
@@ -111,15 +83,7 @@ fn prepare_file_change_approval(
     inner: &ThreadInner,
     request_id: codex_app_server_protocol::RequestId,
     params: FileChangeRequestApprovalParams,
-) -> PreparedFileChangeApproval {
-    if !should_prompt_file_change_approval(inner.collaboration_mode_kind, inner.edit_approval_mode)
-    {
-        return PreparedFileChangeApproval::Immediate {
-            request_id,
-            decision: FileChangeApprovalDecision::Accept,
-        };
-    }
-
+) -> FileChangeApprovalPending {
     let tool_call_id = ToolCallId::new(params.item_id.clone());
     let started_changes = inner
         .file_change_started_changes
@@ -182,7 +146,7 @@ fn prepare_file_change_approval(
     };
     content.extend(details.into_iter().map(Into::into));
 
-    PreparedFileChangeApproval::Pending(Box::new(FileChangeApprovalPending {
+    FileChangeApprovalPending {
         client: inner.client.clone(),
         request_id,
         tool_call: ToolCallUpdate::new(
@@ -199,7 +163,7 @@ fn prepare_file_change_approval(
             PermissionOption::new(ALLOW_ONCE, "Yes", PermissionOptionKind::AllowOnce),
             PermissionOption::new(REJECT_ONCE, "No", PermissionOptionKind::RejectOnce),
         ],
-    }))
+    }
 }
 
 fn file_change_approval_decision_from_outcome(

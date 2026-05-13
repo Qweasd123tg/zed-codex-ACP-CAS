@@ -3,10 +3,9 @@
 use crate::thread::session_selector_preferences::{SelectorLayoutEntry, SelectorLayoutPreferences};
 use crate::thread::{
     AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
-    ContextUsageSource, EditApprovalMode, LimitsDisplayStyle, ModeKind, ModelDisplayStyle,
-    PLAN_SESSION_MODE_ID, ReasoningEffort, ReasoningEffortDisplayStyle, ServiceTier,
-    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectGroup,
-    SessionConfigSelectOption, ThreadInner,
+    ContextUsageSource, LimitsDisplayStyle, ModeKind, ModelDisplayStyle, PLAN_SESSION_MODE_ID,
+    ReasoningEffort, ReasoningEffortDisplayStyle, ServiceTier, SessionConfigOption,
+    SessionConfigOptionCategory, SessionConfigSelectGroup, SessionConfigSelectOption, ThreadInner,
 };
 
 #[path = "context.rs"]
@@ -61,7 +60,6 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) compaction_in_progress: bool,
     pub(in crate::thread) approval: AppAskForApproval,
     pub(in crate::thread) sandbox: AppSandboxMode,
-    pub(in crate::thread) edit_approval_mode: EditApprovalMode,
     pub(in crate::thread) collaboration_mode_kind: ModeKind,
     pub(in crate::thread) account_status: &'a context::AccountStatus,
     pub(in crate::thread) total_token_usage:
@@ -92,7 +90,6 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         compaction_in_progress: inner.compaction_in_progress,
         approval: inner.approval_policy,
         sandbox: inner.sandbox_mode,
-        edit_approval_mode: inner.edit_approval_mode,
         collaboration_mode_kind: inner.collaboration_mode_kind,
         account_status: &inner.account_status,
         total_token_usage: inner.total_token_usage.as_ref(),
@@ -123,7 +120,6 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         compaction_in_progress,
         approval,
         sandbox,
-        edit_approval_mode,
         collaboration_mode_kind,
         account_status,
         total_token_usage,
@@ -133,7 +129,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         selector_layout,
     } = input;
 
-    let current_permissions_id = current_permission_mode_id(approval, sandbox, edit_approval_mode);
+    let current_permissions_id = current_permission_mode_id(approval, sandbox);
     let current_permissions_value = if collaboration_mode_kind == ModeKind::Plan {
         PLAN_SESSION_MODE_ID.to_string()
     } else {
@@ -151,7 +147,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
     ];
     let mut guarded_permission_options = Vec::new();
     let mut bypass_permission_options = Vec::new();
-    for permission_mode in permission_modes(approval, sandbox, edit_approval_mode) {
+    for permission_mode in permission_modes() {
         let option =
             SessionConfigSelectOption::new(permission_mode.id.0.clone(), permission_mode.name)
                 .description(permission_mode.description);
@@ -191,7 +187,6 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         .description(current_permission_description(
             approval,
             sandbox,
-            edit_approval_mode,
             collaboration_mode_kind,
         )),
     ));
@@ -593,12 +588,10 @@ fn fast_mode_label(service_tier: Option<ServiceTier>) -> &'static str {
 fn current_permission_description(
     approval: AppAskForApproval,
     sandbox: AppSandboxMode,
-    edit_approval_mode: EditApprovalMode,
     collaboration_mode_kind: ModeKind,
 ) -> String {
-    let permission_description =
-        current_permission_mode_description(approval, sandbox, edit_approval_mode)
-            .unwrap_or_else(|| "Choose file edit and sandbox permission behavior".to_string());
+    let permission_description = current_permission_mode_description(approval, sandbox)
+        .unwrap_or_else(|| "Choose file edit and sandbox permission behavior".to_string());
     if collaboration_mode_kind == ModeKind::Plan {
         return format!(
             "Plan-first mode with visible step tracking.\nPermissions: {permission_description}"
@@ -611,10 +604,9 @@ fn current_permission_description(
 fn current_permission_mode_description(
     approval: AppAskForApproval,
     sandbox: AppSandboxMode,
-    edit_approval_mode: EditApprovalMode,
 ) -> Option<String> {
-    let current_permissions_id = current_permission_mode_id(approval, sandbox, edit_approval_mode);
-    permission_modes(approval, sandbox, edit_approval_mode)
+    let current_permissions_id = current_permission_mode_id(approval, sandbox);
+    permission_modes()
         .into_iter()
         .find(|mode| mode.id == current_permissions_id)
         .and_then(|mode| mode.description)
@@ -712,8 +704,8 @@ mod tests {
     };
     use crate::thread::{
         AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
-        ContextUsageSource, EditApprovalMode, LimitsDisplayStyle, ModeKind, ModelDisplayStyle,
-        ReasoningEffort, ReasoningEffortDisplayStyle, ServiceTier,
+        ContextUsageSource, LimitsDisplayStyle, ModeKind, ModelDisplayStyle, ReasoningEffort,
+        ReasoningEffortDisplayStyle, ServiceTier,
     };
     use agent_client_protocol::schema::{
         SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
@@ -766,7 +758,6 @@ mod tests {
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
-            edit_approval_mode: EditApprovalMode::AskEveryEdit,
             collaboration_mode_kind: ModeKind::Default,
             account_status: &account_status,
             total_token_usage: None,
@@ -869,7 +860,6 @@ mod tests {
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
-            edit_approval_mode: EditApprovalMode::AskEveryEdit,
             collaboration_mode_kind: ModeKind::Default,
             account_status: &account_status,
             total_token_usage: None,
@@ -960,7 +950,6 @@ mod tests {
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
-            edit_approval_mode: EditApprovalMode::AskEveryEdit,
             collaboration_mode_kind: ModeKind::Default,
             account_status: &account_status,
             total_token_usage: None,
@@ -1026,7 +1015,6 @@ mod tests {
             compaction_in_progress: true,
             approval: AppAskForApproval::Never,
             sandbox: AppSandboxMode::ReadOnly,
-            edit_approval_mode: EditApprovalMode::AskEveryEdit,
             collaboration_mode_kind: ModeKind::Plan,
             account_status: &account_status,
             total_token_usage: None,
@@ -1133,7 +1121,6 @@ mod tests {
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
-            edit_approval_mode: EditApprovalMode::AskEveryEdit,
             collaboration_mode_kind: ModeKind::Default,
             account_status: &account_status,
             total_token_usage: None,

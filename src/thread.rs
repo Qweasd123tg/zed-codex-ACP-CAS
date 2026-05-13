@@ -110,7 +110,6 @@ const MAX_VISIBLE_PLAN_ENTRIES: usize = 6;
 const PLAN_SESSION_MODE_ID: &str = "plan";
 const DEFAULT_SESSION_MODE_ID: &str = "default";
 const AUTO_MODE_ID: &str = "auto";
-const AUTO_ASK_EDITS_MODE_ID: &str = "auto-ask-edits";
 const PLAN_IMPLEMENTATION_TOOL_CALL_ID: &str = "plan-implementation";
 const PLAN_IMPLEMENTATION_YES_OPTION_ID: &str = "plan-implement-yes";
 const PLAN_IMPLEMENTATION_NO_OPTION_ID: &str = "plan-implement-no";
@@ -150,7 +149,6 @@ struct ThreadInner {
     approval_policy: AppAskForApproval,
     sandbox_policy: AppSandboxPolicy,
     sandbox_mode: AppSandboxMode,
-    edit_approval_mode: EditApprovalMode,
     collaboration_mode_kind: ModeKind,
     current_model: String,
     current_model_provider: String,
@@ -242,13 +240,6 @@ pub(crate) enum ModelDisplayStyle {
     #[default]
     WithPrefix,
     WithoutPrefix,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// Определяет, подтверждаются ли правки файлов автоматически или вручную.
-enum EditApprovalMode {
-    AutoApprove,
-    AskEveryEdit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

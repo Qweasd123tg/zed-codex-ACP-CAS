@@ -1,10 +1,9 @@
 //! Mode/sandbox mapping helper-ы для session_config.
 
 use crate::thread::{
-    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, AppAskForApproval, AppModel,
-    AppSandboxMode, AppSandboxPolicy, AskForApproval, DEFAULT_SESSION_MODE_ID, EditApprovalMode,
-    ModeKind, ModelId, ModelInfo, PLAN_SESSION_MODE_ID, SandboxPolicy, SessionMode, SessionModeId,
-    SessionModeState, SessionModelState,
+    APPROVAL_PRESETS, AUTO_MODE_ID, AppAskForApproval, AppModel, AppSandboxMode, AppSandboxPolicy,
+    AskForApproval, DEFAULT_SESSION_MODE_ID, ModeKind, ModelId, ModelInfo, PLAN_SESSION_MODE_ID,
+    SandboxPolicy, SessionMode, SessionModeId, SessionModeState, SessionModelState,
 };
 
 // Сатурируем signed-значения, чтобы избежать underflow при конвертации счётчиков протокола.
@@ -56,7 +55,6 @@ pub(in crate::thread) fn mode_state(collaboration_mode_kind: ModeKind) -> Sessio
 pub(in crate::thread) fn current_permission_mode_id(
     approval: AppAskForApproval,
     sandbox: AppSandboxMode,
-    edit_approval_mode: EditApprovalMode,
 ) -> SessionModeId {
     let current = APPROVAL_PRESETS
         .iter()
@@ -71,18 +69,10 @@ pub(in crate::thread) fn current_permission_mode_id(
                 .expect("read-only preset should exist")
         });
 
-    if current.id == AUTO_MODE_ID && edit_approval_mode == EditApprovalMode::AskEveryEdit {
-        SessionModeId::new(AUTO_ASK_EDITS_MODE_ID)
-    } else {
-        SessionModeId::new(current.id)
-    }
+    SessionModeId::new(current.id)
 }
 
-pub(in crate::thread) fn permission_modes(
-    _approval: AppAskForApproval,
-    _sandbox: AppSandboxMode,
-    _edit_approval_mode: EditApprovalMode,
-) -> Vec<SessionMode> {
+pub(in crate::thread) fn permission_modes() -> Vec<SessionMode> {
     let mut available_modes = Vec::new();
     if let Some(read_only_preset) = APPROVAL_PRESETS
         .iter()
@@ -101,11 +91,6 @@ pub(in crate::thread) fn permission_modes(
         available_modes.push(
             SessionMode::new(AUTO_MODE_ID, "Workspace")
                 .description("Workspace-write sandbox. Codex can edit this workspace; network and outside-workspace writes still ask."),
-        );
-        available_modes.push(
-            SessionMode::new(AUTO_ASK_EDITS_MODE_ID, "Ask edits").description(
-                "Workspace-write sandbox with a confirmation popup for every file edit.",
-            ),
         );
     }
     if let Some(full_access_preset) = APPROVAL_PRESETS

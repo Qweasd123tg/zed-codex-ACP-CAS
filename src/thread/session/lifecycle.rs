@@ -21,9 +21,9 @@ use super::session_config::{
 };
 use super::{
     AppAskForApproval, AppModel, AppSandboxPolicy, AppServerProcess, Client, ClientCapabilities,
-    Config, ConnectionTo, ContextUsageSource, EditApprovalMode, Error, ListSessionsResponse,
-    ModeKind, ReasoningEffort, ServiceTier, SessionClient, SessionId, Thread, ThreadInner,
-    ThreadListParams, ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
+    Config, ConnectionTo, ContextUsageSource, Error, ListSessionsResponse, ModeKind,
+    ReasoningEffort, ServiceTier, SessionClient, SessionId, Thread, ThreadInner, ThreadListParams,
+    ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
 };
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
@@ -473,7 +473,6 @@ impl Thread {
             approval_policy: bootstrap.approval_policy,
             sandbox_policy: bootstrap.sandbox.clone(),
             sandbox_mode: policy_to_mode(&bootstrap.sandbox),
-            edit_approval_mode: EditApprovalMode::AutoApprove,
             collaboration_mode_kind: ModeKind::Default,
             current_model: bootstrap.model,
             current_model_provider: bootstrap.model_provider,

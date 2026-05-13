@@ -1,7 +1,7 @@
 //! Внутренние переходы состояния Thread, которые сбрасывают транзиентный учёт на каждый turn.
 
 use crate::thread::session_config::{policy_to_mode, to_app_approval, to_app_sandbox_mode};
-use crate::thread::{AppSandboxPolicy, EditApprovalMode, ModeKind, ThreadInner};
+use crate::thread::{AppSandboxPolicy, ModeKind, ThreadInner};
 use codex_utils_approval_presets::ApprovalPreset;
 use tracing::warn;
 
@@ -86,13 +86,11 @@ impl ThreadInner {
     pub(super) fn apply_mode_preset(
         &mut self,
         preset: &ApprovalPreset,
-        edit_approval_mode: EditApprovalMode,
         collaboration_mode_kind: ModeKind,
     ) {
         self.approval_policy = to_app_approval(preset.approval);
         self.sandbox_policy = AppSandboxPolicy::from(preset.sandbox.clone());
         self.sandbox_mode = to_app_sandbox_mode(&preset.sandbox);
-        self.edit_approval_mode = edit_approval_mode;
         self.collaboration_mode_kind = collaboration_mode_kind;
         self.sync_sandbox_mode_from_policy("apply_mode_preset");
     }

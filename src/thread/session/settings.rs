@@ -10,10 +10,9 @@ use super::session_config::{
     parse_reasoning_effort_display_style, reasoning_effort_value,
 };
 use super::{
-    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, ContextControlDisplay,
-    ContextDisplayStyle, DEFAULT_SESSION_MODE_ID, EditApprovalMode, Error, LimitsDisplayStyle,
-    ModeKind, ModelDisplayStyle, ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort,
-    ReasoningEffortDisplayStyle, SessionConfigId, SessionModeId, Thread, replay,
+    APPROVAL_PRESETS, ContextControlDisplay, ContextDisplayStyle, DEFAULT_SESSION_MODE_ID, Error,
+    LimitsDisplayStyle, ModeKind, ModelDisplayStyle, ModelId, PLAN_SESSION_MODE_ID,
+    ReasoningEffort, ReasoningEffortDisplayStyle, SessionConfigId, SessionModeId, Thread, replay,
 };
 use crate::thread::features::{
     collab::{remember_agent_label, warm_agent_labels_for_turns},
@@ -70,32 +69,11 @@ impl Thread {
         }
 
         let next_mode = ModeKind::Default;
-        if mode.0.as_ref() == AUTO_ASK_EDITS_MODE_ID {
-            let default_preset = APPROVAL_PRESETS
-                .iter()
-                .find(|preset| preset.id == AUTO_MODE_ID)
-                .ok_or_else(Error::invalid_params)?;
-            inner.apply_mode_preset(default_preset, EditApprovalMode::AskEveryEdit, next_mode);
-            if should_clear_visible_plan_for_mode_change(
-                previous_mode,
-                next_mode,
-                had_visible_plan_state,
-            ) {
-                clear_visible_plan_state(&mut inner).await;
-            }
-            return Ok(());
-        }
-
         let preset = APPROVAL_PRESETS
             .iter()
             .find(|preset| preset.id == mode.0.as_ref())
             .ok_or_else(Error::invalid_params)?;
-        let edit_approval_mode = if preset.id == AUTO_MODE_ID {
-            EditApprovalMode::AutoApprove
-        } else {
-            EditApprovalMode::AskEveryEdit
-        };
-        inner.apply_mode_preset(preset, edit_approval_mode, next_mode);
+        inner.apply_mode_preset(preset, next_mode);
         if should_clear_visible_plan_for_mode_change(
             previous_mode,
             next_mode,

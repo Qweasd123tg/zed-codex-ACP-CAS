@@ -9,9 +9,7 @@ use super::features::collab::render::{collab_tool_title, collab_tool_title_with_
 use super::features::collab::status::{
     collab_agent_state_summary, collab_status_summary_line, map_collab_status,
 };
-use super::features::file::changes::{
-    file_change_to_replay_diff, file_change_tool_location, should_prompt_file_change_approval,
-};
+use super::features::file::changes::{file_change_to_replay_diff, file_change_tool_location};
 use super::features::plan::{
     collaboration_mode_for_turn, fallback_plan_can_enter_summarizing,
     fallback_plan_entries_for_steps, fallback_plan_should_advance, limit_plan_entries,
@@ -28,9 +26,9 @@ use super::session_config::{
 use super::turn_diff::parse_turn_unified_diff_files;
 use super::unified_diff::{apply_unified_diff_to_text, unified_diff_to_old_new};
 use super::{
-    APPROVAL_PRESETS, AUTO_ASK_EDITS_MODE_ID, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID, DiffScope,
-    EditApprovalMode, FallbackPlanPhase, FallbackPlanState, MAX_VISIBLE_PLAN_ENTRIES,
-    NONE_OF_THE_ABOVE, PLAN_SESSION_MODE_ID, SessionCommand,
+    APPROVAL_PRESETS, AUTO_MODE_ID, DEFAULT_SESSION_MODE_ID, DiffScope, FallbackPlanPhase,
+    FallbackPlanState, MAX_VISIBLE_PLAN_ENTRIES, NONE_OF_THE_ABOVE, PLAN_SESSION_MODE_ID,
+    SessionCommand,
 };
 use crate::thread::session_selector_preferences::SlashCommandPreferences;
 use agent_client_protocol::schema::{
@@ -1293,31 +1291,7 @@ fn collaboration_mode_for_turn_is_explicit_for_plan_mode() {
 }
 
 #[test]
-fn file_change_approval_is_always_prompted_in_plan_mode() {
-    assert!(should_prompt_file_change_approval(
-        ModeKind::Plan,
-        EditApprovalMode::AutoApprove
-    ));
-    assert!(should_prompt_file_change_approval(
-        ModeKind::Plan,
-        EditApprovalMode::AskEveryEdit
-    ));
-}
-
-#[test]
-fn file_change_approval_respects_edit_mode_in_default_mode() {
-    assert!(!should_prompt_file_change_approval(
-        ModeKind::Default,
-        EditApprovalMode::AutoApprove
-    ));
-    assert!(should_prompt_file_change_approval(
-        ModeKind::Default,
-        EditApprovalMode::AskEveryEdit
-    ));
-}
-
-#[test]
-fn mode_state_uses_custom_auto_ask_edits_id() {
+fn mode_state_uses_backend_auto_mode_id() {
     let auto_preset = APPROVAL_PRESETS
         .iter()
         .find(|preset| preset.id == AUTO_MODE_ID)
@@ -1325,22 +1299,13 @@ fn mode_state_uses_custom_auto_ask_edits_id() {
     let current_mode_id = current_permission_mode_id(
         to_app_approval(auto_preset.approval),
         to_app_sandbox_mode(&auto_preset.sandbox),
-        EditApprovalMode::AskEveryEdit,
     );
-    assert_eq!(current_mode_id.0.as_ref(), AUTO_ASK_EDITS_MODE_ID);
+    assert_eq!(current_mode_id.0.as_ref(), AUTO_MODE_ID);
 }
 
 #[test]
 fn mode_state_shows_read_only_when_not_current() {
-    let auto_preset = APPROVAL_PRESETS
-        .iter()
-        .find(|preset| preset.id == AUTO_MODE_ID)
-        .expect("auto preset should exist");
-    let modes = permission_modes(
-        to_app_approval(auto_preset.approval),
-        to_app_sandbox_mode(&auto_preset.sandbox),
-        EditApprovalMode::AutoApprove,
-    );
+    let modes = permission_modes();
 
     assert!(modes.iter().any(|mode| mode.id.0.as_ref() == "read-only"));
 }
@@ -1354,13 +1319,8 @@ fn mode_state_keeps_read_only_when_current() {
     let current_mode_id = current_permission_mode_id(
         to_app_approval(read_only_preset.approval),
         to_app_sandbox_mode(&read_only_preset.sandbox),
-        EditApprovalMode::AskEveryEdit,
     );
-    let modes = permission_modes(
-        to_app_approval(read_only_preset.approval),
-        to_app_sandbox_mode(&read_only_preset.sandbox),
-        EditApprovalMode::AskEveryEdit,
-    );
+    let modes = permission_modes();
 
     assert_eq!(current_mode_id.0.as_ref(), "read-only");
     assert!(modes.iter().any(|mode| mode.id.0.as_ref() == "read-only"));
@@ -1368,15 +1328,7 @@ fn mode_state_keeps_read_only_when_current() {
 
 #[test]
 fn permission_modes_explain_full_access_sandbox_behavior() {
-    let auto_preset = APPROVAL_PRESETS
-        .iter()
-        .find(|preset| preset.id == AUTO_MODE_ID)
-        .expect("auto preset should exist");
-    let modes = permission_modes(
-        to_app_approval(auto_preset.approval),
-        to_app_sandbox_mode(&auto_preset.sandbox),
-        EditApprovalMode::AutoApprove,
-    );
+    let modes = permission_modes();
 
     let full_access = modes
         .iter()
