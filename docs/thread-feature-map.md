@@ -224,6 +224,8 @@ flowchart LR
 - Тот же preferences-файл содержит `slash_commands`: явные boolean flags для surfaced slash-команд. `false` скрывает команду из Zed `available_commands` и останавливает ручной ввод системным сообщением; hidden `/delete` следует за `archive`.
 - Account rate limits дополнительно дают одноразовые chat-advisory при переходе через 75/90/95/100% использованного окна; состояние порогов хранится в `ThreadInner`,
   а форматирование находится в `src/thread/session/config/limits.rs`, чтобы `Context` selector и warning-текст не расходились.
+- Reset-время в account limits форматируется с минутами для sub-day окон (`in 4h 23m`), чтобы нижний selector не прятал важный остаток за округлением до часов.
+- После обычного model turn адаптер best-effort обновляет account rate limits через `account/rateLimits/read` с коротким timeout и тем же `AccountRateLimitsUpdated` path, чтобы нижний `Context` selector не ждал следующего prompt для перехода, например, с `100%` на фактический `70%`.
 - `ThreadTokenUsageUpdated` остается adapter-side forwarding в ACP `UsageUpdate`, но нативный context circle в текущем `Zed` для external ACP не подтвержден:
   если нужен именно этот UI, сначала нужен Zed-side patch/контракт, а не новая runtime-ветка в адаптере.
   После обновления ACP/Zed adapter-side часть готова: `src/thread/turn/notify.rs` публикует `usage_update` из cached context usage на `load`/`resume` и из live `ThreadTokenUsageUpdated` после turn, чтобы клиент мог отрисовать нативный context indicator без ожидания текстового `/status`.

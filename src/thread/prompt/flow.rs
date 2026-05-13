@@ -7,6 +7,7 @@ use super::{
 use agent_client_protocol::schema::{ContentBlock, PromptRequest};
 
 const COMPACTION_PROMPT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+const RATE_LIMIT_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl Thread {
     // Сначала обрабатываем slash-команды, чтобы не отправлять управляющие команды как пользовательский промпт.
@@ -188,6 +189,7 @@ impl Thread {
         let stop_reason = self
             .run_single_turn_ext(input, collaboration_mode_kind)
             .await?;
+        self.refresh_rate_limits_after_turn().await;
         let mut inner = self.inner.lock().await;
 
         if let Some(implementation_input) =
@@ -195,12 +197,43 @@ impl Thread {
                 .await?
         {
             drop(inner);
-            return self
+            let stop_reason = self
                 .run_single_turn_ext(implementation_input, ModeKind::Default)
-                .await;
+                .await?;
+            self.refresh_rate_limits_after_turn().await;
+            return Ok(stop_reason);
         }
 
         Ok(stop_reason)
+    }
+
+    async fn refresh_rate_limits_after_turn(&self) {
+        let app = {
+            let inner = self.inner.lock().await;
+            inner.app.clone()
+        };
+        let refresh = async {
+            let mut app = app.lock().await;
+            app.get_account_rate_limits().await
+        };
+        let rate_limits = match tokio::time::timeout(RATE_LIMIT_REFRESH_TIMEOUT, refresh).await {
+            Ok(Ok(response)) => response.rate_limits,
+            Ok(Err(error)) => {
+                tracing::debug!(%error, "failed to refresh rate limits after turn");
+                return;
+            }
+            Err(_) => {
+                tracing::debug!("timed out refreshing rate limits after turn");
+                return;
+            }
+        };
+
+        let mut inner = self.inner.lock().await;
+        crate::thread::features::notification::events::usage::emit_account_rate_limits_updated(
+            &mut inner,
+            rate_limits,
+        )
+        .await;
     }
 }
 

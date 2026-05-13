@@ -2,6 +2,7 @@
 
 use crate::thread::features::resume::common::format_relative_timestamp;
 use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const RATE_LIMIT_WARNING_THRESHOLDS: [i32; 4] = [75, 90, 95, 100];
 
@@ -166,9 +167,54 @@ fn format_reset_line(label: &str, window: Option<&RateLimitWindow>) -> String {
 
     let reset = window
         .resets_at
-        .map(format_relative_timestamp)
+        .map(format_reset_timestamp)
         .unwrap_or_else(|| "-".to_string());
     format!("{label}: resets {reset}")
+}
+
+fn format_reset_timestamp(unix_seconds: i64) -> String {
+    if unix_seconds <= 0 {
+        return "-".to_string();
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default();
+
+    if unix_seconds > now {
+        return format_reset_delta((unix_seconds - now) as u64);
+    }
+
+    format_relative_timestamp(unix_seconds)
+}
+
+fn format_reset_delta(delta: u64) -> String {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+
+    if delta < MINUTE {
+        return "soon".to_string();
+    }
+    if delta < HOUR {
+        return format!("in {}m", delta / MINUTE);
+    }
+    if delta < DAY {
+        let hours = delta / HOUR;
+        let minutes = (delta % HOUR) / MINUTE;
+        if minutes == 0 {
+            return format!("in {hours}h");
+        }
+        return format!("in {hours}h {minutes}m");
+    }
+
+    let days = delta / DAY;
+    let hours = (delta % DAY) / HOUR;
+    if hours == 0 {
+        return format!("in {days}d");
+    }
+    format!("in {days}d {hours}h")
 }
 
 fn limit_duration_label(window: &RateLimitWindow) -> Option<String> {
@@ -207,8 +253,8 @@ mod tests {
     use super::{
         RateLimitWarning, RateLimitWarningState, combined_limits_reset_message,
         combined_limits_status_label, five_hour_reset_message, five_hour_status_label,
-        observe_rate_limit_snapshot, take_rate_limit_warnings, weekly_reset_message,
-        weekly_status_label,
+        format_reset_delta, observe_rate_limit_snapshot, take_rate_limit_warnings,
+        weekly_reset_message, weekly_status_label,
     };
     use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
     use codex_protocol::account::PlanType;
@@ -263,6 +309,14 @@ mod tests {
             combined_limits_status_label(Some(&snapshot)),
             "5h 58% · wk 95%"
         );
+    }
+
+    #[test]
+    fn rate_limit_reset_delta_keeps_minutes_for_hourly_windows() {
+        assert_eq!(format_reset_delta(4 * 60 * 60 + 23 * 60 + 12), "in 4h 23m");
+        assert_eq!(format_reset_delta(4 * 60 * 60), "in 4h");
+        assert_eq!(format_reset_delta(42 * 60 + 59), "in 42m");
+        assert_eq!(format_reset_delta(26 * 60 * 60 + 10 * 60), "in 1d 2h");
     }
 
     #[test]
