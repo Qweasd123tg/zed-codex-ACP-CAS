@@ -304,8 +304,9 @@ $CODEX_HOME/codex-acp/selector-preferences.json
 
 The adapter creates this file on session startup if it is missing. This preserves choices such as
 context display mode, context percent/braille style, limits text/bars/block style, model label
-style, and reasoning effort display style across restarts. It also keeps visual style controls out
-of the lower selector menus and allows a conservative layout override over known selectors.
+style, reasoning effort display style, default reasoning effort, and compact model/effort filters
+across restarts. It also keeps visual style controls out of the lower selector menus and allows a
+conservative layout override over known selectors.
 
 Default config:
 
@@ -316,6 +317,26 @@ Default config:
   "limits_display_style": "text",
   "model_display_style": "with_prefix",
   "reasoning_effort_display_style": "circle",
+  "model_selector": {
+    "default_model": null,
+    "default_reasoning_effort": null,
+    "default_service_tier": null,
+    "models": {
+      "gpt-5.5": true,
+      "gpt-5.4": true,
+      "gpt-5.4-mini": true,
+      "gpt-5.3-codex": true,
+      "gpt-5.2": true
+    },
+    "reasoning_efforts": {
+      "none": false,
+      "minimal": false,
+      "low": true,
+      "medium": true,
+      "high": true,
+      "xhigh": true
+    }
+  },
   "layout": {
     "order": ["permissions", "model", "context_control"],
     "permissions": {
@@ -352,6 +373,37 @@ Default config:
 }
 ```
 
+Example: keep `gpt-5.5` as the practical default, hide older/noisy model entries, and keep only
+medium/high effort choices in the selector:
+
+```json
+{
+  "model_selector": {
+    "default_model": "gpt-5.5",
+    "default_reasoning_effort": "high",
+    "default_service_tier": null,
+    "models": {
+      "gpt-5.5": true,
+      "gpt-5.4": true,
+      "gpt-5.4-mini": true,
+      "gpt-5.3-codex": false,
+      "gpt-5.2": false
+    },
+    "reasoning_efforts": {
+      "none": false,
+      "minimal": false,
+      "low": false,
+      "medium": true,
+      "high": true,
+      "xhigh": false
+    }
+  }
+}
+```
+
+The example is intentionally partial: any missing fields keep their current/default values.
+Do not put `//` comments into `selector-preferences.json`; the adapter reads it as strict JSON.
+
 Fields:
 
 - `context_control_display`: what the lower `Context` selector button shows.
@@ -364,6 +416,20 @@ Fields:
   Values: `with_prefix`, `without_prefix`.
 - `reasoning_effort_display_style`: effort label style.
   Values: `text`, `circle`.
+- `model_selector.default_model`: startup default model id, or `null` to keep the app-server/session default.
+- `model_selector.default_reasoning_effort`: startup default for reasoning effort.
+  Common values: `minimal`, `low`, `medium`, `high`, `xhigh`, or `null` to use the backend/model default.
+  `none` is protocol-visible mainly for plan/collaboration overrides; normal model turns may reject it.
+- `model_selector.default_service_tier`: startup default service tier.
+  Values: `fast`, `flex`, or `null` for the standard/default tier.
+- `model_selector.models`: model visibility table for the lower `Model` selector.
+  Values are booleans: `true` shows the model, `false` hides it.
+  The currently selected model remains visible even if listed here, so Zed never gets a
+  `currentValue` without a matching option.
+- `model_selector.reasoning_efforts`: effort visibility table for the lower `Model -> Effort`
+  group. Values are booleans. `none` and `minimal` are present as experimental/protocol entries;
+  if enabled manually, the selector will show them even when the current backend model list does
+  not advertise them. The backend may still reject unsupported combinations.
 - `layout.order`: order of lower selectors.
   Known ids: `permissions`, `model`, `context_control`.
 - `layout.<selector>.visible`: show or hide a selector.

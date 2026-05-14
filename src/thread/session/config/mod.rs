@@ -1,6 +1,8 @@
 //! Маппинг конфигурации сессии между ACP-опциями и runtime-настройками Codex app-server.
 
-use crate::thread::session_selector_preferences::{SelectorLayoutEntry, SelectorLayoutPreferences};
+use crate::thread::session_selector_preferences::{
+    ModelSelectorPreferences, SelectorLayoutEntry, SelectorLayoutPreferences,
+};
 use crate::thread::{
     AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
     ContextUsageSource, LimitsDisplayStyle, ModeKind, ModelDisplayStyle, PLAN_SESSION_MODE_ID,
@@ -48,6 +50,7 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) current_reasoning_effort: ReasoningEffort,
     pub(in crate::thread) current_reasoning_effort_display_style: ReasoningEffortDisplayStyle,
     pub(in crate::thread) current_model_display_style: ModelDisplayStyle,
+    pub(in crate::thread) model_selector: &'a ModelSelectorPreferences,
     pub(in crate::thread) current_used_tokens: Option<u64>,
     pub(in crate::thread) current_context_window_size: Option<u64>,
     pub(in crate::thread) current_usage_percent: Option<u64>,
@@ -79,6 +82,7 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         current_reasoning_effort: inner.reasoning_effort,
         current_reasoning_effort_display_style: inner.reasoning_effort_display_style,
         current_model_display_style: inner.model_display_style,
+        model_selector: &inner.model_selector,
         current_used_tokens: inner.last_used_tokens,
         current_context_window_size: inner.context_window_size,
         current_usage_percent: usage_percent(inner.last_used_tokens, inner.context_window_size),
@@ -109,6 +113,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         current_reasoning_effort,
         current_reasoning_effort_display_style,
         current_model_display_style,
+        model_selector,
         current_used_tokens,
         current_context_window_size,
         current_usage_percent,
@@ -200,15 +205,16 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             apply_group_layout(
                 selector_layout,
                 "model",
-                model_option_groups(
+                model_option_groups(ModelOptionGroupsInput {
                     models,
                     current_model_entry,
-                    &current_model_id,
+                    current_model_id: &current_model_id,
                     current_reasoning_effort,
                     current_reasoning_effort_display_style,
                     current_model_display_style,
+                    model_selector,
                     current_service_tier,
-                ),
+                }),
             ),
         )
         .category(SessionConfigOptionCategory::Model)
@@ -438,15 +444,28 @@ fn fast_mode_short_marker(service_tier: Option<ServiceTier>) -> Option<&'static 
     }
 }
 
-fn model_option_groups(
-    models: &[AppModel],
-    current_model_entry: Option<&AppModel>,
-    current_model_id: &str,
+struct ModelOptionGroupsInput<'a> {
+    models: &'a [AppModel],
+    current_model_entry: Option<&'a AppModel>,
+    current_model_id: &'a str,
     current_reasoning_effort: ReasoningEffort,
     current_reasoning_effort_display_style: ReasoningEffortDisplayStyle,
     current_model_display_style: ModelDisplayStyle,
+    model_selector: &'a ModelSelectorPreferences,
     current_service_tier: Option<ServiceTier>,
-) -> Vec<SessionConfigSelectGroup> {
+}
+
+fn model_option_groups(input: ModelOptionGroupsInput<'_>) -> Vec<SessionConfigSelectGroup> {
+    let ModelOptionGroupsInput {
+        models,
+        current_model_entry,
+        current_model_id,
+        current_reasoning_effort,
+        current_reasoning_effort_display_style,
+        current_model_display_style,
+        model_selector,
+        current_service_tier,
+    } = input;
     let mut model_options = Vec::with_capacity(models.len() + 1);
     let mut has_current_model = false;
     let current_speed_value = fast_mode::fast_mode_value(current_service_tier);
@@ -460,6 +479,9 @@ fn model_option_groups(
         current_model_display_style,
     );
     for model in models {
+        if model_selector.hides_model(&model.id, current_model_id) {
+            continue;
+        }
         if model.id == current_model_id {
             has_current_model = true;
         }
@@ -496,6 +518,7 @@ fn model_option_groups(
         current_model_entry,
         current_reasoning_effort,
         current_reasoning_effort_display_style,
+        model_selector,
     );
     let speed_options = fast_mode::fast_mode_options(current_service_tier)
         .into_iter()
@@ -523,13 +546,21 @@ fn reasoning_effort_option_groups(
     current_model_entry: Option<&AppModel>,
     current_reasoning_effort: ReasoningEffort,
     current_reasoning_effort_display_style: ReasoningEffortDisplayStyle,
+    model_selector: &ModelSelectorPreferences,
 ) -> Vec<SessionConfigSelectOption> {
     let current_effort_value = reasoning_effort_value(current_reasoning_effort);
     let mut effort_options = Vec::new();
     let mut has_current_effort = false;
+    let mut advertised_efforts = Vec::new();
     if let Some(model) = current_model_entry {
         effort_options.reserve(model.supported_reasoning_efforts.len() + 1);
         for option in &model.supported_reasoning_efforts {
+            advertised_efforts.push(option.reasoning_effort);
+            if model_selector
+                .hides_reasoning_effort(option.reasoning_effort, current_reasoning_effort)
+            {
+                continue;
+            }
             let effort_value = reasoning_effort_value(option.reasoning_effort);
             has_current_effort |= effort_value == current_effort_value;
             let label = reasoning::reasoning_effort_option_label(
@@ -547,6 +578,29 @@ fn reasoning_effort_option_groups(
                     name,
                 )
                 .description(option.description.clone()),
+            );
+        }
+        for effort in model_selector.configured_visible_reasoning_efforts() {
+            if advertised_efforts.contains(&effort)
+                || model_selector.hides_reasoning_effort(effort, current_reasoning_effort)
+            {
+                continue;
+            }
+            let effort_value = reasoning_effort_value(effort);
+            has_current_effort |= effort_value == current_effort_value;
+            let label = reasoning::reasoning_effort_option_label(
+                effort,
+                current_reasoning_effort_display_style,
+            );
+            let name = if effort_value == current_effort_value {
+                format!("★ {label}")
+            } else {
+                label
+            };
+            effort_options.push(
+                SessionConfigSelectOption::new(model_reasoning_value(effort), name).description(
+                    "Configured manually in selector-preferences.json. The backend may reject it if the current model does not support this reasoning effort.",
+                ),
             );
         }
     } else {
@@ -700,7 +754,7 @@ mod tests {
         parse_model_reasoning_value, parse_model_speed_value,
     };
     use crate::thread::session_selector_preferences::{
-        SelectorLayoutEntry, SelectorLayoutPreferences,
+        ModelSelectorPreferences, SelectorLayoutEntry, SelectorLayoutPreferences,
     };
     use crate::thread::{
         AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
@@ -747,6 +801,7 @@ mod tests {
             current_reasoning_effort: ReasoningEffort::High,
             current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Circle,
             current_model_display_style: ModelDisplayStyle::WithPrefix,
+            model_selector: &Default::default(),
             current_used_tokens: None,
             current_context_window_size: None,
             current_usage_percent: None,
@@ -849,6 +904,7 @@ mod tests {
             current_reasoning_effort: ReasoningEffort::High,
             current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Text,
             current_model_display_style: ModelDisplayStyle::WithoutPrefix,
+            model_selector: &Default::default(),
             current_used_tokens: None,
             current_context_window_size: None,
             current_usage_percent: None,
@@ -890,6 +946,130 @@ mod tests {
             groups[1].options.iter().any(
                 |option| option.value.0.as_ref() == "reasoning:high" && option.name == "★ High"
             )
+        );
+    }
+
+    #[test]
+    fn model_selector_preferences_filter_models_and_efforts() {
+        let account_status = super::AccountStatus::default();
+        let mcp_summary = super::ContextSelectorSummary::default();
+        let skills_summary = super::ContextSelectorSummary::default();
+        let plugins_summary = super::ContextSelectorSummary::default();
+        let selector_layout = SelectorLayoutPreferences::default();
+        let model_selector = ModelSelectorPreferences {
+            default_model: None,
+            default_reasoning_effort: None,
+            default_service_tier: None,
+            models: [("gpt-5.2".to_string(), false)].into_iter().collect(),
+            reasoning_efforts: [
+                (ReasoningEffort::Low.to_string(), false),
+                (ReasoningEffort::XHigh.to_string(), false),
+            ]
+            .into_iter()
+            .collect(),
+            hidden_models: Vec::new(),
+            hidden_reasoning_efforts: Vec::new(),
+        };
+        let models = vec![
+            AppModel {
+                id: "gpt-5.5".to_string(),
+                model: "gpt-5.5".to_string(),
+                upgrade: None,
+                upgrade_info: None,
+                availability_nux: None,
+                display_name: "GPT-5.5".to_string(),
+                description: "Frontier model".to_string(),
+                hidden: false,
+                supported_reasoning_efforts: vec![
+                    ReasoningEffortOption {
+                        reasoning_effort: ReasoningEffort::Low,
+                        description: "Fast".to_string(),
+                    },
+                    ReasoningEffortOption {
+                        reasoning_effort: ReasoningEffort::High,
+                        description: "Deep".to_string(),
+                    },
+                    ReasoningEffortOption {
+                        reasoning_effort: ReasoningEffort::XHigh,
+                        description: "Max".to_string(),
+                    },
+                ],
+                default_reasoning_effort: ReasoningEffort::High,
+                input_modalities: Vec::new(),
+                supports_personality: false,
+                is_default: true,
+            },
+            AppModel {
+                id: "gpt-5.2".to_string(),
+                model: "gpt-5.2".to_string(),
+                upgrade: None,
+                upgrade_info: None,
+                availability_nux: None,
+                display_name: "gpt-5.2".to_string(),
+                description: "Older model".to_string(),
+                hidden: false,
+                supported_reasoning_efforts: Vec::new(),
+                default_reasoning_effort: ReasoningEffort::Medium,
+                input_modalities: Vec::new(),
+                supports_personality: false,
+                is_default: false,
+            },
+        ];
+
+        let options = config_options(ConfigOptionsInput {
+            workspace_cwd: std::path::Path::new("/tmp"),
+            models: &models,
+            current_model: "gpt-5.5",
+            current_service_tier: None,
+            current_reasoning_effort: ReasoningEffort::High,
+            current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Text,
+            current_model_display_style: ModelDisplayStyle::WithoutPrefix,
+            model_selector: &model_selector,
+            current_used_tokens: None,
+            current_context_window_size: None,
+            current_usage_percent: None,
+            current_context_usage_source: None::<ContextUsageSource>,
+            current_context_display: ContextControlDisplay::Context,
+            current_context_display_style: ContextDisplayStyle::Percent,
+            current_limits_display_style: LimitsDisplayStyle::Text,
+            current_account_rate_limits: None,
+            compaction_in_progress: false,
+            approval: AppAskForApproval::OnRequest,
+            sandbox: AppSandboxMode::WorkspaceWrite,
+            collaboration_mode_kind: ModeKind::Default,
+            account_status: &account_status,
+            total_token_usage: None,
+            session_mcp_summary: &mcp_summary,
+            session_skills_summary: &skills_summary,
+            session_plugins_summary: &plugins_summary,
+            selector_layout: &selector_layout,
+        });
+
+        let model = options
+            .iter()
+            .find(|option| option.id.0.as_ref() == "model")
+            .expect("model selector exists");
+        let SessionConfigKind::Select(select) = &model.kind else {
+            panic!("model selector should be a select config option");
+        };
+        let SessionConfigSelectOptions::Grouped(groups) = &select.options else {
+            panic!("model selector should use grouped options");
+        };
+        assert_eq!(
+            groups[0]
+                .options
+                .iter()
+                .map(|option| option.value.0.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["gpt-5.5"]
+        );
+        assert_eq!(
+            groups[1]
+                .options
+                .iter()
+                .map(|option| option.value.0.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["reasoning:high"]
         );
     }
 
@@ -939,6 +1119,7 @@ mod tests {
             current_reasoning_effort: ReasoningEffort::High,
             current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Circle,
             current_model_display_style: ModelDisplayStyle::WithPrefix,
+            model_selector: &Default::default(),
             current_used_tokens: Some(195_499),
             current_context_window_size: Some(258_400),
             current_usage_percent: Some(76),
@@ -1004,6 +1185,7 @@ mod tests {
             current_reasoning_effort: ReasoningEffort::High,
             current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Circle,
             current_model_display_style: ModelDisplayStyle::WithPrefix,
+            model_selector: &Default::default(),
             current_used_tokens: Some(1_000),
             current_context_window_size: Some(2_000),
             current_usage_percent: Some(50),
@@ -1110,6 +1292,7 @@ mod tests {
             current_reasoning_effort: ReasoningEffort::High,
             current_reasoning_effort_display_style: ReasoningEffortDisplayStyle::Circle,
             current_model_display_style: ModelDisplayStyle::WithPrefix,
+            model_selector: &Default::default(),
             current_used_tokens: Some(1_000),
             current_context_window_size: Some(2_000),
             current_usage_percent: Some(50),

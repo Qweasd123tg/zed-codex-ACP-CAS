@@ -87,14 +87,21 @@ impl Thread {
     pub async fn set_model(&self, model: ModelId) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
         inner.current_model = model.0.to_string();
-        inner.reasoning_effort = normalize_reasoning_effort_for_model(
-            &inner.models,
-            &inner.current_model,
-            inner.reasoning_effort,
-        );
+        if !inner
+            .model_selector
+            .explicitly_enables_reasoning_effort(inner.reasoning_effort)
+        {
+            inner.reasoning_effort = normalize_reasoning_effort_for_model(
+                &inner.models,
+                &inner.current_model,
+                inner.reasoning_effort,
+            );
+        }
+        inner.model_selector.default_model = Some(inner.current_model.clone());
         inner.last_used_tokens = None;
         inner.context_window_size = None;
         inner.context_usage_source = None;
+        persist_selector_preferences_or_warn(&inner);
         Ok(())
     }
 
@@ -105,6 +112,9 @@ impl Thread {
                 .supported_reasoning_efforts
                 .iter()
                 .any(|option| option.reasoning_effort == effort)
+            && !inner
+                .model_selector
+                .explicitly_enables_reasoning_effort(effort)
         {
             return Err(Error::invalid_params().data(format!(
                 "Reasoning effort `{}` is not supported by model `{}`",
@@ -113,6 +123,8 @@ impl Thread {
             )));
         }
         inner.reasoning_effort = effort;
+        inner.model_selector.default_reasoning_effort = Some(effort);
+        persist_selector_preferences_or_warn(&inner);
         Ok(())
     }
 
@@ -145,6 +157,8 @@ impl Thread {
     ) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
         inner.service_tier = service_tier;
+        inner.model_selector.default_service_tier = service_tier;
+        persist_selector_preferences_or_warn(&inner);
         Ok(())
     }
 

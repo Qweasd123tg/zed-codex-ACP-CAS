@@ -448,6 +448,7 @@ impl Thread {
 
         let selector_preferences_path = selector_preferences_path(&codex_home);
         let legacy_selector_preferences_path = legacy_selector_preferences_path(&codex_home);
+        let should_materialize_selector_preferences = !selector_preferences_path.exists();
         let selector_preferences = restore_selector_preferences(
             &selector_preferences_path,
             &legacy_selector_preferences_path,
@@ -480,6 +481,7 @@ impl Thread {
             reasoning_effort,
             reasoning_effort_display_style: Default::default(),
             model_display_style: Default::default(),
+            model_selector: Default::default(),
             agent_labels,
             compaction_in_progress: false,
             context_control_display: Default::default(),
@@ -518,7 +520,9 @@ impl Thread {
             turn_reconnect_retry_limit_hit: false,
         };
         apply_selector_preferences(&mut inner, selector_preferences);
-        if let Err(error) = persist_selector_preferences(&inner) {
+        if should_materialize_selector_preferences
+            && let Err(error) = persist_selector_preferences(&inner)
+        {
             warn!(
                 %error,
                 path = %inner.selector_preferences_path.display(),

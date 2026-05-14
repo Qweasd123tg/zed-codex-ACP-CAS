@@ -1,5 +1,6 @@
 //! Persistent adapter-side defaults for nested selector state that ACP cannot model directly.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::thread::{
-    ContextControlDisplay, ContextDisplayStyle, LimitsDisplayStyle, ModelDisplayStyle,
-    ReasoningEffortDisplayStyle, ThreadInner,
+    AppModel, ContextControlDisplay, ContextDisplayStyle, LimitsDisplayStyle, ModelDisplayStyle,
+    ReasoningEffort, ReasoningEffortDisplayStyle, ServiceTier, ThreadInner,
+    session_config::normalize_reasoning_effort_for_model,
 };
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,8 +20,91 @@ pub(in crate::thread) struct SelectorPreferences {
     pub(in crate::thread) limits_display_style: Option<LimitsDisplayStyle>,
     pub(in crate::thread) model_display_style: Option<ModelDisplayStyle>,
     pub(in crate::thread) reasoning_effort_display_style: Option<ReasoningEffortDisplayStyle>,
+    pub(in crate::thread) model_selector: Option<ModelSelectorPreferences>,
     pub(in crate::thread) layout: Option<SelectorLayoutPreferences>,
     pub(in crate::thread) slash_commands: Option<SlashCommandPreferences>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::thread) struct ModelSelectorPreferences {
+    pub(in crate::thread) default_model: Option<String>,
+    pub(in crate::thread) default_reasoning_effort: Option<ReasoningEffort>,
+    pub(in crate::thread) default_service_tier: Option<ServiceTier>,
+    #[serde(default)]
+    pub(in crate::thread) models: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub(in crate::thread) reasoning_efforts: BTreeMap<String, bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(in crate::thread) hidden_models: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(in crate::thread) hidden_reasoning_efforts: Vec<ReasoningEffort>,
+}
+
+impl ModelSelectorPreferences {
+    pub(in crate::thread) fn hides_model(&self, model_id: &str, current_model_id: &str) -> bool {
+        if model_id == current_model_id {
+            return false;
+        }
+        if let Some(visible) = self.model_visibility(model_id) {
+            return !visible;
+        }
+        self.hidden_models
+            .iter()
+            .any(|hidden| hidden.eq_ignore_ascii_case(model_id))
+    }
+
+    pub(in crate::thread) fn hides_reasoning_effort(
+        &self,
+        effort: ReasoningEffort,
+        current_effort: ReasoningEffort,
+    ) -> bool {
+        if effort == current_effort {
+            return false;
+        }
+        if let Some(visible) = self.reasoning_efforts.get(&effort.to_string()) {
+            return !visible;
+        }
+        self.hidden_reasoning_efforts.contains(&effort)
+    }
+
+    pub(in crate::thread) fn explicitly_enables_reasoning_effort(
+        &self,
+        effort: ReasoningEffort,
+    ) -> bool {
+        self.reasoning_efforts
+            .get(&effort.to_string())
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub(in crate::thread) fn configured_visible_reasoning_efforts(&self) -> Vec<ReasoningEffort> {
+        all_reasoning_efforts()
+            .into_iter()
+            .filter(|effort| self.explicitly_enables_reasoning_effort(*effort))
+            .collect()
+    }
+
+    fn model_visibility(&self, model_id: &str) -> Option<bool> {
+        self.models.get(model_id).copied().or_else(|| {
+            self.models
+                .iter()
+                .find_map(|(id, visible)| id.eq_ignore_ascii_case(model_id).then_some(*visible))
+        })
+    }
+
+    fn normalized_for_runtime(mut self) -> Self {
+        for model_id in &self.hidden_models {
+            self.models.entry(model_id.clone()).or_insert(false);
+        }
+        for effort in &self.hidden_reasoning_efforts {
+            self.reasoning_efforts
+                .entry(effort.to_string())
+                .or_insert(false);
+        }
+        self.hidden_models.clear();
+        self.hidden_reasoning_efforts.clear();
+        self
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,6 +251,27 @@ pub(in crate::thread) fn apply_selector_preferences(
     if let Some(value) = preferences.reasoning_effort_display_style {
         inner.reasoning_effort_display_style = value;
     }
+    if let Some(value) = preferences.model_selector {
+        let value = value.normalized_for_runtime();
+        if let Some(model) = &value.default_model
+            && inner
+                .models
+                .iter()
+                .any(|candidate| candidate.id == *model || candidate.model == *model)
+        {
+            inner.current_model = model.clone();
+        }
+        if let Some(effort) = value.default_reasoning_effort {
+            inner.reasoning_effort = normalize_reasoning_effort_for_preferences(
+                &inner.models,
+                &inner.current_model,
+                &value,
+                effort,
+            );
+        }
+        inner.service_tier = value.default_service_tier;
+        inner.model_selector = value;
+    }
     if let Some(value) = preferences.layout {
         inner.selector_layout = value;
     }
@@ -181,10 +287,56 @@ pub(in crate::thread) fn persist_selector_preferences(inner: &ThreadInner) -> st
         limits_display_style: Some(inner.limits_display_style),
         model_display_style: Some(inner.model_display_style),
         reasoning_effort_display_style: Some(inner.reasoning_effort_display_style),
+        model_selector: Some(materialized_model_selector(
+            &inner.model_selector,
+            &inner.models,
+        )),
         layout: Some(materialized_selector_layout(&inner.selector_layout)),
         slash_commands: Some(inner.slash_commands.clone()),
     };
     write_selector_preferences(&inner.selector_preferences_path, &preferences)
+}
+
+fn materialized_model_selector(
+    preferences: &ModelSelectorPreferences,
+    models: &[AppModel],
+) -> ModelSelectorPreferences {
+    let mut materialized = preferences.clone().normalized_for_runtime();
+    for model in models {
+        let visible = materialized.model_visibility(&model.id).unwrap_or(true);
+        materialized.models.insert(model.id.clone(), visible);
+    }
+    for effort in all_reasoning_efforts() {
+        materialized
+            .reasoning_efforts
+            .entry(effort.to_string())
+            .or_insert(true);
+    }
+    materialized
+}
+
+fn normalize_reasoning_effort_for_preferences(
+    models: &[AppModel],
+    current_model: &str,
+    preferences: &ModelSelectorPreferences,
+    effort: ReasoningEffort,
+) -> ReasoningEffort {
+    if preferences.explicitly_enables_reasoning_effort(effort) {
+        effort
+    } else {
+        normalize_reasoning_effort_for_model(models, current_model, effort)
+    }
+}
+
+fn all_reasoning_efforts() -> [ReasoningEffort; 6] {
+    [
+        ReasoningEffort::None,
+        ReasoningEffort::Minimal,
+        ReasoningEffort::Low,
+        ReasoningEffort::Medium,
+        ReasoningEffort::High,
+        ReasoningEffort::XHigh,
+    ]
 }
 
 fn materialized_selector_layout(layout: &SelectorLayoutPreferences) -> SelectorLayoutPreferences {
@@ -270,13 +422,13 @@ fn write_selector_preferences(
 #[cfg(test)]
 mod tests {
     use super::{
-        SelectorLayoutEntry, SelectorLayoutPreferences, SlashCommandPreferences,
-        legacy_selector_preferences_path, materialized_selector_layout,
+        ModelSelectorPreferences, SelectorLayoutEntry, SelectorLayoutPreferences,
+        SlashCommandPreferences, legacy_selector_preferences_path, materialized_selector_layout,
         restore_selector_preferences, selector_preferences_path, write_selector_preferences,
     };
     use crate::thread::{
         ContextControlDisplay, ContextDisplayStyle, LimitsDisplayStyle, ModelDisplayStyle,
-        ReasoningEffortDisplayStyle,
+        ReasoningEffort, ReasoningEffortDisplayStyle, ServiceTier,
     };
     use std::path::Path;
 
@@ -311,6 +463,17 @@ mod tests {
             limits_display_style: Some(LimitsDisplayStyle::Block),
             model_display_style: Some(ModelDisplayStyle::WithoutPrefix),
             reasoning_effort_display_style: Some(ReasoningEffortDisplayStyle::Text),
+            model_selector: Some(ModelSelectorPreferences {
+                default_model: Some("gpt-5.5".to_string()),
+                default_reasoning_effort: Some(ReasoningEffort::High),
+                default_service_tier: Some(ServiceTier::Fast),
+                models: [("gpt-5.2".to_string(), false)].into_iter().collect(),
+                reasoning_efforts: [(ReasoningEffort::XHigh.to_string(), false)]
+                    .into_iter()
+                    .collect(),
+                hidden_models: Vec::new(),
+                hidden_reasoning_efforts: Vec::new(),
+            }),
             layout: Some(SelectorLayoutPreferences {
                 order: Some(vec![
                     "context_control".to_string(),
@@ -359,6 +522,22 @@ mod tests {
             restored.reasoning_effort_display_style,
             Some(ReasoningEffortDisplayStyle::Text)
         );
+        let model_selector = restored
+            .model_selector
+            .expect("model selector preferences should restore");
+        assert_eq!(model_selector.default_model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(
+            model_selector.default_reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+        assert_eq!(model_selector.default_service_tier, Some(ServiceTier::Fast));
+        assert_eq!(model_selector.models.get("gpt-5.2"), Some(&false));
+        assert_eq!(
+            model_selector
+                .reasoning_efforts
+                .get(&ReasoningEffort::XHigh.to_string()),
+            Some(&false)
+        );
         let layout = restored.layout.expect("layout should restore");
         assert_eq!(
             layout.order,
@@ -383,7 +562,6 @@ mod tests {
         assert!(!slash_commands.archive);
         assert!(slash_commands.status);
         assert!(!slash_commands.is_enabled("delete"));
-
         drop(std::fs::remove_file(path));
     }
 
@@ -409,6 +587,39 @@ mod tests {
         );
 
         drop(std::fs::remove_file(legacy_path));
+    }
+
+    #[test]
+    fn legacy_hidden_model_selector_arrays_normalize_to_visibility_tables() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "codex-acp-selector-preferences-legacy-model-selector-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(
+            &path,
+            r#"{
+              "model_selector": {
+                "default_reasoning_effort": "high",
+                "hidden_models": ["gpt-5.2"],
+                "hidden_reasoning_efforts": ["xhigh"]
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let restored = restore_selector_preferences(&path, Path::new("/tmp/missing-legacy.json"));
+        let model_selector = restored
+            .model_selector
+            .expect("model selector preferences should restore")
+            .normalized_for_runtime();
+
+        assert_eq!(model_selector.models.get("gpt-5.2"), Some(&false));
+        assert_eq!(model_selector.reasoning_efforts.get("xhigh"), Some(&false));
+        assert!(model_selector.hidden_models.is_empty());
+        assert!(model_selector.hidden_reasoning_efforts.is_empty());
+
+        drop(std::fs::remove_file(path));
     }
 
     #[test]

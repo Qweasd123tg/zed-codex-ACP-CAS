@@ -156,6 +156,7 @@ struct ThreadInner {
     reasoning_effort: ReasoningEffort,
     reasoning_effort_display_style: ReasoningEffortDisplayStyle,
     model_display_style: ModelDisplayStyle,
+    model_selector: session_selector_preferences::ModelSelectorPreferences,
     agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
     compaction_in_progress: bool,
     context_control_display: ContextControlDisplay,
