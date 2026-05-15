@@ -38,7 +38,6 @@ use tracing::{debug, info};
 
 use crate::thread::{Thread, build_session_mcp_setup};
 
-#[allow(dead_code)]
 const EXT_THREAD_ROLLBACK_METHODS: [&str; 4] = [
     "zed.dev/codex/thread/rollback",
     "codex/thread/rollback",
@@ -166,7 +165,6 @@ impl CodexAgent {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 struct ThreadRollbackExtParams {
     #[serde(alias = "session_id")]
     session_id: SessionId,
@@ -837,7 +835,6 @@ impl CodexAgent {
         Ok(SetSessionConfigOptionResponse::new(config_options))
     }
 
-    #[allow(dead_code)]
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse, Error> {
         let Some(params) = parse_thread_rollback_ext_params(&args)? else {
             return Err(Error::method_not_found());

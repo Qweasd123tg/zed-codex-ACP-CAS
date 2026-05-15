@@ -9,11 +9,16 @@ pub(in crate::thread) struct ReconnectProgress {
 pub(in crate::thread) fn parse_reconnect_progress(message: &str) -> Option<ReconnectProgress> {
     let trimmed = message.trim();
     let progress = trimmed
-        .strip_prefix("[error] Reconnecting... ")
-        .or_else(|| trimmed.strip_prefix("Reconnecting... "))?;
-    let (current, total) = progress.split_once('/')?;
+        .find("Reconnecting... ")
+        .map(|index| &trimmed[index + "Reconnecting... ".len()..])?;
+    let (current, rest) = progress.split_once('/')?;
+    let total = rest
+        .split_whitespace()
+        .next()
+        .unwrap_or(rest)
+        .trim_matches(|ch: char| !ch.is_ascii_digit());
     let current = current.trim().parse().ok()?;
-    let total = total.trim().parse().ok()?;
+    let total = total.parse().ok()?;
     Some(ReconnectProgress { current, total })
 }
 
@@ -49,6 +54,17 @@ mod tests {
             parse_reconnect_progress("Reconnecting... 5/5"),
             Some(ReconnectProgress {
                 current: 5,
+                total: 5,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_reconnect_progress_inside_error_text() {
+        assert_eq!(
+            parse_reconnect_progress("stream dropped; Reconnecting... 1/5 after transport error"),
+            Some(ReconnectProgress {
+                current: 1,
                 total: 5,
             })
         );

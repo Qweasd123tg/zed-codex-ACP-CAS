@@ -83,7 +83,6 @@ Sub-agent and collaboration tool-call rendering:
   - `/undo`
   - `/plan`
   - `/diff`
-  - hidden compatibility alias `/delete -> /archive`
 - Better thread title handling for resume/archive/rename/fork flows
 - ACP `session/fork` surfaced on top of native `thread/fork`
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
@@ -169,7 +168,7 @@ Current gaps:
 - Default-mode fallback checkpoint rendering is intentionally pragmatic ACP UI, not a pixel-for-pixel clone of Codex CLI autoplan visuals
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
 - Some upstream-style flows are still missing or incomplete, including `close_session` and `/logout`
-- There is still no true delete path end-to-end: `codex app-server` does not give this fork a practical hard-delete flow, and the current ACP bridge in `Zed` still does not surface `session/delete`, so `/delete` stays only as a compatibility alias to `/archive`
+- There is still no true delete path end-to-end: `codex app-server` does not give this fork a practical hard-delete flow, and the current ACP bridge in `Zed` still does not surface `session/delete`; use `/archive` when you only need to hide a thread from normal lists
 - Slash `/new` is intentionally not surfaced anymore. Use native `Zed` `New Thread` for a real new ACP session; in-place backend switching remains only for `/fork` and archive-triggered replacement flows. Standard ACP `session/fork` is supported by the adapter, but current `Zed` still has no dedicated UI entrypoint for it, so slash `/fork` remains the practical path unless you patch the client. The old soft-new behavior is summarized in `docs/drafts/soft-new-backup.md`
 - Some behavior still depends on Zed-side ACP support
 
@@ -478,8 +477,7 @@ Fields:
 - `layout.<selector>.groups`: whitelist and order of known groups inside that selector.
 - `slash_commands`: ordered surfaced slash-command list.
   Comment out a row to hide the command from Zed and reject it when typed manually.
-  Row order controls Zed command order. `/delete` is a hidden compatibility alias for `/archive`;
-  omit/comment `archive` to disable both.
+  Row order controls Zed command order.
 
 Known groups:
 
@@ -490,7 +488,6 @@ Known groups:
 Known slash commands:
 
 - `init`, `status`, `review`, `threads`, `resume`, `fork`, `archive`, `unarchive`, `compact`, `undo`, `plan`, `rename`, `diff`.
-- `/delete` is a hidden compatibility alias for `/archive`; setting `"archive": false` disables both.
 
 Unknown selector/group ids are ignored; if a group override matches nothing, the adapter keeps the
 default groups to avoid rendering an empty selector.

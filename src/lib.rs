@@ -69,9 +69,3 @@ pub async fn run_main(
 
     Ok(())
 }
-
-// Переэкспортируем типы MCP-сервера для совместимости.
-pub use codex_mcp_server::{
-    CodexToolCallParam, CodexToolCallReplyParam, ExecApprovalElicitRequestParams,
-    ExecApprovalResponse, PatchApprovalElicitRequestParams, PatchApprovalResponse,
-};

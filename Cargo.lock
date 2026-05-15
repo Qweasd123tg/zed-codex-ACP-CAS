@@ -1028,18 +1028,16 @@ checksum = "e9b18233253483ce2f65329a24072ec414db782531bdbb7d0bbc4bd2ce6b7e21"
 
 [[package]]
 name = "codex-acp"
-version = "0.19.0"
+version = "0.20.1"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
- "async-trait",
  "chrono",
  "clap",
  "codex-app-server-protocol",
  "codex-arg0",
  "codex-core",
  "codex-login",
- "codex-mcp-server",
  "codex-protocol",
  "codex-utils-approval-presets",
  "codex-utils-cli",
@@ -1420,28 +1418,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-mcp-server"
-version = "0.0.0"
-source = "git+https://github.com/zed-industries/codex?rev=ab7a5b87a9e455235f65637f1675c03051481c87#ab7a5b87a9e455235f65637f1675c03051481c87"
-dependencies = [
- "anyhow",
- "codex-arg0",
- "codex-core",
- "codex-protocol",
- "codex-shell-command",
- "codex-utils-cli",
- "codex-utils-json-to-toml",
- "rmcp 0.15.0",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "shlex",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "codex-network-proxy"
 version = "0.0.0"
 source = "git+https://github.com/zed-industries/codex?rev=ab7a5b87a9e455235f65637f1675c03051481c87#ab7a5b87a9e455235f65637f1675c03051481c87"
@@ -1722,15 +1698,6 @@ dependencies = [
  "image",
  "thiserror 2.0.18",
  "tokio",
-]
-
-[[package]]
-name = "codex-utils-json-to-toml"
-version = "0.0.0"
-source = "git+https://github.com/zed-industries/codex?rev=ab7a5b87a9e455235f65637f1675c03051481c87#ab7a5b87a9e455235f65637f1675c03051481c87"
-dependencies = [
- "serde_json",
- "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]

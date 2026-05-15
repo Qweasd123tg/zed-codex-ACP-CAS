@@ -144,7 +144,7 @@ flowchart LR
 - `src/thread/features/collab/render.rs` для title/kind/live/replay поведения;
 - `src/thread/features/collab/status.rs` для ACP-status mapping и summary line;
 - `src/thread/features/collab/content.rs` для text payload, `raw_input`/`raw_output` и новых полей `agents_states[*]`;
-- `src/thread/core/tests.rs` для фиксированных title/status/content ожиданий;
+- `src/thread/core/tests/collab.rs` для фиксированных title/status/content ожиданий;
 - `README.md` и `AGENTS.md`, чтобы правила и user-facing docs не отставали от кода.
 
 Отдельная инварианта по данным: не терять `sender_thread_id`, `receiver_thread_ids`, `prompt`, `agents_states[*].status`, `agents_states[*].message` при live/update/replay.
@@ -168,7 +168,7 @@ flowchart LR
 3. Изменение slash/prompt workflow (`/init`, `/review`, `/plan <prompt>` и похожие fixed prompt-turn ветки):
 - `src/thread/prompt/commands.rs`
 - `src/thread/prompt/flow.rs`
-- `src/thread/core/tests.rs`
+- `src/thread/core/tests/slash_commands.rs`
 - `README.md` / `docs/upstream-feature-matrix.md` для surfaced command parity
 
 4. Изменение file-change lifecycle:
@@ -192,9 +192,14 @@ flowchart LR
 - `src/thread/session/config/context/skills.rs`
 - `src/thread/session/config/context/plugins.rs`
 - `src/thread/session/config/fast_mode.rs`
+- `src/thread/session/config/layout.rs`
 - `src/thread/session/config/limits.rs`
+- `src/thread/session/config/model_selector.rs`
 - `src/thread/session/config/modes.rs`
 - `src/thread/session/config/reasoning.rs`
+- `src/thread/session/selector_preferences.rs`
+- `src/thread/session/selector_preferences/jsonc.rs`
+- `src/thread/session/selector_preferences/materialize.rs`
 - `src/thread/session/settings.rs`
 - `src/thread/features/session/modes.rs`
 - `src/thread/features/session/controls.rs`
@@ -224,7 +229,7 @@ flowchart LR
 - В группе `Context -> Display` есть три режима нижней кнопки: context-only, limits-only и combined context+limits. Стиль context (`percent`/`braille`) и стиль limits (`text`/`bars`/`block`) больше не шумят в selector UI и задаются через `$CODEX_HOME/codex-acp/selector-preferences.json`. Model labels берутся из `model_selector.models[*].name`, effort labels/descriptions — из `model_selector.reasoning_efforts[*].name` / `description`; если override не задан, используются backend/code defaults. Отдельных model-prefix, effort-icon и speed-glyph style layers больше нет. Сам hover у выбранного display mode при этом обязан оставаться человекочитаемым: процент, exact tokens, status (`live` / `cached` / `pending` / `compacting`) и account limits отдельными строками.
 - Вложенные style/layout-настройки selectors дополнительно сохраняются adapter-side в `$CODEX_HOME/codex-acp/selector-preferences.json`, потому что ACP/Zed отдает только один `currentValue` на selector и не может выразить одновременно `context+limits` + `Braille` + `Block`. Layout config ограниченно управляет только известными selectors: `order`, `visible`, `name`, `groups`; произвольные option values не поддерживаются. Persistence best-effort: ошибка записи не должна ломать сам выбор пункта.
 - Существующий `selector-preferences.json` не перезаписывается на старте только ради materialize, чтобы ручной конфиг не сбрасывался в defaults. Если файл не парсится, session startup возвращает явную ошибку с путем к файлу. Save path перед записью перечитывает текущий валидный файл и сохраняет ручные per-model `name` / `description`, чтобы selector-click из старой in-memory сессии не стер кастомные названия. Новый файл создается без inert/example секций, сам default config уже является редактируемым примером.
-- Тот же preferences-файл содержит `slash_commands` как ordered list surfaced slash-команд: строка есть в списке — команда показывается и разрешена, строка закомментирована — команда скрыта из Zed `available_commands` и останавливается при ручном вводе системным сообщением. Порядок строк задает порядок команд в Zed; hidden `/delete` следует за `archive`.
+- Тот же preferences-файл содержит `slash_commands` как ordered list surfaced slash-команд: строка есть в списке — команда показывается и разрешена, строка закомментирована — команда скрыта из Zed `available_commands` и останавливается при ручном вводе системным сообщением. Порядок строк задает порядок команд в Zed.
 - Account rate limits дополнительно дают одноразовые chat-advisory при переходе через 75/90/95/100% использованного окна; состояние порогов хранится в `ThreadInner`,
   а форматирование находится в `src/thread/session/config/limits.rs`, чтобы `Context` selector и warning-текст не расходились.
 - Reset-время в account limits форматируется с минутами для sub-day окон (`in 4h 23m`), чтобы нижний selector не прятал важный остаток за округлением до часов.
@@ -240,7 +245,7 @@ flowchart LR
 - `src/thread/features/collab/content.rs`
 - `src/thread/core/item_handlers.rs`
 - `src/thread/core/replay.rs`
-- `src/thread/core/tests.rs`
+- `src/thread/core/tests/collab.rs`
 - `README.md`
 - `AGENTS.md`
 
@@ -346,7 +351,9 @@ Command approval title не должен оставаться generic `Details` 
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
 | `src/thread/prompt/*` | Парсинг slash-команд, fixed prompt-turn override-ы (`/init`, `/plan <prompt>`), routing в review/session-turn flow |
 | `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread, transport scrub при переключении |
-| `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, hidden `/delete -> /archive` alias, archive/unarchive picker UI, ACP `session/fork` bootstrap helper, session replay события, `SessionInfoUpdate` (`title` + `updated_at`), history replay fencing и runtime handling нижних `Context` и `Speed` selectors |
+| `src/thread/session/config/*` | Runtime построение lower selectors, permission/model/context групп, layout ordering и formatter-ы статусов |
+| `src/thread/session/selector_preferences*` | Schema, materialization, persistence и JSONC parser/writer для `$CODEX_HOME/codex-acp/selector-preferences.json` |
+| `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, archive/unarchive picker UI, ACP `session/fork` bootstrap helper, session replay события, `SessionInfoUpdate` (`title` + `updated_at`), history replay fencing и runtime handling нижних `Context` и `Speed` selectors |
 | `src/codex_agent.rs` + `src/thread/session/lifecycle.rs` | ACP `session/fork` capability и handler поверх существующего `thread/fork` backend |
 | `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
 | `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw/location payload |

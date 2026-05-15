@@ -23,8 +23,7 @@ pub(in crate::thread) async fn emit_agent_message_delta(
     }
 
     if let Some(progress) = parse_reconnect_progress(&delta) {
-        let warning_count = inner.note_reconnect_warning(progress.current >= progress.total);
-        if warning_count == 1 {
+        if inner.note_reconnect_progress(progress.current, progress.total) {
             inner
                 .client
                 .send_agent_text(format_reconnect_status(progress))

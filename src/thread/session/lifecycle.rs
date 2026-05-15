@@ -521,6 +521,8 @@ impl Thread {
             turn_last_progress_at: std::time::Instant::now(),
             turn_reconnect_warning_count: 0,
             turn_reconnect_retry_limit_hit: false,
+            turn_last_reconnect_progress: None,
+            turn_reconnect_stall_notice_sent: false,
         };
         apply_selector_preferences(&mut inner, selector_preferences);
         if should_materialize_selector_preferences

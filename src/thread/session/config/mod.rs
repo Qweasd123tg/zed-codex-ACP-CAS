@@ -1,7 +1,7 @@
 //! Маппинг конфигурации сессии между ACP-опциями и runtime-настройками Codex app-server.
 
 use crate::thread::session_selector_preferences::{
-    ModelSelectorPreferences, SelectorLayoutEntry, SelectorLayoutPreferences,
+    ModelSelectorPreferences, SelectorLayoutPreferences,
 };
 use crate::thread::{
     AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
@@ -14,20 +14,25 @@ use crate::thread::{
 mod context;
 #[path = "fast_mode.rs"]
 mod fast_mode;
+#[path = "layout.rs"]
+mod layout;
 #[path = "limits.rs"]
 mod limits;
+#[path = "model_selector.rs"]
+mod model_selector;
 #[path = "modes.rs"]
 mod modes;
 #[path = "reasoning.rs"]
 mod reasoning;
 
+use self::layout::{apply_group_layout, apply_selector_order, selector_name};
+use self::model_selector::{
+    ModelOptionGroupsInput, model_option_groups, model_selector_description,
+};
 pub(super) use modes::{
     current_permission_mode_id, i64_to_u64_saturating, mode_state, permission_modes,
     policy_to_mode, session_model_state, to_app_approval, to_app_sandbox_mode,
 };
-
-const MODEL_REASONING_VALUE_PREFIX: &str = "reasoning:";
-const MODEL_SPEED_VALUE_PREFIX: &str = "speed:";
 
 impl ContextControlDisplay {
     fn value_id(self) -> &'static str {
@@ -258,349 +263,6 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
     apply_selector_order(selector_layout, options)
 }
 
-fn selector_name(
-    layout: &SelectorLayoutPreferences,
-    selector_id: &str,
-    default_name: &str,
-) -> String {
-    layout
-        .entry(selector_id)
-        .and_then(|entry| entry.name.as_deref())
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .unwrap_or(default_name)
-        .to_string()
-}
-
-fn selector_visible(layout: &SelectorLayoutPreferences, selector_id: &str) -> bool {
-    layout
-        .entry(selector_id)
-        .and_then(|entry| entry.visible)
-        .unwrap_or(true)
-}
-
-fn apply_group_layout(
-    layout: &SelectorLayoutPreferences,
-    selector_id: &str,
-    groups: Vec<SessionConfigSelectGroup>,
-) -> Vec<SessionConfigSelectGroup> {
-    let Some(SelectorLayoutEntry {
-        groups: Some(group_order),
-        ..
-    }) = layout.entry(selector_id)
-    else {
-        return groups;
-    };
-    let mut remaining = groups;
-    let mut ordered = Vec::new();
-
-    for group_id in group_order {
-        if let Some(index) = remaining
-            .iter()
-            .position(|group| group.group.0.as_ref() == group_id.as_str())
-        {
-            ordered.push(remaining.remove(index));
-        }
-    }
-
-    if ordered.is_empty() {
-        remaining
-    } else {
-        ordered
-    }
-}
-
-fn apply_selector_order(
-    layout: &SelectorLayoutPreferences,
-    options: Vec<(&'static str, SessionConfigOption)>,
-) -> Vec<SessionConfigOption> {
-    let mut remaining = options
-        .into_iter()
-        .filter(|(selector_id, _)| selector_visible(layout, selector_id))
-        .collect::<Vec<_>>();
-    let mut ordered = Vec::with_capacity(remaining.len());
-
-    if let Some(selector_order) = &layout.order {
-        for selector_id in selector_order {
-            if let Some(index) = remaining
-                .iter()
-                .position(|(candidate_id, _)| *candidate_id == selector_id.as_str())
-            {
-                ordered.push(remaining.remove(index).1);
-            }
-        }
-    }
-
-    ordered.extend(remaining.into_iter().map(|(_, option)| option));
-    ordered
-}
-
-pub(super) fn parse_model_reasoning_value(value: &str) -> Option<ReasoningEffort> {
-    value
-        .strip_prefix(MODEL_REASONING_VALUE_PREFIX)
-        .and_then(parse_reasoning_effort)
-}
-
-pub(super) fn parse_model_speed_value(value: &str) -> Option<Option<ServiceTier>> {
-    value
-        .strip_prefix(MODEL_SPEED_VALUE_PREFIX)
-        .and_then(parse_fast_mode_value)
-}
-
-fn model_reasoning_value(effort: ReasoningEffort) -> String {
-    format!(
-        "{MODEL_REASONING_VALUE_PREFIX}{}",
-        reasoning_effort_value(effort)
-    )
-}
-
-fn model_speed_value(value: &str) -> String {
-    format!("{MODEL_SPEED_VALUE_PREFIX}{value}")
-}
-
-fn model_label_for_selector(
-    current_model_entry: Option<&AppModel>,
-    current_model_id: &str,
-    model_selector: &ModelSelectorPreferences,
-) -> String {
-    model_selector
-        .model_name_override(current_model_id)
-        .map(ToString::to_string)
-        .unwrap_or_else(|| {
-            current_model_entry
-                .map(|model| model.display_name.as_str())
-                .unwrap_or(current_model_id)
-                .trim()
-                .to_string()
-        })
-}
-
-fn current_model_label_for_selector(
-    current_model_entry: Option<&AppModel>,
-    current_model_id: &str,
-    current_reasoning_effort: ReasoningEffort,
-    model_selector: &ModelSelectorPreferences,
-) -> String {
-    [
-        model_label_for_selector(current_model_entry, current_model_id, model_selector),
-        reasoning_effort_label_for_selector(current_reasoning_effort, model_selector),
-    ]
-    .join(" ")
-}
-
-fn reasoning_effort_label_for_selector(
-    effort: ReasoningEffort,
-    model_selector: &ModelSelectorPreferences,
-) -> String {
-    model_selector
-        .reasoning_effort_name_override(effort)
-        .map(str::to_string)
-        .unwrap_or_else(|| reasoning::reasoning_effort_label(effort).to_string())
-}
-
-struct ModelOptionGroupsInput<'a> {
-    models: &'a [AppModel],
-    current_model_entry: Option<&'a AppModel>,
-    current_model_id: &'a str,
-    current_reasoning_effort: ReasoningEffort,
-    model_selector: &'a ModelSelectorPreferences,
-    current_service_tier: Option<ServiceTier>,
-}
-
-fn model_option_groups(input: ModelOptionGroupsInput<'_>) -> Vec<SessionConfigSelectGroup> {
-    let ModelOptionGroupsInput {
-        models,
-        current_model_entry,
-        current_model_id,
-        current_reasoning_effort,
-        model_selector,
-        current_service_tier,
-    } = input;
-    let mut model_options = Vec::with_capacity(models.len() + 1);
-    let mut has_current_model = false;
-    let current_speed_value = fast_mode::fast_mode_value(current_service_tier);
-    let current_speed_label = fast_mode_label(current_service_tier);
-    let current_model_label = current_model_label_for_selector(
-        current_model_entry,
-        current_model_id,
-        current_reasoning_effort,
-        model_selector,
-    );
-    for model in model_selector.ordered_models(models) {
-        if model_selector.hides_model(&model.id, current_model_id) {
-            continue;
-        }
-        if model.id == current_model_id {
-            has_current_model = true;
-        }
-        let is_current_model = model.id == current_model_id;
-        let model_name = if is_current_model {
-            current_model_label.clone()
-        } else {
-            model_label_for_selector(Some(model), &model.id, model_selector)
-        };
-        let description = if is_current_model {
-            let model_description = model_selector
-                .model_description_override(&model.id)
-                .unwrap_or(&model.description);
-            format!(
-                "{}\nSelected: reasoning effort {}, speed {}.",
-                model_description,
-                reasoning::reasoning_effort_description_label(current_reasoning_effort),
-                current_speed_label
-            )
-        } else {
-            model_selector
-                .model_description_override(&model.id)
-                .unwrap_or(&model.description)
-                .to_string()
-        };
-        model_options.push(
-            SessionConfigSelectOption::new(model.id.clone(), model_name).description(description),
-        );
-    }
-
-    if !has_current_model {
-        model_options.push(SessionConfigSelectOption::new(
-            current_model_id.to_string(),
-            current_model_label,
-        ));
-    }
-
-    let reasoning_options = reasoning_effort_option_groups(
-        current_model_entry,
-        current_reasoning_effort,
-        model_selector,
-    );
-    let speed_options = fast_mode::fast_mode_options(current_service_tier)
-        .into_iter()
-        .map(|option| {
-            let value = option.value.0.to_string();
-            let name = if value == current_speed_value {
-                format!("★ {}", option.name)
-            } else {
-                option.name
-            };
-            SessionConfigSelectOption::new(model_speed_value(&value), name)
-                .description(option.description)
-        })
-        .collect();
-
-    vec![
-        SessionConfigSelectGroup::new("models", "Models", model_options),
-        SessionConfigSelectGroup::new("effort", "Effort", reasoning_options),
-        SessionConfigSelectGroup::new("speed", "Speed", speed_options),
-    ]
-}
-
-fn reasoning_effort_option_groups(
-    current_model_entry: Option<&AppModel>,
-    current_reasoning_effort: ReasoningEffort,
-    model_selector: &ModelSelectorPreferences,
-) -> Vec<SessionConfigSelectOption> {
-    let current_effort_value = reasoning_effort_value(current_reasoning_effort);
-    let mut effort_options = Vec::new();
-    let mut has_current_effort = false;
-    let mut advertised_efforts = Vec::new();
-    if let Some(model) = current_model_entry {
-        effort_options.reserve(model.supported_reasoning_efforts.len() + 1);
-        for option in &model.supported_reasoning_efforts {
-            advertised_efforts.push(option.reasoning_effort);
-            if model_selector
-                .hides_reasoning_effort(option.reasoning_effort, current_reasoning_effort)
-            {
-                continue;
-            }
-            let effort_value = reasoning_effort_value(option.reasoning_effort);
-            has_current_effort |= effort_value == current_effort_value;
-            let label = model_selector
-                .reasoning_effort_name_override(option.reasoning_effort)
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    reasoning::reasoning_effort_label(option.reasoning_effort).to_string()
-                });
-            let name = if effort_value == current_effort_value {
-                format!("★ {label}")
-            } else {
-                label
-            };
-            let description = model_selector
-                .reasoning_effort_description_override(option.reasoning_effort)
-                .unwrap_or(&option.description)
-                .to_string();
-            effort_options.push(
-                SessionConfigSelectOption::new(
-                    model_reasoning_value(option.reasoning_effort),
-                    name,
-                )
-                .description(description),
-            );
-        }
-        for effort in model_selector.configured_visible_reasoning_efforts() {
-            if advertised_efforts.contains(&effort)
-                || model_selector.hides_reasoning_effort(effort, current_reasoning_effort)
-            {
-                continue;
-            }
-            let effort_value = reasoning_effort_value(effort);
-            has_current_effort |= effort_value == current_effort_value;
-            let label = model_selector
-                .reasoning_effort_name_override(effort)
-                .map(str::to_string)
-                .unwrap_or_else(|| reasoning::reasoning_effort_label(effort).to_string());
-            let name = if effort_value == current_effort_value {
-                format!("★ {label}")
-            } else {
-                label
-            };
-            let description = model_selector
-                .reasoning_effort_description_override(effort)
-                .map(str::to_string)
-                .unwrap_or_else(|| configured_reasoning_effort_description(effort).to_string());
-            effort_options.push(
-                SessionConfigSelectOption::new(model_reasoning_value(effort), name)
-                    .description(description),
-            );
-        }
-    } else {
-        effort_options.reserve(1);
-    }
-
-    if effort_options.is_empty() || !has_current_effort {
-        effort_options.push(SessionConfigSelectOption::new(
-            model_reasoning_value(current_reasoning_effort),
-            format!(
-                "★ {}",
-                reasoning_effort_label_for_selector(current_reasoning_effort, model_selector)
-            ),
-        ));
-    }
-
-    effort_options
-}
-
-fn configured_reasoning_effort_description(effort: ReasoningEffort) -> &'static str {
-    match effort {
-        ReasoningEffort::Minimal => {
-            "Configured manually in selector-preferences.json. Minimal reasoning can reduce latency, but the backend currently rejects it when tools such as image_gen or web_search are enabled."
-        }
-        ReasoningEffort::None => {
-            "Configured manually in selector-preferences.json. None is a protocol-visible experimental effort that may work for simple turns, but the backend can reject unsupported combinations."
-        }
-        _ => {
-            "Configured manually in selector-preferences.json. The backend may reject it if the current model does not support this reasoning effort."
-        }
-    }
-}
-
-fn fast_mode_label(service_tier: Option<ServiceTier>) -> &'static str {
-    match service_tier {
-        Some(ServiceTier::Fast) => "Fast",
-        Some(ServiceTier::Flex) => "Flex",
-        None => "Standard",
-    }
-}
-
 fn current_permission_description(
     approval: AppAskForApproval,
     sandbox: AppSandboxMode,
@@ -626,23 +288,6 @@ fn current_permission_mode_description(
         .into_iter()
         .find(|mode| mode.id == current_permissions_id)
         .and_then(|mode| mode.description)
-}
-
-fn model_selector_description(
-    current_model_entry: Option<&AppModel>,
-    current_model_id: &str,
-    current_reasoning_effort: ReasoningEffort,
-    current_service_tier: Option<ServiceTier>,
-    model_selector: &ModelSelectorPreferences,
-) -> String {
-    let current_effort_label =
-        reasoning_effort_label_for_selector(current_reasoning_effort, model_selector);
-    let current_model_name =
-        model_label_for_selector(current_model_entry, current_model_id, model_selector);
-    let current_speed_label = fast_mode_label(current_service_tier);
-    format!(
-        "{current_model_name}\nReasoning effort: {current_effort_label}\nSpeed: {current_speed_label}"
-    )
 }
 
 fn context_selector_description(
@@ -685,6 +330,7 @@ pub(super) use fast_mode::{
 pub(super) use limits::{
     RateLimitWarning, RateLimitWarningState, observe_rate_limit_snapshot, take_rate_limit_warnings,
 };
+pub(super) use model_selector::{parse_model_reasoning_value, parse_model_speed_value};
 pub(super) use reasoning::{
     find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
     reasoning_effort_value, resolve_reasoning_effort,
@@ -704,9 +350,9 @@ pub(super) fn usage_percent(used: Option<u64>, size: Option<u64>) -> Option<u64>
 
 #[cfg(test)]
 mod tests {
+    use super::model_selector::{model_reasoning_value, model_speed_value};
     use super::{
-        ConfigOptionsInput, config_options, model_reasoning_value, model_speed_value,
-        parse_model_reasoning_value, parse_model_speed_value,
+        ConfigOptionsInput, config_options, parse_model_reasoning_value, parse_model_speed_value,
     };
     use crate::thread::session_selector_preferences::{
         ModelSelectorModelDetails, ModelSelectorModelEntry, ModelSelectorPreferences,

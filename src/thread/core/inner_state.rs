@@ -28,6 +28,8 @@ impl ThreadInner {
         self.turn_last_progress_at = std::time::Instant::now();
         self.turn_reconnect_warning_count = 0;
         self.turn_reconnect_retry_limit_hit = false;
+        self.turn_last_reconnect_progress = None;
+        self.turn_reconnect_stall_notice_sent = false;
     }
 
     pub(super) fn prepare_for_new_turn(
@@ -65,14 +67,30 @@ impl ThreadInner {
         self.turn_last_progress_at = std::time::Instant::now();
         self.turn_reconnect_warning_count = 0;
         self.turn_reconnect_retry_limit_hit = false;
+        self.turn_last_reconnect_progress = None;
+        self.turn_reconnect_stall_notice_sent = false;
     }
 
-    pub(super) fn note_reconnect_warning(&mut self, reached_retry_limit: bool) -> u32 {
-        self.turn_reconnect_warning_count = self.turn_reconnect_warning_count.saturating_add(1);
-        if reached_retry_limit {
+    pub(super) fn note_reconnect_progress(&mut self, current: u32, total: u32) -> bool {
+        self.turn_last_progress_at = std::time::Instant::now();
+        let progress = (current, total);
+        let is_new_progress = self.turn_last_reconnect_progress != Some(progress);
+        if is_new_progress {
+            self.turn_reconnect_warning_count = self.turn_reconnect_warning_count.saturating_add(1);
+            self.turn_last_reconnect_progress = Some(progress);
+        }
+        if current >= total {
             self.turn_reconnect_retry_limit_hit = true;
         }
-        self.turn_reconnect_warning_count
+        is_new_progress
+    }
+
+    pub(super) fn mark_reconnect_stall_notice_sent(&mut self) -> bool {
+        if self.turn_reconnect_stall_notice_sent {
+            return false;
+        }
+        self.turn_reconnect_stall_notice_sent = true;
+        true
     }
 
     pub(super) fn record_turn_error_notice(

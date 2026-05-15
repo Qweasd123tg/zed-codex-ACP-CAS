@@ -1,6 +1,6 @@
 [package]
 name = "codex-acp"
-version = "0.20.0"
+version = "0.20.1"
 edition = "2024"
 authors = ["Qweasd123tg"]
 license = "Apache-2.0"
@@ -19,13 +19,11 @@ path = "src/lib.rs"
 [dependencies]
 agent-client-protocol = { version = "=0.11.1", features = ["unstable"] }
 anyhow = "1"
-async-trait = "0.1"
 chrono = "0.4"
 clap = "4"
 codex-app-server-protocol = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-arg0 = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-core = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
-codex-mcp-server = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-protocol = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-login = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
 codex-utils-approval-presets = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }

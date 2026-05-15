@@ -1,7 +1,6 @@
 //! Persistent adapter-side defaults for nested selector state that ACP cannot model directly.
 
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
@@ -10,7 +9,17 @@ use uuid::Uuid;
 
 use crate::thread::{
     AppModel, ContextControlDisplay, ContextDisplayStyle, LimitsDisplayStyle, ReasoningEffort,
-    ServiceTier, ThreadInner, session_config::normalize_reasoning_effort_for_model,
+    ServiceTier, ThreadInner,
+};
+
+#[path = "selector_preferences/jsonc.rs"]
+mod jsonc;
+#[path = "selector_preferences/materialize.rs"]
+mod materialize;
+
+use self::materialize::{
+    materialized_model_selector, materialized_selector_layout,
+    normalize_reasoning_effort_for_preferences,
 };
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -349,25 +358,15 @@ impl SlashCommandPreferences {
     }
 
     pub(in crate::thread) fn is_enabled(&self, command: &str) -> bool {
-        let canonical = if command == "delete" {
-            "archive"
-        } else {
-            command
-        };
         self.commands
             .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(canonical))
+            .any(|candidate| candidate.eq_ignore_ascii_case(command))
     }
 
     pub(in crate::thread) fn command_order(&self, command: &str) -> Option<usize> {
-        let canonical = if command == "delete" {
-            "archive"
-        } else {
-            command
-        };
         self.commands
             .iter()
-            .position(|candidate| candidate.eq_ignore_ascii_case(canonical))
+            .position(|candidate| candidate.eq_ignore_ascii_case(command))
     }
 }
 
@@ -508,123 +507,9 @@ pub(in crate::thread) fn persist_selector_preferences(inner: &ThreadInner) -> st
     write_selector_preferences(&inner.selector_preferences_path, &preferences)
 }
 
-fn materialized_model_selector(
-    preferences: &ModelSelectorPreferences,
-    models: &[AppModel],
-) -> ModelSelectorPreferences {
-    let mut materialized = preferences.clone();
-    if materialized.models.is_empty() {
-        materialized.models = models
-            .iter()
-            .map(|model| ModelSelectorModelEntry::materialized(&model.id, None))
-            .collect();
-    } else {
-        materialized.models = materialized
-            .models
-            .iter()
-            .map(|entry| ModelSelectorModelEntry::materialized(entry.id(), Some(entry)))
-            .collect();
-    }
-    if materialized.reasoning_efforts.is_empty() {
-        materialized.reasoning_efforts = all_reasoning_efforts()
-            .into_iter()
-            .map(|effort| ModelSelectorReasoningEffortEntry::materialized(effort, None))
-            .collect();
-    } else {
-        materialized.reasoning_efforts = materialized
-            .reasoning_efforts
-            .iter()
-            .map(|entry| ModelSelectorReasoningEffortEntry::materialized(entry.id(), Some(entry)))
-            .collect();
-    }
-    materialized
-}
-
-fn normalize_reasoning_effort_for_preferences(
-    models: &[AppModel],
-    current_model: &str,
-    preferences: &ModelSelectorPreferences,
-    effort: ReasoningEffort,
-) -> ReasoningEffort {
-    if preferences.explicitly_enables_reasoning_effort(effort) {
-        effort
-    } else {
-        normalize_reasoning_effort_for_model(models, current_model, effort)
-    }
-}
-
-fn all_reasoning_efforts() -> [ReasoningEffort; 6] {
-    [
-        ReasoningEffort::None,
-        ReasoningEffort::Minimal,
-        ReasoningEffort::Low,
-        ReasoningEffort::Medium,
-        ReasoningEffort::High,
-        ReasoningEffort::XHigh,
-    ]
-}
-
-fn materialized_selector_layout(layout: &SelectorLayoutPreferences) -> SelectorLayoutPreferences {
-    SelectorLayoutPreferences {
-        order: Some(layout.order.clone().unwrap_or_else(default_selector_order)),
-        permissions: Some(materialized_selector_entry(
-            layout.permissions.as_ref(),
-            "Permissions",
-            &["workflow", "guarded", "bypass"],
-        )),
-        model: Some(materialized_selector_entry(
-            layout.model.as_ref(),
-            "Model",
-            &["models", "effort", "speed"],
-        )),
-        context_control: Some(materialized_selector_entry(
-            layout.context_control.as_ref(),
-            "Context",
-            &["display", "integrations", "actions"],
-        )),
-    }
-}
-
-fn materialized_selector_entry(
-    entry: Option<&SelectorLayoutEntry>,
-    default_name: &str,
-    default_groups: &[&str],
-) -> SelectorLayoutEntry {
-    SelectorLayoutEntry {
-        visible: Some(entry.and_then(|entry| entry.visible).unwrap_or(true)),
-        name: Some(
-            entry
-                .and_then(|entry| entry.name.clone())
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or_else(|| default_name.to_string()),
-        ),
-        groups: Some(
-            entry
-                .and_then(|entry| entry.groups.clone())
-                .filter(|groups| !groups.is_empty())
-                .unwrap_or_else(|| {
-                    default_groups
-                        .iter()
-                        .map(|group| group.to_string())
-                        .collect()
-                }),
-        ),
-    }
-}
-
-fn default_selector_order() -> Vec<String> {
-    ["permissions", "model", "context_control"]
-        .into_iter()
-        .map(str::to_string)
-        .collect()
-}
-
 fn read_selector_preferences(preferences_path: &Path) -> std::io::Result<SelectorPreferences> {
     match fs::read_to_string(preferences_path) {
-        Ok(contents) => serde_json::from_str(&strip_json_trailing_commas(&strip_json_comments(
-            &contents,
-        )?))
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err)),
+        Ok(contents) => jsonc::parse_selector_preferences_jsonc(&contents),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(SelectorPreferences::default())
         }
@@ -640,194 +525,9 @@ fn write_selector_preferences(
         fs::create_dir_all(parent)?;
     }
     let tmp_path = preferences_path.with_extension(format!("{}.tmp", Uuid::new_v4()));
-    let payload = selector_preferences_jsonc(preferences)?;
+    let payload = jsonc::selector_preferences_jsonc(preferences)?;
     fs::write(&tmp_path, payload)?;
     fs::rename(tmp_path, preferences_path)
-}
-
-fn selector_preferences_jsonc(preferences: &SelectorPreferences) -> io::Result<Vec<u8>> {
-    let mut sections = Vec::new();
-    if let Some(display) = &preferences.display {
-        sections.push(jsonc_section(
-            "Display styles for compact lower-panel selectors.",
-            "display",
-            display,
-        )?);
-    }
-    if let Some(defaults) = &preferences.defaults {
-        sections.push(jsonc_section(
-            "Defaults applied when a new ACP session starts. null keeps the app-server default.",
-            "defaults",
-            defaults,
-        )?);
-    }
-    if let Some(model_selector) = &preferences.model_selector {
-        sections.push(jsonc_section(
-            "Model selector controls. Comment out list rows to hide them; row order controls menu order.",
-            "model_selector",
-            model_selector,
-        )?);
-    }
-    if let Some(layout) = &preferences.layout {
-        sections.push(jsonc_section(
-            "Lower selector order, titles, visibility, and group order.",
-            "layout",
-            layout,
-        )?);
-    }
-    if let Some(slash_commands) = &preferences.slash_commands {
-        sections.push(jsonc_section(
-            "Slash commands. Comment out list rows to hide/block them; row order controls Zed command order.",
-            "slash_commands",
-            slash_commands,
-        )?);
-    }
-
-    let mut output = String::from("{\n");
-    output.push_str(&sections.join(",\n\n"));
-    output.push_str("\n}\n");
-    Ok(output.into_bytes())
-}
-
-fn jsonc_section<T: Serialize>(comment: &str, key: &str, value: &T) -> io::Result<String> {
-    let json = serde_json::to_string_pretty(value)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    let mut lines = json.lines();
-    let mut section = format!("  // {comment}\n  \"{key}\": ");
-    if let Some(first) = lines.next() {
-        section.push_str(first);
-    }
-    for line in lines {
-        section.push('\n');
-        section.push_str("  ");
-        section.push_str(line);
-    }
-    Ok(section)
-}
-
-fn strip_json_comments(input: &str) -> io::Result<String> {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum State {
-        Normal,
-        String,
-        LineComment,
-        BlockComment,
-    }
-
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    let mut state = State::Normal;
-    let mut escaped = false;
-
-    while let Some(ch) = chars.next() {
-        match state {
-            State::Normal => {
-                if ch == '"' {
-                    output.push(ch);
-                    state = State::String;
-                } else if ch == '/' && chars.peek() == Some(&'/') {
-                    chars.next();
-                    output.push(' ');
-                    output.push(' ');
-                    state = State::LineComment;
-                } else if ch == '/' && chars.peek() == Some(&'*') {
-                    chars.next();
-                    output.push(' ');
-                    output.push(' ');
-                    state = State::BlockComment;
-                } else {
-                    output.push(ch);
-                }
-            }
-            State::String => {
-                output.push(ch);
-                if escaped {
-                    escaped = false;
-                } else if ch == '\\' {
-                    escaped = true;
-                } else if ch == '"' {
-                    state = State::Normal;
-                }
-            }
-            State::LineComment => {
-                if ch == '\n' {
-                    output.push('\n');
-                    state = State::Normal;
-                } else {
-                    output.push(' ');
-                }
-            }
-            State::BlockComment => {
-                if ch == '*' && chars.peek() == Some(&'/') {
-                    chars.next();
-                    output.push(' ');
-                    output.push(' ');
-                    state = State::Normal;
-                } else if ch == '\n' {
-                    output.push('\n');
-                } else {
-                    output.push(' ');
-                }
-            }
-        }
-    }
-
-    if state == State::BlockComment {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "unterminated block comment in selector preferences",
-        ));
-    }
-
-    Ok(output)
-}
-
-fn strip_json_trailing_commas(input: &str) -> String {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum State {
-        Normal,
-        String,
-    }
-
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    let mut state = State::Normal;
-    let mut escaped = false;
-
-    while let Some(ch) = chars.next() {
-        match state {
-            State::Normal => {
-                if ch == '"' {
-                    output.push(ch);
-                    state = State::String;
-                } else if ch == ',' {
-                    let mut lookahead = chars.clone();
-                    while matches!(lookahead.peek(), Some(next) if next.is_whitespace()) {
-                        lookahead.next();
-                    }
-                    if matches!(lookahead.peek(), Some(']' | '}')) {
-                        output.push(' ');
-                    } else {
-                        output.push(ch);
-                    }
-                } else {
-                    output.push(ch);
-                }
-            }
-            State::String => {
-                output.push(ch);
-                if escaped {
-                    escaped = false;
-                } else if ch == '\\' {
-                    escaped = true;
-                } else if ch == '"' {
-                    state = State::Normal;
-                }
-            }
-        }
-    }
-
-    output
 }
 
 fn deserialize_double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -996,7 +696,6 @@ mod tests {
         assert!(slash_commands.is_enabled("status"));
         assert!(!slash_commands.is_enabled("review"));
         assert!(!slash_commands.is_enabled("archive"));
-        assert!(!slash_commands.is_enabled("delete"));
         drop(std::fs::remove_file(path));
     }
 

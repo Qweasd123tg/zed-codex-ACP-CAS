@@ -191,6 +191,8 @@ struct ThreadInner {
     turn_last_progress_at: std::time::Instant,
     turn_reconnect_warning_count: u32,
     turn_reconnect_retry_limit_hit: bool,
+    turn_last_reconnect_progress: Option<(u32, u32)>,
+    turn_reconnect_stall_notice_sent: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,7 +228,6 @@ enum LimitsDisplayStyle {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[allow(dead_code)]
 enum FallbackPlanPhase {
     Planning = 0,
     Implementing = 1,
