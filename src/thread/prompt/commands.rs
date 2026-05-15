@@ -369,7 +369,7 @@ pub(super) fn normalize_preview(preview: &str) -> String {
 }
 
 pub(super) fn builtin_commands(slash_commands: &SlashCommandPreferences) -> Vec<AvailableCommand> {
-    [
+    let mut commands = [
         AvailableCommand::new(
             "init",
             "Create an AGENTS.md file with instructions for Codex",
@@ -440,7 +440,9 @@ pub(super) fn builtin_commands(slash_commands: &SlashCommandPreferences) -> Vec<
     ]
     .into_iter()
     .filter(|command| slash_commands.is_enabled(command.name.as_str()))
-    .collect()
+    .collect::<Vec<_>>();
+    commands.sort_by_key(|command| slash_commands.command_order(command.name.as_str()));
+    commands
 }
 
 fn slash_command_rest<'a>(text: &'a str, command: &str) -> Option<&'a str> {

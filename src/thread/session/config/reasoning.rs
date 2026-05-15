@@ -1,6 +1,6 @@
 //! Reasoning/model helper-ы для session_config.
 
-use crate::thread::{AppModel, ReasoningEffort, ReasoningEffortDisplayStyle};
+use crate::thread::{AppModel, ReasoningEffort};
 
 pub(in crate::thread) fn find_model_for_current<'a>(
     models: &'a [AppModel],
@@ -61,24 +61,7 @@ pub(in crate::thread) fn reasoning_effort_value(effort: ReasoningEffort) -> &'st
     }
 }
 
-pub(in crate::thread) fn parse_reasoning_effort_display_style(
-    value: &str,
-) -> Option<ReasoningEffortDisplayStyle> {
-    match value {
-        "circle" => Some(ReasoningEffortDisplayStyle::Circle),
-        "text" => Some(ReasoningEffortDisplayStyle::Text),
-        _ => None,
-    }
-}
-
-fn reasoning_effort_display_style_label(style: ReasoningEffortDisplayStyle) -> &'static str {
-    match style {
-        ReasoningEffortDisplayStyle::Circle => "Circle",
-        ReasoningEffortDisplayStyle::Text => "Text",
-    }
-}
-
-fn reasoning_effort_label(effort: ReasoningEffort) -> &'static str {
+pub(in crate::thread) fn reasoning_effort_label(effort: ReasoningEffort) -> &'static str {
     match effort {
         ReasoningEffort::None => "None",
         ReasoningEffort::Minimal => "Minimal",
@@ -89,32 +72,6 @@ fn reasoning_effort_label(effort: ReasoningEffort) -> &'static str {
     }
 }
 
-pub(in crate::thread) fn reasoning_effort_icon(effort: ReasoningEffort) -> &'static str {
-    match effort {
-        ReasoningEffort::None => "○",
-        ReasoningEffort::Minimal | ReasoningEffort::Low => "◔",
-        ReasoningEffort::Medium => "◑",
-        ReasoningEffort::High => "◕",
-        ReasoningEffort::XHigh => "●",
-    }
-}
-
-pub(in crate::thread) fn reasoning_effort_option_label(
-    effort: ReasoningEffort,
-    style: ReasoningEffortDisplayStyle,
-) -> String {
-    match style {
-        ReasoningEffortDisplayStyle::Circle => reasoning_effort_icon(effort).to_string(),
-        ReasoningEffortDisplayStyle::Text => reasoning_effort_label(effort).to_string(),
-    }
-}
-
 pub(in crate::thread) fn reasoning_effort_description_label(effort: ReasoningEffort) -> String {
     reasoning_effort_label(effort).to_string()
-}
-
-pub(in crate::thread) fn reasoning_effort_style_option_label(
-    style: ReasoningEffortDisplayStyle,
-) -> String {
-    reasoning_effort_display_style_label(style).to_string()
 }

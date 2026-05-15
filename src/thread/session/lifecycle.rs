@@ -1,6 +1,7 @@
 //! Поток старта и остановки сессии: создание session, bootstrap capability и очистка.
 
 use std::collections::{HashMap, HashSet};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -28,8 +29,8 @@ use super::{
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::session_selector_preferences::{
-    apply_selector_preferences, legacy_selector_preferences_path, persist_selector_preferences,
-    restore_selector_preferences, selector_preferences_path,
+    apply_selector_preferences, persist_selector_preferences, restore_selector_preferences,
+    selector_preferences_path,
 };
 use crate::thread::session_usage_cache::{context_usage_cache_path, restore_cached_context_usage};
 use codex_app_server_protocol::{
@@ -63,6 +64,13 @@ struct BackendThreadBootstrap {
 
 fn startup_error(stage: &str, error: Error) -> Error {
     Error::internal_error().data(format!("{stage}: {error}"))
+}
+
+fn selector_preferences_error(path: &Path, error: io::Error) -> Error {
+    Error::internal_error().data(format!(
+        "failed to read selector preferences at {}: {error}. Fix or remove this file; codex-acp will not overwrite an invalid existing config.",
+        path.display()
+    ))
 }
 
 fn format_session_updated_at(updated_at: i64) -> String {
@@ -433,7 +441,7 @@ impl Thread {
         bootstrap: BackendThreadBootstrap,
         models: Vec<AppModel>,
         cached_context_usage: Option<(u64, u64)>,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let reasoning_effort =
             resolve_reasoning_effort(&models, &bootstrap.model, bootstrap.reasoning_effort);
         let thread = bootstrap.thread;
@@ -447,12 +455,9 @@ impl Thread {
         );
 
         let selector_preferences_path = selector_preferences_path(&codex_home);
-        let legacy_selector_preferences_path = legacy_selector_preferences_path(&codex_home);
         let should_materialize_selector_preferences = !selector_preferences_path.exists();
-        let selector_preferences = restore_selector_preferences(
-            &selector_preferences_path,
-            &legacy_selector_preferences_path,
-        );
+        let selector_preferences = restore_selector_preferences(&selector_preferences_path)
+            .map_err(|error| selector_preferences_error(&selector_preferences_path, error))?;
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
         let mut inner = ThreadInner {
             session_id: session_id.clone(),
@@ -479,8 +484,6 @@ impl Thread {
             current_model_provider: bootstrap.model_provider,
             service_tier: bootstrap.service_tier,
             reasoning_effort,
-            reasoning_effort_display_style: Default::default(),
-            model_display_style: Default::default(),
             model_selector: Default::default(),
             agent_labels,
             compaction_in_progress: false,
@@ -529,10 +532,10 @@ impl Thread {
                 "failed to materialize selector preferences"
             );
         }
-        Thread {
+        Ok(Thread {
             inner: Arc::new(tokio::sync::Mutex::new(inner)),
             cancel_tx,
-        }
+        })
     }
 
     async fn fork_as_new_session(
@@ -635,7 +638,7 @@ impl Thread {
         session_mcp_summary: ContextSelectorSummary,
         mut app: AppServerProcess,
         resume: ThreadResumeResponse,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let models = match app.model_list().await {
             Ok(response) => response.data,
             Err(error) => {
@@ -702,7 +705,7 @@ impl Thread {
         account_status: AccountStatus,
         mut app: AppServerProcess,
         start: ThreadStartResponse,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let models = match app.model_list().await {
             Ok(response) => response.data,
             Err(error) => {
@@ -759,7 +762,7 @@ impl Thread {
         )
         .await?;
 
-        Ok(Self::build_started_thread(
+        Self::build_started_thread(
             session_id,
             config.codex_home.clone(),
             config.bundled_skills_enabled(),
@@ -773,7 +776,7 @@ impl Thread {
             app,
             start,
         )
-        .await)
+        .await
     }
 
     // Сначала запускаем сессию app-server, чтобы последующие capability-вызовы имели валидный session id.
@@ -804,7 +807,7 @@ impl Thread {
             app,
             start,
         )
-        .await;
+        .await?;
 
         Ok((session_id, thread))
     }
@@ -850,7 +853,7 @@ impl Thread {
             }
             Err(error) => return Err(error),
         };
-        Ok(Self::build_resumed_thread(
+        Self::build_resumed_thread(
             session_id,
             config,
             client,
@@ -860,7 +863,7 @@ impl Thread {
             app,
             resume,
         )
-        .await)
+        .await
     }
 
     pub async fn fork_session(

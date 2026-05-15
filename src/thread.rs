@@ -154,8 +154,6 @@ struct ThreadInner {
     current_model_provider: String,
     service_tier: Option<ServiceTier>,
     reasoning_effort: ReasoningEffort,
-    reasoning_effort_display_style: ReasoningEffortDisplayStyle,
-    model_display_style: ModelDisplayStyle,
     model_selector: session_selector_preferences::ModelSelectorPreferences,
     agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
     compaction_in_progress: bool,
@@ -225,22 +223,6 @@ enum LimitsDisplayStyle {
     Text,
     Bars,
     Block,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ReasoningEffortDisplayStyle {
-    #[default]
-    Circle,
-    Text,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ModelDisplayStyle {
-    #[default]
-    WithPrefix,
-    WithoutPrefix,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

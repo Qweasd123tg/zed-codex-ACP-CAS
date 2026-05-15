@@ -5,14 +5,13 @@ use super::session_config::{
     CONTEXT_LIMITS_BARS_VALUE, CONTEXT_LIMITS_BLOCK_VALUE, CONTEXT_LIMITS_TEXT_VALUE,
     CONTEXT_LIMITS_VALUE, CONTEXT_PERCENT_VALUE, CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE,
     PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, find_model_for_current,
-    normalize_reasoning_effort_for_model, parse_fast_mode_value, parse_model_display_value,
-    parse_model_reasoning_value, parse_model_speed_value, parse_reasoning_effort,
-    parse_reasoning_effort_display_style, reasoning_effort_value,
+    normalize_reasoning_effort_for_model, parse_fast_mode_value, parse_model_reasoning_value,
+    parse_model_speed_value, parse_reasoning_effort, reasoning_effort_value,
 };
 use super::{
     APPROVAL_PRESETS, ContextControlDisplay, ContextDisplayStyle, DEFAULT_SESSION_MODE_ID, Error,
-    LimitsDisplayStyle, ModeKind, ModelDisplayStyle, ModelId, PLAN_SESSION_MODE_ID,
-    ReasoningEffort, ReasoningEffortDisplayStyle, SessionConfigId, SessionModeId, Thread, replay,
+    LimitsDisplayStyle, ModeKind, ModelId, PLAN_SESSION_MODE_ID, ReasoningEffort, SessionConfigId,
+    SessionModeId, Thread, replay,
 };
 use crate::thread::features::{
     collab::{remember_agent_label, warm_agent_labels_for_turns},
@@ -124,29 +123,6 @@ impl Thread {
         }
         inner.reasoning_effort = effort;
         inner.model_selector.default_reasoning_effort = Some(effort);
-        persist_selector_preferences_or_warn(&inner);
-        Ok(())
-    }
-
-    pub async fn set_reasoning_effort_display_style(
-        &self,
-        style: ReasoningEffortDisplayStyle,
-    ) -> Result<(), Error> {
-        let mut inner = self.inner.lock().await;
-        if inner.reasoning_effort_display_style == style {
-            return Ok(());
-        }
-        inner.reasoning_effort_display_style = style;
-        persist_selector_preferences_or_warn(&inner);
-        Ok(())
-    }
-
-    pub async fn set_model_display_style(&self, style: ModelDisplayStyle) -> Result<(), Error> {
-        let mut inner = self.inner.lock().await;
-        if inner.model_display_style == style {
-            return Ok(());
-        }
-        inner.model_display_style = style;
         persist_selector_preferences_or_warn(&inner);
         Ok(())
     }
@@ -311,14 +287,6 @@ impl Thread {
                     self.set_fast_mode(service_tier).await?;
                     self.notify_config_options_update().await;
                     Ok(())
-                } else if let Some(style) = parse_reasoning_effort_display_style(&value.0) {
-                    self.set_reasoning_effort_display_style(style).await?;
-                    self.notify_config_options_update().await;
-                    Ok(())
-                } else if let Some(style) = parse_model_display_value(&value.0) {
-                    self.set_model_display_style(style).await?;
-                    self.notify_config_options_update().await;
-                    Ok(())
                 } else {
                     self.set_model(ModelId::new(value.0)).await
                 }
@@ -332,14 +300,6 @@ impl Thread {
                 let effort = parse_reasoning_effort(&value.0)
                     .ok_or_else(|| Error::invalid_params().data("Unsupported reasoning effort"))?;
                 self.set_reasoning_effort(effort).await?;
-                self.notify_config_options_update().await;
-                Ok(())
-            }
-            "reasoning_effort_style" => {
-                let style = parse_reasoning_effort_display_style(&value.0).ok_or_else(|| {
-                    Error::invalid_params().data("Unsupported reasoning effort style")
-                })?;
-                self.set_reasoning_effort_display_style(style).await?;
                 self.notify_config_options_update().await;
                 Ok(())
             }

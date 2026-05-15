@@ -480,20 +480,17 @@ fn builtin_commands_include_review_and_fork() {
 
 #[test]
 fn builtin_commands_honor_slash_command_preferences() {
-    let slash_commands = SlashCommandPreferences {
-        review: false,
-        archive: false,
-        ..Default::default()
-    };
+    let slash_commands =
+        SlashCommandPreferences::from_commands(vec!["unarchive".to_string(), "status".to_string()]);
     let names = builtin_commands(&slash_commands)
         .into_iter()
         .map(|command| command.name)
         .collect::<Vec<_>>();
 
-    assert!(names.contains(&"status".to_string()));
+    assert_eq!(names[0], "unarchive");
+    assert_eq!(names[1], "status");
     assert!(!names.contains(&"review".to_string()));
     assert!(!names.contains(&"archive".to_string()));
-    assert!(names.contains(&"unarchive".to_string()));
 }
 
 #[test]

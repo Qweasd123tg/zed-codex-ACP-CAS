@@ -295,48 +295,70 @@ That script rotates `.build/codex-acp-current` and `.build/codex-acp-previous`. 
 `target/release/codex-acp` does not update the binary path if Zed is already configured to use
 `.build/codex-acp-current`.
 
-Nested selector styles and layout preferences are persisted by the adapter because ACP/Zed only
-exposes one `currentValue` per selector. The file lives under:
+Nested selector preferences are persisted by the adapter because ACP/Zed only exposes one
+`currentValue` per selector. The file lives under:
 
 ```text
 $CODEX_HOME/codex-acp/selector-preferences.json
 ```
 
-The adapter creates this file on session startup if it is missing. This preserves choices such as
-context display mode, context percent/braille style, limits text/bars/block style, model label
-style, reasoning effort display style, default reasoning effort, and compact model/effort filters
-across restarts. It also keeps visual style controls out of the lower selector menus and allows a
-conservative layout override over known selectors.
+The adapter creates this file on session startup if it is missing. Existing files are never treated
+as disposable defaults: invalid JSON/JSONC now fails session startup with the file path instead of
+being silently replaced. The file is JSON with comments (`//` and `/* ... */` are accepted; trailing
+commas are accepted). This preserves choices such as context display mode, context percent/braille style,
+limits text/bars/block style, default model/reasoning/speed, per-model and per-effort
+labels/descriptions, and compact model/effort filters across restarts. It also keeps visual style
+controls out of the lower selector menus and allows a conservative layout override over known
+selectors.
+When a selector choice is persisted, the adapter rereads the current file first and preserves manual
+per-model `name` / `description` overrides instead of regenerating model labels from memory.
 
 Default config:
 
-```json
+```jsonc
 {
-  "context_control_display": "context",
-  "context_display_style": "percent",
-  "limits_display_style": "text",
-  "model_display_style": "with_prefix",
-  "reasoning_effort_display_style": "circle",
-  "model_selector": {
-    "default_model": null,
-    "default_reasoning_effort": null,
-    "default_service_tier": null,
-    "models": {
-      "gpt-5.5": true,
-      "gpt-5.4": true,
-      "gpt-5.4-mini": true,
-      "gpt-5.3-codex": true,
-      "gpt-5.2": true
-    },
-    "reasoning_efforts": {
-      "none": false,
-      "minimal": false,
-      "low": true,
-      "medium": true,
-      "high": true,
-      "xhigh": true
-    }
+  // Display styles for compact lower-panel selectors.
+  "display": {
+    "context_control": "context",
+    "context": "percent",
+    "limits": "text"
   },
+
+  // Defaults applied when a new ACP session starts. null keeps the app-server default.
+  "defaults": {
+    "model": null,
+    "reasoning_effort": null,
+    "service_tier": null
+  },
+
+  // Model selector controls. Comment out list rows to hide them; row order controls menu order.
+  "model_selector": {
+    "models": [
+      {
+        "id": "gpt-5.5",
+        "name": "Main",
+        "description": "Main daily coding model"
+      },
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      // "gpt-5.3-codex",
+      // "gpt-5.2"
+    ],
+    "reasoning_efforts": [
+      // "none",
+      // "minimal",
+      "low",
+      "medium",
+      {
+        "id": "high",
+        "name": "High",
+        "description": "Greater reasoning depth for complex problems"
+      },
+      "xhigh"
+    ]
+  },
+
+  // Lower selector order, titles, visibility, and group order.
   "layout": {
     "order": ["permissions", "model", "context_control"],
     "permissions": {
@@ -355,90 +377,109 @@ Default config:
       "groups": ["display", "integrations", "actions"]
     }
   },
-  "slash_commands": {
-    "init": true,
-    "status": true,
-    "review": true,
-    "threads": true,
-    "resume": true,
-    "fork": true,
-    "archive": true,
-    "unarchive": true,
-    "compact": true,
-    "undo": true,
-    "plan": true,
-    "rename": true,
-    "diff": true
-  }
+
+  // Slash commands. Comment out list rows to hide/block them; row order controls Zed command order.
+  "slash_commands": [
+    "init",
+    "status",
+    "review",
+    "threads",
+    "resume",
+    "fork",
+    "archive",
+    "unarchive",
+    "compact",
+    "undo",
+    "plan",
+    "rename",
+    "diff",
+  ]
 }
 ```
 
 Example: keep `gpt-5.5` as the practical default, hide older/noisy model entries, and keep only
 medium/high effort choices in the selector:
 
-```json
+```jsonc
 {
+  "defaults": {
+    "model": "gpt-5.5",
+    "reasoning_effort": "high",
+    "service_tier": null
+  },
   "model_selector": {
-    "default_model": "gpt-5.5",
-    "default_reasoning_effort": "high",
-    "default_service_tier": null,
-    "models": {
-      "gpt-5.5": true,
-      "gpt-5.4": true,
-      "gpt-5.4-mini": true,
-      "gpt-5.3-codex": false,
-      "gpt-5.2": false
-    },
-    "reasoning_efforts": {
-      "none": false,
-      "minimal": false,
-      "low": false,
-      "medium": true,
-      "high": true,
-      "xhigh": false
-    }
+    "models": [
+      {
+        "id": "gpt-5.5",
+        "name": "5.5",
+        "description": "Main daily coding model"
+      },
+      "gpt-5.4",
+      "gpt-5.4-mini"
+      // "gpt-5.3-codex",
+      // "gpt-5.2"
+    ],
+    "reasoning_efforts": [
+      // "none",
+      // "minimal",
+      // "low",
+      "medium",
+      {
+        "id": "high",
+        "name": "много",
+        "description": "Глубже думает, но сильнее тратит лимиты"
+      }
+      // "xhigh"
+    ]
   }
 }
 ```
 
 The example is intentionally partial: any missing fields keep their current/default values.
-Do not put `//` comments into `selector-preferences.json`; the adapter reads it as strict JSON.
 
 Fields:
 
-- `context_control_display`: what the lower `Context` selector button shows.
+- `display.context_control`: what the lower `Context` selector button shows.
   Values: `context`, `limits`, `context_and_limits`.
-- `context_display_style`: compact context usage style.
+- `display.context`: compact context usage style.
   Values: `percent`, `braille`.
-- `limits_display_style`: 5-hour limit style.
+- `display.limits`: 5-hour limit style.
   Values: `text`, `bars`, `block`.
-- `model_display_style`: model label style in the lower `Model` selector.
-  Values: `with_prefix`, `without_prefix`.
-- `reasoning_effort_display_style`: effort label style.
-  Values: `text`, `circle`.
-- `model_selector.default_model`: startup default model id, or `null` to keep the app-server/session default.
-- `model_selector.default_reasoning_effort`: startup default for reasoning effort.
+- `defaults.model`: startup default model id, or `null` to keep the app-server/session default.
+- `defaults.reasoning_effort`: startup default for reasoning effort.
   Common values: `minimal`, `low`, `medium`, `high`, `xhigh`, or `null` to use the backend/model default.
-  `none` is protocol-visible mainly for plan/collaboration overrides; normal model turns may reject it.
-- `model_selector.default_service_tier`: startup default service tier.
+  `minimal` is real Codex/API config, but current app-server turns can fail with
+  `image_gen`/`web_search` enabled because those tools are not compatible with
+  `reasoning.effort = "minimal"`. `none` is protocol-visible mainly for plan/collaboration
+  overrides; in this adapter it can work for simple turns, but normal model turns may still reject it.
+- `defaults.service_tier`: startup default service tier. `null` clears any saved override and uses
+  the app-server default.
   Values: `fast`, `flex`, or `null` for the standard/default tier.
-- `model_selector.models`: model visibility table for the lower `Model` selector.
-  Values are booleans: `true` shows the model, `false` hides it.
-  The currently selected model remains visible even if listed here, so Zed never gets a
-  `currentValue` without a matching option.
-- `model_selector.reasoning_efforts`: effort visibility table for the lower `Model -> Effort`
-  group. Values are booleans. `none` and `minimal` are present as experimental/protocol entries;
+- `model_selector.models`: ordered visible model list for the lower `Model` selector.
+  Rows can be model id strings or objects with `id`, `name`, and `description`.
+  Comment out a row to hide it. The list order controls menu order.
+  `name` overrides the visible model label, `description` overrides the hover text, and the
+  currently selected model remains visible even if omitted, so Zed never gets a `currentValue`
+  without a matching option.
+  There is no separate model-label style toggle anymore.
+- `model_selector.reasoning_efforts`: ordered visible effort list for the lower `Model -> Effort`
+  group. Rows can be effort id strings or objects with `id`, `name`, and `description`.
+  Comment out a row to hide it. The list order controls menu order.
+  `name` overrides the visible effort label, `description` overrides the hover text.
+  `none` and `minimal` are present as experimental/protocol entries;
   if enabled manually, the selector will show them even when the current backend model list does
-  not advertise them. The backend may still reject unsupported combinations.
+  not advertise them. The backend may still reject unsupported combinations; observed failure:
+  `minimal` with `image_gen`/`web_search` returns an invalid-request error.
 - `layout.order`: order of lower selectors.
   Known ids: `permissions`, `model`, `context_control`.
 - `layout.<selector>.visible`: show or hide a selector.
   Values: `true`, `false`.
 - `layout.<selector>.name`: selector title shown by Zed.
 - `layout.<selector>.groups`: whitelist and order of known groups inside that selector.
-- `slash_commands.<command>`: show and allow a slash command.
-  Values: `true`, `false`. Disabled commands are hidden from Zed's command list and rejected when
-  typed manually.
+- `slash_commands`: ordered surfaced slash-command list.
+  Comment out a row to hide the command from Zed and reject it when typed manually.
+  Row order controls Zed command order. `/delete` is a hidden compatibility alias for `/archive`;
+  omit/comment `archive` to disable both.
 
 Known groups:
 
@@ -452,8 +493,7 @@ Known slash commands:
 - `/delete` is a hidden compatibility alias for `/archive`; setting `"archive": false` disables both.
 
 Unknown selector/group ids are ignored; if a group override matches nothing, the adapter keeps the
-default groups to avoid rendering an empty selector. The old
-`$CODEX_HOME/memories/codex-acp/selector-preferences.json` path is still read as a fallback.
+default groups to avoid rendering an empty selector.
 
 Example:
 
