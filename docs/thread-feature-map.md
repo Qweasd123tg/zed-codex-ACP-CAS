@@ -356,7 +356,7 @@ Command approval title не должен оставаться generic `Details` 
 | `src/thread/session/display_maps*` | Schema, materialization, persistence и JSONC parser/writer для `$CODEX_HOME/codex-acp/display-maps.json` |
 | `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, archive/unarchive picker UI, ACP `session/fork` bootstrap helper, session replay события, `SessionInfoUpdate` (`title` + `updated_at`), history replay fencing и runtime handling нижних `Context` и `Speed` selectors |
 | `src/codex_agent.rs` + `src/thread/session/lifecycle.rs` | ACP `session/fork` capability и handler поверх существующего `thread/fork` backend |
-| `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image карточек |
+| `src/thread/features/tool_events/*` | Lifecycle command/mcp/web/image/generated-image карточек |
 | `src/thread/features/tool_call_ui/*` | Эвристики вида карточки + title/raw/location payload |
 | `src/thread/features/status_mapping.rs` | app-server status -> ACP status |
 

@@ -89,7 +89,8 @@ async fn maybe_advance_fallback_for_started_item(
         | ThreadItem::McpToolCall { .. }
         | ThreadItem::CollabAgentToolCall { .. }
         | ThreadItem::WebSearch { .. }
-        | ThreadItem::ImageView { .. } => {
+        | ThreadItem::ImageView { .. }
+        | ThreadItem::ImageGeneration { .. } => {
             maybe_advance_fallback_plan(inner, turn_id, FallbackPlanPhase::Implementing).await;
         }
         _ => {}

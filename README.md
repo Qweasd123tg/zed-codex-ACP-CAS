@@ -88,7 +88,9 @@ Sub-agent and collaboration tool-call rendering:
 - ACP `session/fork` surfaced on top of native `thread/fork`
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
 - In-place `/fork` and standard ACP `session/fork` support
-- Tool call cards for command, MCP, web, image, file, and collab branches
+- Tool call cards for command, MCP, web, image, generated-image, file, and collab branches
+- Generated images are also surfaced as inline markdown images and saved under `$CODEX_HOME/codex-acp/generated-images/`.
+  This is a pragmatic adapter-side rendering path for current Zed/ACP behavior, not the ideal final contract; a future protocol/Zed path should surface generated images and saved-file links natively.
 - Clearer status surfacing through `/status` and the compact context `%` selector
 - Compact context selector summaries for session status, context usage, MCP, skills, plugins, limits, and compaction
 - More reliable context compaction in Zed: `/compact` and the compact context selector now keep draining background app-server notifications until completion/failure, so the selector should not stay stuck on `Compacting...`
@@ -165,7 +167,6 @@ Current strengths of this fork:
 Current gaps:
 
 - No full structured elicitation parity yet
-- No image-generation output-card parity with upstream `codex-acp v0.14.0` yet
 - Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
 - Default-mode fallback checkpoint rendering is intentionally pragmatic ACP UI, not a pixel-for-pixel clone of Codex CLI autoplan visuals
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
@@ -713,7 +714,7 @@ That is a Zed panel layout setting, not an ACP adapter option.
 Near-term work:
 
 - Keep refining the compact context `%` selector and `/status` report where it helps daily use
-- Audit and selectively port upstream `codex-acp v0.14.0` parity items: image-generation output cards and the terminal-output fallback memory fix
+- Audit and selectively port upstream `codex-acp v0.14.0` parity items: terminal-output fallback memory fix and the next permission/elicitation details
 - Decide the next surfaced preview flow after `/diff`, most likely `thread/read`
 
 Later candidates:

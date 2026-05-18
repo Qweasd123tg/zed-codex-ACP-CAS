@@ -2,6 +2,7 @@
 //! Модуль оставлен фасадом; конкретные сценарии вынесены по типам tool-call.
 
 use crate::thread::{SessionClient, ThreadInner, ThreadItem};
+use std::path::Path;
 
 #[path = "command.rs"]
 pub(in crate::thread) mod command;
@@ -54,6 +55,10 @@ pub(in crate::thread) async fn handle_item_started(
             web_image::emit_image_view_started(inner, id, path).await;
             None
         }
+        ThreadItem::ImageGeneration { id, status, .. } => {
+            web_image::emit_image_generation_started(inner, id, status).await;
+            None
+        }
         _ => Some(item),
     }
 }
@@ -102,6 +107,16 @@ pub(in crate::thread) async fn handle_item_completed(
             web_image::emit_web_search_completed(inner, id).await;
             None
         }
+        ThreadItem::ImageGeneration {
+            id,
+            status,
+            revised_prompt,
+            result,
+        } => {
+            web_image::emit_image_generation_completed(inner, id, status, revised_prompt, result)
+                .await;
+            None
+        }
         _ => Some(item),
     }
 }
@@ -109,6 +124,7 @@ pub(in crate::thread) async fn handle_item_completed(
 // Роутер replay-item для tool-событий.
 pub(in crate::thread) async fn replay_item(
     client: &SessionClient,
+    codex_home: &Path,
     item: ThreadItem,
 ) -> Option<ThreadItem> {
     match item {
@@ -169,6 +185,23 @@ pub(in crate::thread) async fn replay_item(
         }
         ThreadItem::ImageView { id, path } => {
             web_image::replay_image_view(client, id, path).await;
+            None
+        }
+        ThreadItem::ImageGeneration {
+            id,
+            status,
+            revised_prompt,
+            result,
+        } => {
+            web_image::replay_image_generation(
+                client,
+                codex_home,
+                id,
+                status,
+                revised_prompt,
+                result,
+            )
+            .await;
             None
         }
         _ => Some(item),

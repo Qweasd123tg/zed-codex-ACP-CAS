@@ -237,16 +237,17 @@ impl Thread {
             collab::warm_agent_labels_for_turns(&mut inner, &turns).await;
             Some((
                 inner.client.clone(),
+                inner.codex_home.clone(),
                 inner.workspace_cwd.clone(),
                 turns,
                 inner.agent_labels.clone(),
             ))
         };
 
-        let Some((client, workspace_cwd, turns, agent_labels)) = replay else {
+        let Some((client, codex_home, workspace_cwd, turns, agent_labels)) = replay else {
             return;
         };
-        replay::replay_turns(&client, &workspace_cwd, &agent_labels, turns).await;
+        replay::replay_turns(&client, &codex_home, &workspace_cwd, &agent_labels, turns).await;
 
         let mut inner = self.inner.lock().await;
         inner.history_replay_in_progress = false;

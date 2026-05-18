@@ -267,7 +267,8 @@ Paste this file into https://markmap.js.org/repl
   - ItemHandlers - src/thread/core/item_handlers.rs
 
 ## ToolEventsWebImage - src/thread/features/tool_events/web_image.rs
-- Depends on: none
+- Depends on
+  - ACP image content schema
 - Used by
   - ItemHandlers - src/thread/core/item_handlers.rs
 
@@ -306,6 +307,7 @@ Paste this file into https://markmap.js.org/repl
 - Used by: none
 
 ## WebImageReplay - src/thread/features/tool_events/web_image.rs
-- Depends on: none
+- Depends on
+  - ACP image content schema
 - Used by
   - Replay - src/thread/core/replay.rs

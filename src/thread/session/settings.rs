@@ -302,6 +302,7 @@ impl Thread {
                 replay_history.then(|| {
                     (
                         inner.client.clone(),
+                        inner.codex_home.clone(),
                         inner.workspace_cwd.clone(),
                         inner.agent_labels.clone(),
                         response.thread.turns,
@@ -310,8 +311,8 @@ impl Thread {
             )
         };
 
-        if let Some((client, workspace_cwd, agent_labels, turns)) = replay_data {
-            replay::replay_turns(&client, &workspace_cwd, &agent_labels, turns).await;
+        if let Some((client, codex_home, workspace_cwd, agent_labels, turns)) = replay_data {
+            replay::replay_turns(&client, &codex_home, &workspace_cwd, &agent_labels, turns).await;
             let mut inner = self.inner.lock().await;
             inner.history_replay_in_progress = false;
         }

@@ -24,6 +24,7 @@ use crate::thread::{
 
 struct ResumeReplayData {
     client: SessionClient,
+    codex_home: PathBuf,
     workspace_cwd: PathBuf,
     agent_labels: HashMap<String, CollabAgentLabel>,
     turns: Vec<AppTurn>,
@@ -149,6 +150,7 @@ impl Thread {
                     inner.history_replay_in_progress = true;
                     Some(ResumeReplayData {
                         client: inner.client.clone(),
+                        codex_home: inner.codex_home.clone(),
                         workspace_cwd: inner.workspace_cwd.clone(),
                         agent_labels: inner.agent_labels.clone(),
                         turns: resume.thread.turns,
@@ -164,6 +166,7 @@ impl Thread {
         if let Some(replay_data) = outcome {
             replay::replay_turns(
                 &replay_data.client,
+                &replay_data.codex_home,
                 &replay_data.workspace_cwd,
                 &replay_data.agent_labels,
                 replay_data.turns,
