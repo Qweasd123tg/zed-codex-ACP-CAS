@@ -58,6 +58,8 @@ mod server_requests;
 mod session_client;
 #[path = "thread/session/config/mod.rs"]
 mod session_config;
+#[path = "thread/session/display_maps.rs"]
+mod session_display_maps;
 #[path = "thread/session/lifecycle.rs"]
 mod session_lifecycle;
 #[path = "thread/session/selector_preferences.rs"]
@@ -158,8 +160,8 @@ struct ThreadInner {
     agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
     compaction_in_progress: bool,
     context_control_display: ContextControlDisplay,
-    context_display_style: ContextDisplayStyle,
-    limits_display_style: LimitsDisplayStyle,
+    display_maps_path: PathBuf,
+    display_maps: session_display_maps::DisplayMapsConfig,
     last_used_tokens: Option<u64>,
     total_token_usage: Option<AppTokenUsageBreakdown>,
     context_window_size: Option<u64>,
@@ -208,23 +210,6 @@ enum ContextControlDisplay {
     Context,
     Limits,
     ContextAndLimits,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ContextDisplayStyle {
-    #[default]
-    Percent,
-    Braille,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum LimitsDisplayStyle {
-    #[default]
-    Text,
-    Bars,
-    Block,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

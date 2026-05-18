@@ -28,6 +28,9 @@ use super::{
 };
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
+use crate::thread::session_display_maps::{
+    display_maps_path, persist_display_maps, restore_display_maps,
+};
 use crate::thread::session_selector_preferences::{
     apply_selector_preferences, persist_selector_preferences, restore_selector_preferences,
     selector_preferences_path,
@@ -69,6 +72,13 @@ fn startup_error(stage: &str, error: Error) -> Error {
 fn selector_preferences_error(path: &Path, error: io::Error) -> Error {
     Error::internal_error().data(format!(
         "failed to read selector preferences at {}: {error}. Fix or remove this file; codex-acp will not overwrite an invalid existing config.",
+        path.display()
+    ))
+}
+
+fn display_maps_error(path: &Path, error: io::Error) -> Error {
+    Error::internal_error().data(format!(
+        "failed to read display maps at {}: {error}. Fix or remove this file; codex-acp will not overwrite an invalid existing config.",
         path.display()
     ))
 }
@@ -458,6 +468,10 @@ impl Thread {
         let should_materialize_selector_preferences = !selector_preferences_path.exists();
         let selector_preferences = restore_selector_preferences(&selector_preferences_path)
             .map_err(|error| selector_preferences_error(&selector_preferences_path, error))?;
+        let display_maps_path = display_maps_path(&codex_home);
+        let should_materialize_display_maps = !display_maps_path.exists();
+        let display_maps = restore_display_maps(&display_maps_path)
+            .map_err(|error| display_maps_error(&display_maps_path, error))?;
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
         let mut inner = ThreadInner {
             session_id: session_id.clone(),
@@ -488,8 +502,8 @@ impl Thread {
             agent_labels,
             compaction_in_progress: false,
             context_control_display: Default::default(),
-            context_display_style: Default::default(),
-            limits_display_style: Default::default(),
+            display_maps_path,
+            display_maps,
             last_used_tokens: cached_context_usage.map(|(used, _)| used),
             total_token_usage: None,
             context_window_size: cached_context_usage.map(|(_, size)| size),
@@ -532,6 +546,15 @@ impl Thread {
                 %error,
                 path = %inner.selector_preferences_path.display(),
                 "failed to materialize selector preferences"
+            );
+        }
+        if should_materialize_display_maps
+            && let Err(error) = persist_display_maps(&inner.display_maps_path, &inner.display_maps)
+        {
+            warn!(
+                %error,
+                path = %inner.display_maps_path.display(),
+                "failed to materialize display maps"
             );
         }
         Ok(Thread {

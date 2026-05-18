@@ -1,72 +1,28 @@
 use std::io;
 
-use serde::Serialize;
+use super::DisplayMapsConfig;
 
-use super::SelectorPreferences;
-
-pub(super) fn parse_selector_preferences_jsonc(contents: &str) -> io::Result<SelectorPreferences> {
+pub(super) fn parse_display_maps_jsonc(contents: &str) -> io::Result<DisplayMapsConfig> {
     serde_json::from_str(&strip_json_trailing_commas(&strip_json_comments(contents)?))
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
 }
 
-pub(super) fn selector_preferences_jsonc(preferences: &SelectorPreferences) -> io::Result<Vec<u8>> {
-    let mut sections = Vec::new();
-    if let Some(display) = &preferences.display {
-        sections.push(jsonc_section(
-            "Display mode for the lower Context selector.",
-            "display",
-            display,
-        )?);
-    }
-    if let Some(defaults) = &preferences.defaults {
-        sections.push(jsonc_section(
-            "Defaults applied when a new ACP session starts. null keeps the app-server default.",
-            "defaults",
-            defaults,
-        )?);
-    }
-    if let Some(model_selector) = &preferences.model_selector {
-        sections.push(jsonc_section(
-            "Model selector controls. Comment out list rows to hide them; row order controls menu order.",
-            "model_selector",
-            model_selector,
-        )?);
-    }
-    if let Some(layout) = &preferences.layout {
-        sections.push(jsonc_section(
-            "Lower selector order, titles, visibility, and group order.",
-            "layout",
-            layout,
-        )?);
-    }
-    if let Some(slash_commands) = &preferences.slash_commands {
-        sections.push(jsonc_section(
-            "Slash commands. Comment out list rows to hide/block them; row order controls Zed command order.",
-            "slash_commands",
-            slash_commands,
-        )?);
-    }
-
-    let mut output = String::from("{\n");
-    output.push_str(&sections.join(",\n\n"));
-    output.push_str("\n}\n");
-    Ok(output.into_bytes())
-}
-
-fn jsonc_section<T: Serialize>(comment: &str, key: &str, value: &T) -> io::Result<String> {
-    let json = serde_json::to_string_pretty(value)
+pub(super) fn display_maps_jsonc(config: &DisplayMapsConfig) -> io::Result<Vec<u8>> {
+    let json = serde_json::to_string_pretty(config)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    let mut lines = json.lines();
-    let mut section = format!("  // {comment}\n  \"{key}\": ");
-    if let Some(first) = lines.next() {
-        section.push_str(first);
+    let mut output = String::from(
+        "{\n  // Context and account limit display maps. Values receive percentages in the 0..100 range.\n",
+    );
+    let inner = json
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .trim_matches('\n');
+    for line in inner.lines() {
+        output.push_str(line);
+        output.push('\n');
     }
-    for line in lines {
-        section.push('\n');
-        section.push_str("  ");
-        section.push_str(line);
-    }
-    Ok(section)
+    output.push_str("}\n");
+    Ok(output.into_bytes())
 }
 
 fn strip_json_comments(input: &str) -> io::Result<String> {
@@ -139,7 +95,7 @@ fn strip_json_comments(input: &str) -> io::Result<String> {
     if state == State::BlockComment {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "unterminated block comment in selector preferences",
+            "unterminated block comment in display maps",
         ));
     }
 

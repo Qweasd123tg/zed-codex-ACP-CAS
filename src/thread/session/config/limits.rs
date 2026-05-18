@@ -1,6 +1,8 @@
 //! Account rate-limit helper-ы для session_config.
 
-use crate::thread::features::resume::common::format_relative_timestamp;
+use crate::thread::{
+    features::resume::common::format_relative_timestamp, session_display_maps::DisplayMapsConfig,
+};
 use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,11 +22,12 @@ pub(in crate::thread) struct RateLimitWarning {
 
 pub(in crate::thread) fn combined_limits_status_label(
     snapshot: Option<&RateLimitSnapshot>,
+    display_maps: &DisplayMapsConfig,
 ) -> String {
     format!(
         "{} · {}",
-        five_hour_status_label(snapshot),
-        weekly_status_label(snapshot),
+        five_hour_status_label(snapshot, display_maps),
+        weekly_status_label(snapshot, display_maps),
     )
 }
 
@@ -38,25 +41,34 @@ pub(in crate::thread) fn combined_limits_reset_message(
     )
 }
 
-pub(in crate::thread) fn limits_status_description(snapshot: Option<&RateLimitSnapshot>) -> String {
+pub(in crate::thread) fn limits_status_description(
+    snapshot: Option<&RateLimitSnapshot>,
+    display_maps: &DisplayMapsConfig,
+) -> String {
     format!(
         "{}\n{}",
-        combined_limits_status_label(snapshot),
+        combined_limits_status_label(snapshot, display_maps),
         combined_limits_reset_message(snapshot)
     )
 }
 
-pub(in crate::thread) fn five_hour_status_label(snapshot: Option<&RateLimitSnapshot>) -> String {
-    format!(
-        "5h {}",
-        short_window_remaining(snapshot.and_then(|snapshot| snapshot.primary.as_ref()))
+pub(in crate::thread) fn five_hour_status_label(
+    snapshot: Option<&RateLimitSnapshot>,
+    display_maps: &DisplayMapsConfig,
+) -> String {
+    short_primary_window_remaining(
+        snapshot.and_then(|snapshot| snapshot.primary.as_ref()),
+        display_maps,
     )
 }
 
-pub(in crate::thread) fn weekly_status_label(snapshot: Option<&RateLimitSnapshot>) -> String {
-    format!(
-        "wk {}",
-        short_window_remaining(snapshot.and_then(|snapshot| snapshot.secondary.as_ref()))
+pub(in crate::thread) fn weekly_status_label(
+    snapshot: Option<&RateLimitSnapshot>,
+    display_maps: &DisplayMapsConfig,
+) -> String {
+    short_secondary_window_remaining(
+        snapshot.and_then(|snapshot| snapshot.secondary.as_ref()),
+        display_maps,
     )
 }
 
@@ -104,10 +116,21 @@ pub(in crate::thread) fn observe_rate_limit_snapshot(
     observe_window_warning_index(&mut state.primary_index, snapshot.primary.as_ref());
 }
 
-fn short_window_remaining(window: Option<&RateLimitWindow>) -> String {
-    window
-        .map(|window| format!("{}%", remaining_percent(window.used_percent)))
-        .unwrap_or_else(|| "--".to_string())
+fn short_primary_window_remaining(
+    window: Option<&RateLimitWindow>,
+    display_maps: &DisplayMapsConfig,
+) -> String {
+    display_maps
+        .render_primary_limit_remaining(window.map(|window| remaining_percent(window.used_percent)))
+}
+
+fn short_secondary_window_remaining(
+    window: Option<&RateLimitWindow>,
+    display_maps: &DisplayMapsConfig,
+) -> String {
+    display_maps.render_secondary_limit_remaining(
+        window.map(|window| remaining_percent(window.used_percent)),
+    )
 }
 
 fn take_window_warning(
@@ -256,6 +279,7 @@ mod tests {
         format_reset_delta, observe_rate_limit_snapshot, take_rate_limit_warnings,
         weekly_reset_message, weekly_status_label,
     };
+    use crate::thread::session_display_maps::DisplayMapsConfig;
     use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
     use codex_protocol::account::PlanType;
 
@@ -278,8 +302,15 @@ mod tests {
             plan_type: Some(PlanType::Plus),
         };
 
-        assert_eq!(five_hour_status_label(Some(&snapshot)), "5h 80%");
-        assert_eq!(weekly_status_label(Some(&snapshot)), "wk 94%");
+        let display_maps = DisplayMapsConfig::default();
+        assert_eq!(
+            five_hour_status_label(Some(&snapshot), &display_maps),
+            "5h 80%"
+        );
+        assert_eq!(
+            weekly_status_label(Some(&snapshot), &display_maps),
+            "wk 94%"
+        );
     }
 
     #[test]
@@ -305,8 +336,9 @@ mod tests {
         assert!(weekly_reset_message(Some(&snapshot)).contains("Weekly: resets"));
         assert!(combined_limits_reset_message(Some(&snapshot)).contains("5-hour: resets"));
         assert!(combined_limits_reset_message(Some(&snapshot)).contains("Weekly: resets"));
+        let display_maps = DisplayMapsConfig::default();
         assert_eq!(
-            combined_limits_status_label(Some(&snapshot)),
+            combined_limits_status_label(Some(&snapshot), &display_maps),
             "5h 58% · wk 95%"
         );
     }

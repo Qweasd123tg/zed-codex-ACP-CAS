@@ -7,10 +7,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::thread::{
-    AppModel, ContextControlDisplay, ContextDisplayStyle, LimitsDisplayStyle, ReasoningEffort,
-    ServiceTier, ThreadInner,
-};
+use crate::thread::{AppModel, ContextControlDisplay, ReasoningEffort, ServiceTier, ThreadInner};
 
 #[path = "selector_preferences/jsonc.rs"]
 mod jsonc;
@@ -39,8 +36,6 @@ pub(in crate::thread) struct SelectorPreferences {
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::thread) struct SelectorDisplayPreferences {
     pub(in crate::thread) context_control: Option<ContextControlDisplay>,
-    pub(in crate::thread) context: Option<ContextDisplayStyle>,
-    pub(in crate::thread) limits: Option<LimitsDisplayStyle>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,11 +65,11 @@ pub(in crate::thread) struct SelectorDefaultPreferences {
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::thread) struct ModelSelectorPreferences {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub(in crate::thread) default_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub(in crate::thread) default_reasoning_effort: Option<ReasoningEffort>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub(in crate::thread) default_service_tier: Option<ServiceTier>,
     #[serde(default)]
     pub(in crate::thread) models: Vec<ModelSelectorModelEntry>,
@@ -404,36 +399,19 @@ pub(in crate::thread) fn apply_selector_preferences(
     inner: &mut ThreadInner,
     preferences: SelectorPreferences,
 ) {
-    if let Some(display) = preferences.display {
-        if let Some(value) = display.context_control {
-            inner.context_control_display = value;
-        }
-        if let Some(value) = display.context {
-            inner.context_display_style = value;
-        }
-        if let Some(value) = display.limits {
-            inner.limits_display_style = value;
-        }
+    if let Some(display) = preferences.display
+        && let Some(value) = display.context_control
+    {
+        inner.context_control_display = value;
     }
     if let Some(value) = preferences.model_selector {
-        if let Some(model) = &value.default_model
-            && inner
-                .models
-                .iter()
-                .any(|candidate| candidate.id == *model || candidate.model == *model)
-        {
-            inner.current_model = model.clone();
-        }
-        if let Some(effort) = value.default_reasoning_effort {
-            inner.reasoning_effort = normalize_reasoning_effort_for_preferences(
-                &inner.models,
-                &inner.current_model,
-                &value,
-                effort,
-            );
-        }
-        inner.service_tier = value.default_service_tier;
+        let default_model = inner.model_selector.default_model.clone();
+        let default_reasoning_effort = inner.model_selector.default_reasoning_effort;
+        let default_service_tier = inner.model_selector.default_service_tier;
         inner.model_selector = value;
+        inner.model_selector.default_model = default_model;
+        inner.model_selector.default_reasoning_effort = default_reasoning_effort;
+        inner.model_selector.default_service_tier = default_service_tier;
     }
     if let Some(defaults) = preferences.defaults {
         if let Some(model) = defaults.model {
@@ -473,21 +451,16 @@ pub(in crate::thread) fn apply_selector_preferences(
 
 pub(in crate::thread) fn persist_selector_preferences(inner: &ThreadInner) -> std::io::Result<()> {
     let existing = read_selector_preferences(&inner.selector_preferences_path)?;
-    let mut model_selector = materialized_model_selector(
+    let model_selector = materialized_model_selector(
         existing
             .model_selector
             .as_ref()
             .unwrap_or(&inner.model_selector),
         &inner.models,
     );
-    model_selector.default_model = None;
-    model_selector.default_reasoning_effort = None;
-    model_selector.default_service_tier = None;
     let preferences = SelectorPreferences {
         display: Some(SelectorDisplayPreferences {
             context_control: Some(inner.context_control_display),
-            context: Some(inner.context_display_style),
-            limits: Some(inner.limits_display_style),
         }),
         defaults: Some(SelectorDefaultPreferences {
             model: Some(inner.model_selector.default_model.clone()),
@@ -562,10 +535,7 @@ mod tests {
         materialized_selector_layout, restore_selector_preferences, selector_preferences_path,
         write_selector_preferences,
     };
-    use crate::thread::{
-        AppModel, ContextControlDisplay, ContextDisplayStyle, LimitsDisplayStyle, ReasoningEffort,
-        ServiceTier,
-    };
+    use crate::thread::{AppModel, ContextControlDisplay, ReasoningEffort, ServiceTier};
     use std::path::Path;
 
     #[test]
@@ -589,8 +559,6 @@ mod tests {
         let preferences = super::SelectorPreferences {
             display: Some(SelectorDisplayPreferences {
                 context_control: Some(ContextControlDisplay::Limits),
-                context: Some(ContextDisplayStyle::Braille),
-                limits: Some(LimitsDisplayStyle::Block),
             }),
             defaults: Some(SelectorDefaultPreferences {
                 model: Some(Some("gpt-5.5".to_string())),
@@ -640,7 +608,7 @@ mod tests {
 
         write_selector_preferences(&path, &preferences).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("// Display styles"));
+        assert!(written.contains("// Display mode"));
         assert!(written.contains("\"defaults\""));
         let restored = restore_selector_preferences(&path).unwrap();
 
@@ -648,8 +616,6 @@ mod tests {
             .display
             .expect("display preferences should restore");
         assert_eq!(display.context_control, Some(ContextControlDisplay::Limits));
-        assert_eq!(display.context, Some(ContextDisplayStyle::Braille));
-        assert_eq!(display.limits, Some(LimitsDisplayStyle::Block));
         let defaults = restored.defaults.expect("defaults should restore");
         assert_eq!(defaults.model, Some(Some("gpt-5.5".to_string())));
         assert_eq!(defaults.reasoning_effort, Some(Some(ReasoningEffort::High)));
@@ -710,17 +676,18 @@ mod tests {
             &path,
             r#"{
               // grouped display settings
-                "display": {
-                  "context_control": "context_and_limits",
-                  "context": "braille",
-                  "limits": "block"
-                },
+	                "display": {
+	                  "context_control": "context_and_limits"
+	                },
               "defaults": {
                 "model": "gpt-5.5",
                 "reasoning_effort": "none",
                 "service_tier": null
               },
               "model_selector": {
+                "default_model": "gpt-5.2",
+                "default_reasoning_effort": "xhigh",
+                "default_service_tier": "fast",
                 "models": [
                   {
                     "id": "gpt-5.5",
@@ -748,8 +715,6 @@ mod tests {
             display.context_control,
             Some(ContextControlDisplay::ContextAndLimits)
         );
-        assert_eq!(display.context, Some(ContextDisplayStyle::Braille));
-        assert_eq!(display.limits, Some(LimitsDisplayStyle::Block));
         let defaults = restored.defaults.expect("defaults should restore");
         assert_eq!(defaults.model, Some(Some("gpt-5.5".to_string())));
         assert_eq!(defaults.reasoning_effort, Some(Some(ReasoningEffort::None)));
@@ -757,6 +722,9 @@ mod tests {
         let model_selector = restored
             .model_selector
             .expect("model selector should restore");
+        assert_eq!(model_selector.default_model, None);
+        assert_eq!(model_selector.default_reasoning_effort, None);
+        assert_eq!(model_selector.default_service_tier, None);
         assert_eq!(
             model_selector.model_name_override("gpt-5.5"),
             Some("главная")

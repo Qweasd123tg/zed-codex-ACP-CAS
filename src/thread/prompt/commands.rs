@@ -274,6 +274,7 @@ pub(super) async fn dispatch_session_command(
                         inner.context_window_size,
                         inner.context_usage_source,
                         inner.account_rate_limits.as_ref(),
+                        &inner.display_maps,
                         inner.compaction_in_progress,
                         &inner.session_mcp_summary,
                         &inner.session_skills_summary,

@@ -1,0 +1,42 @@
+{
+  // Old "block" style for the primary 5-hour limit.
+  // Buckets match the previous rounded 8-level block formatter.
+  "context": {
+    "usage": "context_percent",
+  },
+  "limits": {
+    "primary": "five_hour_block",
+    "secondary": "weekly_percent",
+  },
+  "maps": {
+    "context_percent": {
+      "kind": "template",
+      "template": "{value}%",
+      "unavailable": "---",
+    },
+    "percent": {
+      "kind": "template",
+      "template": "{value}%",
+      "unavailable": "--",
+    },
+    "five_hour_block": {
+      "kind": "thresholds",
+      "values": [
+        { "min": 0, "label": "▁" },
+        { "min": 8, "label": "▂" },
+        { "min": 22, "label": "▃" },
+        { "min": 36, "label": "▄" },
+        { "min": 50, "label": "▅" },
+        { "min": 65, "label": "▆" },
+        { "min": 79, "label": "▇" },
+        { "min": 93, "label": "█" },
+      ],
+      "unavailable": "▁",
+    },
+    "weekly_percent": {
+      "kind": "template",
+      "template": "wk {value}%",
+      "unavailable": "wk --",
+    },
+  },
+}

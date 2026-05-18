@@ -69,6 +69,7 @@ Sub-agent and collaboration tool-call rendering:
   - `list_sessions`
 - Session-scoped MCP passthrough for `stdio` and `http`
 - History replay after `load_session` and `resume_session`
+- ACP `agent_info.version` is published from the package version, so recent Zed External Agent settings can show the running adapter version
 - Session commands:
   - `/init`
   - `/status`
@@ -164,6 +165,7 @@ Current strengths of this fork:
 Current gaps:
 
 - No full structured elicitation parity yet
+- No image-generation output-card parity with upstream `codex-acp v0.14.0` yet
 - Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
 - Default-mode fallback checkpoint rendering is intentionally pragmatic ACP UI, not a pixel-for-pixel clone of Codex CLI autoplan visuals
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
@@ -180,8 +182,9 @@ Current gaps:
 - `Speed` is available inside the adapter `Model` selector. It primarily exposes `service_tier=fast`, with `flex` available as the alternate Codex service tier. Zed's native toolbar fast-mode button is currently native-thread/staff/model-gated and is not a generic custom ACP control, so custom ACP users should use the adapter selector instead.
 - The grouped `Model` selector is an adapter-side workaround for current ACP/Zed limits. ACP `select` exposes only one `current_value`, and current Zed does not provide native multi-current state, toolbar overflow control, or nested selector state for external ACP agents. The adapter therefore marks active nested entries such as reasoning and speed with short labels like `★ High` / `★ Fast` and keeps details in option descriptions.
 - `/undo` itself works, and the adapter also exposes rollback via ACP ext methods, but the visual rewind/edit button and the pencil-style edit UX in current `Zed` still depend on a client-side ACP fix: the external-agent ACP bridge does not wire `truncate()` / rollback ext-methods for this flow yet. In practice that means patching or rebuilding `Zed` if you want the native button UX
-- Zed Agent Panel message queueing is asymmetric today: native `Zed Agent` can send queued messages at turn/tool-call boundaries, but external ACP agents receive queued messages only after the current generation finishes. The pinned Codex app-server has `turn/steer`, so the backend can accept mid-turn steering, but this adapter cannot expose a real CLI-style "send before the next tool call" UX until `Zed` forwards queued external-agent prompts before generation completion.
-- Recent Zed Agent UI can edit chat names through the session `title` when that client-side path is enabled for external agents. The adapter already publishes titles through `SessionInfoUpdate` and `/rename`; inline title editing itself is controlled by Zed.
+- Zed Agent Panel message queueing is asymmetric today: native `Zed Agent` can send queued messages at turn/tool-call boundaries, but external ACP agents receive queued messages only after the current generation finishes. Zed `1.3.0` fixed the stray finished notification before a queued message is sent, but not the external-agent boundary itself. The pinned Codex app-server has `turn/steer`, so the backend can accept mid-turn steering, but this adapter cannot expose a real CLI-style "send before the next tool call" UX until `Zed` forwards queued external-agent prompts before generation completion.
+- Recent Zed releases center external agents around the Threads Sidebar, Parallel Agents, ACP Registry installs, and External Agent settings. This adapter should fit that native shell instead of duplicating thread/worktree orchestration inside slash commands.
+- Zed `1.3.0` / `zed-industries/zed#56446` added client-side editing for external-agent thread titles. In current Zed this is stored as Zed sidebar `title_override` metadata for ACP external agents; it does not call back into the adapter to persist the Codex backend thread name. Use `/rename` when the rename must persist in Codex thread history or be visible to other clients.
 - The selected-agent / `New Thread` trigger in current `Zed` can show a visibly odd pulsing state that appears only while the pointer is moving. In practice this looks like a client-side repaint/animation quirk, not an ACP startup stall in the adapter
 - While history replay is restoring after `load_session` or replaying `/undo`, new prompts and session commands are intentionally fenced until replay finishes; this avoids overlapping turn/replay state in one ACP session
 - Linux is the most tested platform right now
@@ -304,8 +307,8 @@ $CODEX_HOME/codex-acp/selector-preferences.json
 The adapter creates this file on session startup if it is missing. Existing files are never treated
 as disposable defaults: invalid JSON/JSONC now fails session startup with the file path instead of
 being silently replaced. The file is JSON with comments (`//` and `/* ... */` are accepted; trailing
-commas are accepted). This preserves choices such as context display mode, context percent/braille style,
-limits text/bars/block style, default model/reasoning/speed, per-model and per-effort
+commas are accepted). This preserves choices such as the lower Context selector display mode,
+default model/reasoning/speed, per-model and per-effort
 labels/descriptions, and compact model/effort filters across restarts. It also keeps visual style
 controls out of the lower selector menus and allows a conservative layout override over known
 selectors.
@@ -316,11 +319,9 @@ Default config:
 
 ```jsonc
 {
-  // Display styles for compact lower-panel selectors.
+  // Display mode for the lower Context selector.
   "display": {
-    "context_control": "context",
-    "context": "percent",
-    "limits": "text"
+    "context_control": "context"
   },
 
   // Defaults applied when a new ACP session starts. null keeps the app-server default.
@@ -396,6 +397,84 @@ Default config:
 }
 ```
 
+Compact context and account-limit labels use a separate JSONC file because they are pure
+`percent -> label` maps rather than selector state:
+
+```text
+$CODEX_HOME/codex-acp/display-maps.json
+```
+
+The adapter creates a minimal default that renders context usage and app-server remaining quota as
+percent labels:
+
+```jsonc
+{
+  // Context and account limit display maps. Values receive percentages in the 0..100 range.
+  "context": {
+    "usage": "context_percent"
+  },
+  "limits": {
+    "primary": "five_hour_percent",
+    "secondary": "weekly_percent"
+  },
+  "maps": {
+    "context_percent": {
+      "kind": "template",
+      "template": "{value}%",
+      "unavailable": "---"
+    },
+    "context_braille": {
+      "kind": "thresholds",
+      "values": [
+        { "min": 0, "label": "⠀" },
+        { "min": 7, "label": "⢀" },
+        { "min": 19, "label": "⣀" },
+        { "min": 32, "label": "⣄" },
+        { "min": 44, "label": "⣤" },
+        { "min": 57, "label": "⣦" },
+        { "min": 69, "label": "⣶" },
+        { "min": 82, "label": "⣷" },
+        { "min": 94, "label": "⣿" }
+      ],
+      "unavailable": "⠀"
+    },
+    "percent": {
+      "kind": "template",
+      "template": "{value}%",
+      "unavailable": "--"
+    },
+    "five_hour_percent": {
+      "kind": "template",
+      "template": "5h {value}%",
+      "unavailable": "5h --"
+    },
+    "weekly_percent": {
+      "kind": "template",
+      "template": "wk {value}%",
+      "unavailable": "wk --"
+    }
+  }
+}
+```
+
+Maps can be `template`, `exact`, or `thresholds`. `exact` maps individual integer percentages;
+`thresholds` uses the highest row where `min <= value`. The context percent is used context, while
+limit percentages are remaining quota. The `5h` / `wk` prefixes are not special runtime labels;
+they are just part of the default templates above. Selected map ids in `context.usage`,
+`limits.primary`, and `limits.secondary` must exist in `maps`; a partial or stale file fails startup
+instead of silently falling back to a hardcoded display.
+
+Ready-to-use examples for the previous compact display variants are kept in:
+
+- `examples/display-maps/context-percent.jsonc`
+- `examples/display-maps/context-braille.jsonc`
+- `examples/display-maps/text.jsonc`
+- `examples/display-maps/bars.jsonc`
+- `examples/display-maps/block.jsonc`
+
+Copy one of them to `$CODEX_HOME/codex-acp/display-maps.json` if you want that style. These files
+are tested fixtures, so their JSONC shape stays aligned with the runtime loader.
+
 Example: keep `gpt-5.5` as the practical default, hide older/noisy model entries, and keep only
 medium/high effort choices in the selector:
 
@@ -440,10 +519,6 @@ Fields:
 
 - `display.context_control`: what the lower `Context` selector button shows.
   Values: `context`, `limits`, `context_and_limits`.
-- `display.context`: compact context usage style.
-  Values: `percent`, `braille`.
-- `display.limits`: 5-hour limit style.
-  Values: `text`, `bars`, `block`.
 - `defaults.model`: startup default model id, or `null` to keep the app-server/session default.
 - `defaults.reasoning_effort`: startup default for reasoning effort.
   Common values: `minimal`, `low`, `medium`, `high`, `xhigh`, or `null` to use the backend/model default.
@@ -617,6 +692,8 @@ User-facing documentation stays in this README. Deeper project notes are kept se
 
 Current Zed-specific UI caveats are tracked in [docs/upstream-feature-matrix.md](docs/upstream-feature-matrix.md), especially around approval-card layout and command/review/session UX that the adapter alone cannot fully control.
 
+The latest local upstream reference sweep was run on `2026-05-16`. At that point Zed stable was `1.2.6`, preview was `1.3.3`, official `codex-acp` was `v0.14.0`, and ACP had moved to `v0.13.0` with v2/MCP-over-ACP scaffolding. Treat dependency updates as scoped migrations, not a mechanical version bump.
+
 If Zed's agent input area or lower selector toolbar looks squeezed, enable Zed's content-width
 limit:
 
@@ -636,6 +713,7 @@ That is a Zed panel layout setting, not an ACP adapter option.
 Near-term work:
 
 - Keep refining the compact context `%` selector and `/status` report where it helps daily use
+- Audit and selectively port upstream `codex-acp v0.14.0` parity items: image-generation output cards and the terminal-output fallback memory fix
 - Decide the next surfaced preview flow after `/diff`, most likely `thread/read`
 
 Later candidates:

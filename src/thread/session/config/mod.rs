@@ -1,13 +1,13 @@
 //! Маппинг конфигурации сессии между ACP-опциями и runtime-настройками Codex app-server.
 
+use crate::thread::session_display_maps::DisplayMapsConfig;
 use crate::thread::session_selector_preferences::{
     ModelSelectorPreferences, SelectorLayoutPreferences,
 };
 use crate::thread::{
-    AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
-    ContextUsageSource, LimitsDisplayStyle, ModeKind, PLAN_SESSION_MODE_ID, ReasoningEffort,
-    ServiceTier, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectGroup,
-    SessionConfigSelectOption, ThreadInner,
+    AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextUsageSource,
+    ModeKind, PLAN_SESSION_MODE_ID, ReasoningEffort, ServiceTier, SessionConfigOption,
+    SessionConfigOptionCategory, SessionConfigSelectGroup, SessionConfigSelectOption, ThreadInner,
 };
 
 #[path = "context.rs"]
@@ -58,8 +58,7 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) current_usage_percent: Option<u64>,
     pub(in crate::thread) current_context_usage_source: Option<ContextUsageSource>,
     pub(in crate::thread) current_context_display: ContextControlDisplay,
-    pub(in crate::thread) current_context_display_style: ContextDisplayStyle,
-    pub(in crate::thread) current_limits_display_style: LimitsDisplayStyle,
+    pub(in crate::thread) display_maps: &'a DisplayMapsConfig,
     pub(in crate::thread) current_account_rate_limits:
         Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
     pub(in crate::thread) compaction_in_progress: bool,
@@ -88,8 +87,7 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         current_usage_percent: usage_percent(inner.last_used_tokens, inner.context_window_size),
         current_context_usage_source: inner.context_usage_source,
         current_context_display: inner.context_control_display,
-        current_context_display_style: inner.context_display_style,
-        current_limits_display_style: inner.limits_display_style,
+        display_maps: &inner.display_maps,
         current_account_rate_limits: inner.account_rate_limits.as_ref(),
         compaction_in_progress: inner.compaction_in_progress,
         approval: inner.approval_policy,
@@ -117,8 +115,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         current_usage_percent,
         current_context_usage_source,
         current_context_display,
-        current_context_display_style,
-        current_limits_display_style,
+        display_maps,
         current_account_rate_limits,
         compaction_in_progress,
         approval,
@@ -240,8 +237,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                     current_context_window_size,
                     current_usage_percent,
                     current_context_usage_source,
-                    current_context_display_style,
-                    current_limits_display_style,
+                    display_maps,
                     current_account_rate_limits,
                     compaction_in_progress,
                     session_mcp_summary,
@@ -256,6 +252,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             current_usage_percent,
             current_context_usage_source,
             current_account_rate_limits,
+            display_maps,
             compaction_in_progress,
         )),
     ));
@@ -296,6 +293,7 @@ fn context_selector_description(
     usage_percent: Option<u64>,
     usage_source: Option<ContextUsageSource>,
     rate_limits: Option<&codex_app_server_protocol::RateLimitSnapshot>,
+    display_maps: &DisplayMapsConfig,
     compaction_in_progress: bool,
 ) -> String {
     let mut sections = vec![
@@ -306,7 +304,7 @@ fn context_selector_description(
             usage_source,
             compaction_in_progress,
         ),
-        limits::limits_status_description(rate_limits),
+        limits::limits_status_description(rate_limits, display_maps),
     ];
 
     if compaction_in_progress {
@@ -317,12 +315,10 @@ fn context_selector_description(
 }
 
 pub(super) use context::{
-    AccountStatus, CONTEXT_BRAILLE_VALUE, CONTEXT_COMBINED_VALUE, CONTEXT_COMPACT_VALUE,
-    CONTEXT_LIMITS_BARS_VALUE, CONTEXT_LIMITS_BLOCK_VALUE, CONTEXT_LIMITS_TEXT_VALUE,
-    CONTEXT_LIMITS_VALUE, CONTEXT_PERCENT_VALUE, CONTEXT_STATUS_VALUE, ContextSelectorSummary,
-    MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
-    build_account_status, build_mcp_summary, build_plugins_summary, build_skills_summary,
-    full_status_report,
+    AccountStatus, CONTEXT_COMBINED_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE,
+    CONTEXT_STATUS_VALUE, ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE,
+    SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, build_account_status, build_mcp_summary,
+    build_plugins_summary, build_skills_summary, full_status_report,
 };
 pub(super) use fast_mode::{
     parse_fast_mode_value, service_tier_override_from_config, service_tier_override_from_session,
@@ -360,8 +356,8 @@ mod tests {
         SelectorLayoutEntry, SelectorLayoutPreferences,
     };
     use crate::thread::{
-        AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextDisplayStyle,
-        ContextUsageSource, LimitsDisplayStyle, ModeKind, ReasoningEffort, ServiceTier,
+        AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextUsageSource,
+        ModeKind, ReasoningEffort, ServiceTier,
     };
     use agent_client_protocol::schema::{
         SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
@@ -407,8 +403,7 @@ mod tests {
             current_usage_percent: None,
             current_context_usage_source: None::<ContextUsageSource>,
             current_context_display: ContextControlDisplay::Context,
-            current_context_display_style: ContextDisplayStyle::Percent,
-            current_limits_display_style: LimitsDisplayStyle::Text,
+            display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
@@ -506,8 +501,7 @@ mod tests {
             current_usage_percent: None,
             current_context_usage_source: None::<ContextUsageSource>,
             current_context_display: ContextControlDisplay::Context,
-            current_context_display_style: ContextDisplayStyle::Percent,
-            current_limits_display_style: LimitsDisplayStyle::Text,
+            display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
@@ -627,8 +621,7 @@ mod tests {
             current_usage_percent: None,
             current_context_usage_source: None::<ContextUsageSource>,
             current_context_display: ContextControlDisplay::Context,
-            current_context_display_style: ContextDisplayStyle::Percent,
-            current_limits_display_style: LimitsDisplayStyle::Text,
+            display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
@@ -730,8 +723,7 @@ mod tests {
             current_usage_percent: Some(76),
             current_context_usage_source: Some(ContextUsageSource::Live),
             current_context_display: ContextControlDisplay::Limits,
-            current_context_display_style: ContextDisplayStyle::Percent,
-            current_limits_display_style: LimitsDisplayStyle::Text,
+            display_maps: &Default::default(),
             current_account_rate_limits: Some(&rate_limits),
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
@@ -794,8 +786,7 @@ mod tests {
             current_usage_percent: Some(50),
             current_context_usage_source: Some(ContextUsageSource::Cached),
             current_context_display: ContextControlDisplay::Context,
-            current_context_display_style: ContextDisplayStyle::Percent,
-            current_limits_display_style: LimitsDisplayStyle::Text,
+            display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: true,
             approval: AppAskForApproval::Never,
@@ -899,8 +890,7 @@ mod tests {
             current_usage_percent: Some(50),
             current_context_usage_source: Some(ContextUsageSource::Cached),
             current_context_display: ContextControlDisplay::Context,
-            current_context_display_style: ContextDisplayStyle::Percent,
-            current_limits_display_style: LimitsDisplayStyle::Text,
+            display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
             approval: AppAskForApproval::OnRequest,
