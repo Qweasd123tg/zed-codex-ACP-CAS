@@ -248,9 +248,7 @@ enum SessionCommand {
     Review {
         instructions: Option<String>,
     },
-    Threads {
-        query: Option<String>,
-    },
+    Threads,
     Resume {
         thread_id: Option<String>,
         include_history: bool,

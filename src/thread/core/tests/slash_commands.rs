@@ -6,18 +6,7 @@ fn parses_threads_command() {
     let prompt: Vec<ContentBlock> = vec!["/threads".into()];
     assert_eq!(
         parse_session_command(&prompt),
-        Some(SessionCommand::Threads { query: None })
-    );
-}
-
-#[test]
-fn parses_threads_command_with_preview_query() {
-    let prompt: Vec<ContentBlock> = vec!["/threads thread_123".into()];
-    assert_eq!(
-        parse_session_command(&prompt),
-        Some(SessionCommand::Threads {
-            query: Some("thread_123".to_string()),
-        })
+        Some(SessionCommand::Threads)
     );
 }
 

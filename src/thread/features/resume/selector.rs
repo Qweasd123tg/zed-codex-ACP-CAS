@@ -15,9 +15,7 @@ use codex_app_server_protocol::{Thread as AppThread, ThreadSortKey};
 use serde_json::json;
 use tracing::warn;
 
-use super::common::{
-    format_relative_timestamp, list_all_threads, thread_display_title, thread_matches_query,
-};
+use super::common::{format_relative_timestamp, list_all_threads, thread_display_title};
 use crate::thread::{RESUME_CANCEL_OPTION_ID, Thread, ThreadInner};
 
 enum ResumeSelection {
@@ -206,6 +204,18 @@ fn next_resume_selector_tool_call_id() -> String {
         .unwrap_or_default()
         .as_nanos();
     format!("resume-selector-{nanos}")
+}
+
+fn thread_matches_query(thread: &AppThread, query: &str) -> bool {
+    if thread.id.contains(query) {
+        return true;
+    }
+    let needle = query.to_lowercase();
+    thread.preview.to_lowercase().contains(&needle)
+        || thread
+            .name
+            .as_ref()
+            .is_some_and(|name| name.to_lowercase().contains(&needle))
 }
 
 fn format_resume_option_label(thread: &AppThread) -> String {

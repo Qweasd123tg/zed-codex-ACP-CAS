@@ -80,18 +80,6 @@ pub(in crate::thread) fn thread_display_title(thread: &Thread) -> String {
     crate::thread::prompt_commands::normalize_preview(base)
 }
 
-pub(in crate::thread) fn thread_matches_query(thread: &Thread, query: &str) -> bool {
-    if thread.id.contains(query) {
-        return true;
-    }
-    let needle = query.to_lowercase();
-    thread.preview.to_lowercase().contains(&needle)
-        || thread
-            .name
-            .as_ref()
-            .is_some_and(|name| name.to_lowercase().contains(&needle))
-}
-
 fn format_past_duration(delta: u64) -> String {
     const MINUTE: u64 = 60;
     const HOUR: u64 = 60 * MINUTE;

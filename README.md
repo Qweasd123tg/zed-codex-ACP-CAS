@@ -74,7 +74,7 @@ Sub-agent and collaboration tool-call rendering:
   - `/init`
   - `/status`
   - `/review`
-  - `/threads` and `/threads <query>` for read-only thread preview
+  - `/threads`
   - `/resume`
   - `/fork`
   - `/archive`
@@ -85,7 +85,6 @@ Sub-agent and collaboration tool-call rendering:
   - `/plan`
   - `/diff`
 - Better thread title handling for resume/archive/rename/fork flows
-- Read-only `thread/read` preview through `/threads <partial_id_or_title>`, without switching the active ACP session
 - ACP `session/fork` surfaced on top of native `thread/fork`
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
 - In-place `/fork` and standard ACP `session/fork` support
@@ -716,7 +715,7 @@ Near-term work:
 
 - Keep refining the compact context `%` selector and `/status` report where it helps daily use
 - Audit and selectively port upstream `codex-acp v0.14.0` parity items: terminal-output fallback memory fix and the next permission/elicitation details
-- Keep the `/threads <query>` read-only preview compact and useful without turning it into a second resume flow
+- Decide the next surfaced preview flow after `/diff`, most likely `thread/read`
 
 Later candidates:
 

@@ -200,8 +200,7 @@ Paste this file into https://markmap.js.org/repl
   - ResumeSelector - src/thread/features/resume/selector.rs
 
 ## ResumeListing - src/thread/features/resume/listing.rs
-- Depends on
-  - AppServer - src/app_server.rs
+- Depends on: none
 - Used by
   - PromptFlow - src/thread/prompt/flow.rs
 
