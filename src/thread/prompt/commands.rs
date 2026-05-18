@@ -153,9 +153,14 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         return Some(parse_diff_args(rest));
     }
 
+    if let Some(rest) = slash_command_rest(text, "/threads") {
+        return Some(SessionCommand::Threads {
+            query: (!rest.is_empty()).then(|| rest.to_string()),
+        });
+    }
+
     let mut parts = text.split_whitespace();
     match parts.next()? {
-        "/threads" => Some(SessionCommand::Threads),
         "/compact" => Some(SessionCommand::Compact),
         "/undo" => {
             let num_turns = parts
@@ -284,8 +289,8 @@ pub(super) async fn dispatch_session_command(
                 .await;
             Ok(CommandDispatchOutcome::Stop(StopReason::EndTurn))
         }
-        SessionCommand::Threads => Ok(CommandDispatchOutcome::Stop(
-            resume::listing::handle_threads_command(inner).await?,
+        SessionCommand::Threads { query } => Ok(CommandDispatchOutcome::Stop(
+            resume::listing::handle_threads_command(inner, query).await?,
         )),
         SessionCommand::Review { instructions } => {
             match session::review::handle_review_command(inner, instructions).await? {
@@ -336,7 +341,7 @@ pub(super) fn session_command_name(command: &SessionCommand) -> &'static str {
     match command {
         SessionCommand::Init { .. } => "init",
         SessionCommand::Status { .. } => "status",
-        SessionCommand::Threads => "threads",
+        SessionCommand::Threads { .. } => "threads",
         SessionCommand::Review { .. } => "review",
         SessionCommand::Resume { .. } => "resume",
         SessionCommand::Archive { .. } => "archive",
@@ -379,7 +384,13 @@ pub(super) fn builtin_commands(slash_commands: &SlashCommandPreferences) -> Vec<
         .input(AvailableCommandInput::Unstructured(
             UnstructuredCommandInput::new("optional custom review instructions"),
         )),
-        AvailableCommand::new("threads", "List saved Codex threads for this account"),
+        AvailableCommand::new(
+            "threads",
+            "List saved Codex threads, or preview one with `/threads <partial_id_or_title>`",
+        )
+        .input(AvailableCommandInput::Unstructured(
+            UnstructuredCommandInput::new("optional partial thread id or title"),
+        )),
         AvailableCommand::new(
             "resume",
             "Resume a thread and replay history. Add `--no-history` for a clean ACP chat switch",
