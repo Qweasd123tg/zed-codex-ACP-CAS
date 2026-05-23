@@ -124,7 +124,7 @@ pub(in crate::thread) async fn handle_item_completed(
 // Роутер replay-item для tool-событий.
 pub(in crate::thread) async fn replay_item(
     client: &SessionClient,
-    codex_home: &Path,
+    cas_home: &Path,
     item: ThreadItem,
 ) -> Option<ThreadItem> {
     match item {
@@ -195,7 +195,7 @@ pub(in crate::thread) async fn replay_item(
         } => {
             web_image::replay_image_generation(
                 client,
-                codex_home,
+                cas_home,
                 id,
                 status,
                 revised_prompt,

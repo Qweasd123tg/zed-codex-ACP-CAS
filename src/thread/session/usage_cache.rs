@@ -20,11 +20,8 @@ struct ContextUsageCacheFile {
     threads: HashMap<String, CachedUsageEntry>,
 }
 
-pub(in crate::thread) fn context_usage_cache_path(codex_home: &Path) -> PathBuf {
-    codex_home
-        .join("memories")
-        .join("codex-acp")
-        .join("context-usage-cache.json")
+pub(in crate::thread) fn context_usage_cache_path(cas_home: &Path) -> PathBuf {
+    cas_home.join("context-usage-cache.json")
 }
 
 pub(in crate::thread) fn restore_cached_context_usage(
@@ -111,14 +108,11 @@ mod tests {
     }
 
     #[test]
-    fn cache_path_uses_codex_memories_subdir() {
-        let path = context_usage_cache_path(Path::new("/tmp/codex-home"));
+    fn cache_path_uses_cas_home() {
+        let path = context_usage_cache_path(Path::new("/tmp/.codex-cas"));
         assert_eq!(
             path,
-            Path::new("/tmp/codex-home")
-                .join("memories")
-                .join("codex-acp")
-                .join("context-usage-cache.json")
+            Path::new("/tmp/.codex-cas").join("context-usage-cache.json")
         );
     }
 

@@ -189,8 +189,8 @@ impl PercentDisplayMap {
     }
 }
 
-pub(in crate::thread) fn display_maps_path(codex_home: &Path) -> PathBuf {
-    codex_home.join("codex-acp").join("display-maps.json")
+pub(in crate::thread) fn display_maps_path(cas_home: &Path) -> PathBuf {
+    cas_home.join("display-maps.json")
 }
 
 pub(in crate::thread) fn restore_display_maps(path: &Path) -> std::io::Result<DisplayMapsConfig> {
@@ -506,14 +506,9 @@ mod tests {
     }
 
     #[test]
-    fn writes_default_display_maps_to_codex_acp_subdir() {
-        let path = display_maps_path(Path::new("/tmp/codex-home"));
-        assert_eq!(
-            path,
-            Path::new("/tmp/codex-home")
-                .join("codex-acp")
-                .join("display-maps.json")
-        );
+    fn writes_default_display_maps_to_cas_home() {
+        let path = display_maps_path(Path::new("/tmp/.codex-cas"));
+        assert_eq!(path, Path::new("/tmp/.codex-cas").join("display-maps.json"));
 
         let temp_path = std::env::temp_dir().join(format!(
             "codex-acp-display-maps-write-{}.json",

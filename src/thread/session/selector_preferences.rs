@@ -383,10 +383,8 @@ fn default_slash_commands() -> [&'static str; 13] {
     ]
 }
 
-pub(in crate::thread) fn selector_preferences_path(codex_home: &Path) -> PathBuf {
-    codex_home
-        .join("codex-acp")
-        .join("selector-preferences.json")
+pub(in crate::thread) fn selector_preferences_path(cas_home: &Path) -> PathBuf {
+    cas_home.join("selector-preferences.json")
 }
 
 pub(in crate::thread) fn restore_selector_preferences(
@@ -539,13 +537,11 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn preferences_path_uses_codex_acp_subdir() {
-        let path = selector_preferences_path(Path::new("/tmp/codex-home"));
+    fn preferences_path_uses_cas_home() {
+        let path = selector_preferences_path(Path::new("/tmp/.codex-cas"));
         assert_eq!(
             path,
-            Path::new("/tmp/codex-home")
-                .join("codex-acp")
-                .join("selector-preferences.json")
+            Path::new("/tmp/.codex-cas").join("selector-preferences.json")
         );
     }
 

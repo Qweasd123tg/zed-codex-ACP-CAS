@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing_subscriber::EnvFilter;
 
+mod adapter_home;
 mod app_server;
 mod codex_agent;
 mod thread;

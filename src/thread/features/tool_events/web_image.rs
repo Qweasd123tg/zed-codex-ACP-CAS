@@ -91,7 +91,7 @@ pub(in crate::thread) async fn emit_image_generation_completed(
     result: String,
 ) {
     let tool_status = image_generation_tool_status(&status);
-    let saved_path = save_generated_image(&inner.codex_home, &id, result.as_str());
+    let saved_path = save_generated_image(&inner.cas_home, &id, result.as_str());
     emit_inline_generated_image(&inner.client, result.as_str()).await;
     let content = image_generation_content(
         revised_prompt.as_deref(),
@@ -165,13 +165,13 @@ pub(in crate::thread) async fn replay_image_view(client: &SessionClient, id: Str
 // Replay-рендер генерации изображения.
 pub(in crate::thread) async fn replay_image_generation(
     client: &SessionClient,
-    codex_home: &Path,
+    cas_home: &Path,
     id: String,
     status: String,
     revised_prompt: Option<String>,
     result: String,
 ) {
-    let saved_path = save_generated_image(codex_home, &id, result.as_str());
+    let saved_path = save_generated_image(cas_home, &id, result.as_str());
     emit_inline_generated_image(client, result.as_str()).await;
     let raw_output = image_generation_raw_output(
         &status,
@@ -268,8 +268,8 @@ fn image_generation_tool_title(saved_path: Option<&Path>) -> String {
     }
 }
 
-fn save_generated_image(codex_home: &Path, id: &str, result: &str) -> Option<PathBuf> {
-    if result.is_empty() || codex_home.as_os_str().is_empty() {
+fn save_generated_image(cas_home: &Path, id: &str, result: &str) -> Option<PathBuf> {
+    if result.is_empty() || cas_home.as_os_str().is_empty() {
         return None;
     }
     let bytes = match decode_image_base64(result) {
@@ -279,7 +279,7 @@ fn save_generated_image(codex_home: &Path, id: &str, result: &str) -> Option<Pat
             return None;
         }
     };
-    let path = generated_image_path(codex_home, id);
+    let path = generated_image_path(cas_home, id);
     if let Some(parent) = path.parent()
         && let Err(error) = fs::create_dir_all(parent)
     {
@@ -299,9 +299,8 @@ fn save_generated_image(codex_home: &Path, id: &str, result: &str) -> Option<Pat
     Some(path)
 }
 
-fn generated_image_path(codex_home: &Path, id: &str) -> PathBuf {
-    codex_home
-        .join("codex-acp")
+fn generated_image_path(cas_home: &Path, id: &str) -> PathBuf {
+    cas_home
         .join("generated-images")
         .join(format!("{}.png", safe_image_id(id)))
 }
@@ -440,9 +439,8 @@ mod tests {
         );
         assert_eq!(safe_image_id("../bad id"), "___bad_id");
         assert_eq!(
-            generated_image_path(std::path::Path::new("/tmp/codex-home"), "ig:1"),
-            std::path::Path::new("/tmp/codex-home")
-                .join("codex-acp")
+            generated_image_path(std::path::Path::new("/tmp/.codex-cas"), "ig:1"),
+            std::path::Path::new("/tmp/.codex-cas")
                 .join("generated-images")
                 .join("ig_1.png")
         );

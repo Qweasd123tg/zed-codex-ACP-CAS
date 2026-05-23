@@ -85,11 +85,10 @@ Sub-agent and collaboration tool-call rendering:
   - `/plan`
   - `/diff`
 - Better thread title handling for resume/archive/rename/fork flows
-- ACP `session/fork` surfaced on top of native `thread/fork`
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
-- In-place `/fork` and standard ACP `session/fork` support
+- Standard ACP `session/fork` plus practical in-place `/fork` support on top of native `thread/fork`
 - Tool call cards for command, MCP, web, image, generated-image, file, and collab branches
-- Generated images are also surfaced as inline markdown images and saved under `$CODEX_HOME/codex-acp/generated-images/`.
+- Generated images are also surfaced as inline markdown images and saved under `~/.codex-cas/generated-images/`.
   This is a pragmatic adapter-side rendering path for current Zed/ACP behavior, not the ideal final contract; a future protocol/Zed path should surface generated images and saved-file links natively.
 - Clearer status surfacing through `/status` and the compact context `%` selector
 - Compact context selector summaries for session status, context usage, MCP, skills, plugins, limits, and compaction
@@ -158,7 +157,6 @@ Current strengths of this fork:
 - Inline review flows backed by native `review/start`
 - Practical thread switching with native `Zed` `New Thread`, `/fork`, `/resume`, and archive-triggered replacement
 - Standard ACP `session/fork` surfaced separately from the in-place slash `/fork` flow
-- Practical plan mode support
 - Canonical session status surfacing through `/status` plus the compact context `%` selector
 - `plugins` now sit alongside `status`, `MCP`, `skills`, and limits in the context selector UX
 - `Speed` is surfaced inside the grouped `Model` selector over Codex `service_tier` and carried through start, resume, fork, and future turns
@@ -302,8 +300,12 @@ Nested selector preferences are persisted by the adapter because ACP/Zed only ex
 `currentValue` per selector. The file lives under:
 
 ```text
-$CODEX_HOME/codex-acp/selector-preferences.json
+~/.codex-cas/selector-preferences.json
 ```
+
+Set `CODEX_CAS_HOME` to override this adapter-owned directory. On first startup after the path
+split, the adapter copies legacy config/cache files from `$CODEX_HOME/codex-acp/` and
+`$CODEX_HOME/memories/codex-acp/` if the new files do not already exist.
 
 The adapter creates this file on session startup if it is missing. Existing files are never treated
 as disposable defaults: invalid JSON/JSONC now fails session startup with the file path instead of
@@ -402,7 +404,7 @@ Compact context and account-limit labels use a separate JSONC file because they 
 `percent -> label` maps rather than selector state:
 
 ```text
-$CODEX_HOME/codex-acp/display-maps.json
+~/.codex-cas/display-maps.json
 ```
 
 The adapter creates a minimal default that renders context usage and app-server remaining quota as
@@ -473,7 +475,7 @@ Ready-to-use examples for the previous compact display variants are kept in:
 - `examples/display-maps/bars.jsonc`
 - `examples/display-maps/block.jsonc`
 
-Copy one of them to `$CODEX_HOME/codex-acp/display-maps.json` if you want that style. These files
+Copy one of them to `~/.codex-cas/display-maps.json` if you want that style. These files
 are tested fixtures, so their JSONC shape stays aligned with the runtime loader.
 
 Example: keep `gpt-5.5` as the practical default, hide older/noisy model entries, and keep only
@@ -715,12 +717,11 @@ Near-term work:
 
 - Keep refining the compact context `%` selector and `/status` report where it helps daily use
 - Audit and selectively port upstream `codex-acp v0.14.0` parity items: terminal-output fallback memory fix and the next permission/elicitation details
-- Decide the next surfaced preview flow after `/diff`, most likely `thread/read`
+- Keep new slash/preview UX scoped to explicit user demand; avoid adding parallel flows when Zed already has native UI
 
 Later candidates:
 
 - `/debug-config`
-- `thread/read`
 
 Not a priority for this fork right now:
 

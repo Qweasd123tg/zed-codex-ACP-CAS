@@ -135,6 +135,7 @@ struct ThreadInner {
     session_id: SessionId,
     app: SharedAppServer,
     codex_home: PathBuf,
+    cas_home: PathBuf,
     bundled_skills_enabled: bool,
     thread_id: String,
     context_usage_cache_path: PathBuf,
