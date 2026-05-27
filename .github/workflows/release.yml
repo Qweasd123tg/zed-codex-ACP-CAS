@@ -148,6 +148,20 @@ jobs:
         shell: bash
         run: shasum -a 256 install.sh > install.sh.sha256
 
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          notes=".github/releases/${{ needs.get-version.outputs.tag_name }}.md"
+          if [ -f "$notes" ]; then
+            cp "$notes" release-notes.md
+          else
+            {
+              echo "# codex-acp ${{ needs.get-version.outputs.tag_name }}"
+              echo
+              echo "See the generated changelog below for commit-level changes."
+            } > release-notes.md
+          fi
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
@@ -156,6 +170,7 @@ jobs:
           name: codex-acp v${{ needs.get-version.outputs.version }}
           draft: false
           prerelease: false
+          body_path: release-notes.md
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
