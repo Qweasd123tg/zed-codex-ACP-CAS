@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO_URL="https://github.com/Qweasd123tg/zed-codex-ACP-CAS"
 
 usage() {
   cat <<'EOF'
@@ -9,8 +10,12 @@ Usage:
   ./install.sh [options] [install_dir] [binary_name]
 
 Options:
+  --download <version>      Download a GitHub Release binary. Use "latest" or a version/tag.
   --from-binary <path>      Install an existing release/downloaded binary instead of building.
   --sha256 <path>           Verify the source binary against a sha256 file before installing.
+  --repo-url <url>          GitHub repository URL for --download (default: project origin).
+  --config-home <path>      Create this adapter config directory (default: CODEX_CAS_HOME or ~/.codex-cas).
+  --no-init-config          Do not create the adapter config directory.
   --with-checks             Run source checks before building from source.
   --checks-mode <mode>      Checks mode when --with-checks is enabled: quick|full (default: quick).
   --no-smoke-test           Skip pre-activation smoke test.
@@ -18,11 +23,12 @@ Options:
 
 Defaults:
   install_dir  = $HOME/.local/bin
-  binary_name  = codex-acp
+  binary_name  = codex-acp (codex-acp.exe on Windows)
 
 Examples:
   ./install.sh
-  ./install.sh --with-checks --checks-mode full
+  ./install.sh --download latest
+  ./install.sh --download 0.23.5
   ./install.sh --from-binary ./codex-acp-linux-x86_64-gnu --sha256 ./codex-acp-linux-x86_64-gnu.sha256
   ./install.sh "$HOME/bin" codex-acp
 EOF
@@ -36,6 +42,19 @@ compute_sha256() {
     shasum -a 256 "$file" | awk '{print $1}'
   else
     echo "No sha256 tool found (expected sha256sum or shasum)." >&2
+    return 1
+  fi
+}
+
+download_file() {
+  local url="$1"
+  local output="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 --connect-timeout 15 -o "$output" "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$output" "$url"
+  else
+    echo "No download tool found (expected curl or wget)." >&2
     return 1
   fi
 }
@@ -90,15 +109,106 @@ smoke_test_binary() {
   fi
 }
 
+host_os() {
+  local os
+  os="$(uname -s)"
+  case "$os" in
+    Linux) echo "linux" ;;
+    Darwin) echo "darwin" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+    *)
+      echo "Unsupported OS: $os" >&2
+      return 1
+      ;;
+  esac
+}
+
+host_arch() {
+  local arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) echo "x64" ;;
+    arm64|aarch64) echo "arm64" ;;
+    *)
+      echo "Unsupported CPU architecture: $arch" >&2
+      return 1
+      ;;
+  esac
+}
+
+release_asset_name() {
+  local os="$1"
+  local arch="$2"
+  case "$os-$arch" in
+    linux-x64) echo "codex-acp-linux-x86_64-gnu" ;;
+    darwin-arm64) echo "codex-acp-macos-aarch64-apple-darwin" ;;
+    windows-x64) echo "codex-acp-windows-x86_64-pc-windows-msvc.exe" ;;
+    *)
+      echo "No release artifact is published for $os-$arch." >&2
+      return 1
+      ;;
+  esac
+}
+
+default_binary_name() {
+  if [[ "$(host_os)" == "windows" ]]; then
+    echo "codex-acp.exe"
+  else
+    echo "codex-acp"
+  fi
+}
+
+release_base_url() {
+  local repo_url="$1"
+  local version="$2"
+  repo_url="${repo_url%/}"
+  if [[ "$version" == "latest" ]]; then
+    echo "$repo_url/releases/latest/download"
+    return
+  fi
+
+  if [[ "$version" == v* ]]; then
+    echo "$repo_url/releases/download/$version"
+  else
+    echo "$repo_url/releases/download/v$version"
+  fi
+}
+
+default_config_home() {
+  if [[ -n "${CODEX_CAS_HOME:-}" ]]; then
+    echo "$CODEX_CAS_HOME"
+    return
+  fi
+  if [[ -n "${HOME:-}" ]]; then
+    echo "$HOME/.codex-cas"
+    return
+  fi
+  echo "HOME is not set; pass --config-home or --no-init-config." >&2
+  return 1
+}
+
 RUN_CHECKS=0
 CHECKS_MODE="quick"
 RUN_SMOKE_TEST=1
+INIT_CONFIG=1
 FROM_BINARY=""
 SHA256_FILE=""
+DOWNLOAD_VERSION=""
+REPO_URL="$DEFAULT_REPO_URL"
+CONFIG_HOME=""
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --download)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --download" >&2
+        usage >&2
+        exit 2
+      fi
+      DOWNLOAD_VERSION="$2"
+      shift 2
+      ;;
     --from-binary|--from)
       if [[ $# -lt 2 ]]; then
         echo "Missing value for $1" >&2
@@ -116,6 +226,28 @@ while [[ $# -gt 0 ]]; do
       fi
       SHA256_FILE="$2"
       shift 2
+      ;;
+    --repo-url)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --repo-url" >&2
+        usage >&2
+        exit 2
+      fi
+      REPO_URL="$2"
+      shift 2
+      ;;
+    --config-home)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --config-home" >&2
+        usage >&2
+        exit 2
+      fi
+      CONFIG_HOME="$2"
+      shift 2
+      ;;
+    --no-init-config)
+      INIT_CONFIG=0
+      shift
       ;;
     --with-checks)
       RUN_CHECKS=1
@@ -167,7 +299,17 @@ if [[ "$CHECKS_MODE" != "quick" && "$CHECKS_MODE" != "full" ]]; then
   exit 2
 fi
 
-if [[ -n "$FROM_BINARY" && "$RUN_CHECKS" == "1" ]]; then
+if [[ -n "$FROM_BINARY" && -n "$DOWNLOAD_VERSION" ]]; then
+  echo "--from-binary and --download are mutually exclusive." >&2
+  exit 2
+fi
+
+if [[ -n "$DOWNLOAD_VERSION" && -n "$SHA256_FILE" ]]; then
+  echo "--sha256 is only valid with --from-binary; --download fetches the matching sha256 file." >&2
+  exit 2
+fi
+
+if [[ -n "$FROM_BINARY" && "$RUN_CHECKS" == "1" ]] || [[ -n "$DOWNLOAD_VERSION" && "$RUN_CHECKS" == "1" ]]; then
   echo "--with-checks is only valid for source installs." >&2
   exit 2
 fi
@@ -177,6 +319,10 @@ if [[ -n "$SHA256_FILE" && -z "$FROM_BINARY" ]]; then
   exit 2
 fi
 
+if [[ -z "$FROM_BINARY" && -z "$DOWNLOAD_VERSION" && ! -f "$ROOT_DIR/Cargo.toml" ]]; then
+  DOWNLOAD_VERSION="latest"
+fi
+
 DEFAULT_INSTALL_DIR="${HOME:-}/.local/bin"
 if [[ "$DEFAULT_INSTALL_DIR" == "/.local/bin" && ${#POSITIONAL_ARGS[@]} -lt 1 ]]; then
   echo "HOME is not set; pass an explicit install_dir." >&2
@@ -184,18 +330,47 @@ if [[ "$DEFAULT_INSTALL_DIR" == "/.local/bin" && ${#POSITIONAL_ARGS[@]} -lt 1 ]]
 fi
 
 INSTALL_DIR="${POSITIONAL_ARGS[0]:-$DEFAULT_INSTALL_DIR}"
-BINARY_NAME="${POSITIONAL_ARGS[1]:-codex-acp}"
+BINARY_NAME="${POSITIONAL_ARGS[1]:-$(default_binary_name)}"
 TARGET_BIN="$INSTALL_DIR/$BINARY_NAME"
 TARGET_INFO="$INSTALL_DIR/${BINARY_NAME}.build-info.txt"
 
 INSTALL_MODE="source"
 SOURCE_BIN=""
+SOURCE_SHA_FILE=""
 VERSION="unknown"
 COMMIT="unknown"
 GIT_DIRTY="unknown"
+DOWNLOAD_URL=""
 RUSTC_VERSION="$(rustc --version 2>/dev/null || echo unknown)"
+DOWNLOAD_DIR=""
 
-if [[ -n "$FROM_BINARY" ]]; then
+cleanup_download() {
+  [[ -z "$DOWNLOAD_DIR" ]] || rm -rf "$DOWNLOAD_DIR"
+}
+trap cleanup_download EXIT
+
+if [[ -n "$DOWNLOAD_VERSION" ]]; then
+  INSTALL_MODE="download"
+  os="$(host_os)"
+  arch="$(host_arch)"
+  asset="$(release_asset_name "$os" "$arch")"
+  base_url="$(release_base_url "$REPO_URL" "$DOWNLOAD_VERSION")"
+  DOWNLOAD_URL="$base_url/$asset"
+  DOWNLOAD_DIR="$(mktemp -d)"
+  SOURCE_BIN="$DOWNLOAD_DIR/$asset"
+  SOURCE_SHA_FILE="$DOWNLOAD_DIR/$asset.sha256"
+
+  echo "[install] downloading $DOWNLOAD_URL"
+  download_file "$DOWNLOAD_URL" "$SOURCE_BIN"
+  echo "[install] downloading $DOWNLOAD_URL.sha256"
+  download_file "$DOWNLOAD_URL.sha256" "$SOURCE_SHA_FILE"
+  echo "[install] verifying sha256"
+  verify_sha256 "$SOURCE_BIN" "$SOURCE_SHA_FILE"
+
+  if [[ "$DOWNLOAD_VERSION" != "latest" ]]; then
+    VERSION="${DOWNLOAD_VERSION#v}"
+  fi
+elif [[ -n "$FROM_BINARY" ]]; then
   INSTALL_MODE="binary"
   SOURCE_BIN="$FROM_BINARY"
   if [[ ! -f "$SOURCE_BIN" ]]; then
@@ -233,11 +408,12 @@ mkdir -p "$INSTALL_DIR"
 
 TMP_BIN=""
 TMP_INFO=""
-cleanup() {
+cleanup_install() {
   [[ -z "$TMP_BIN" ]] || rm -f "$TMP_BIN"
   [[ -z "$TMP_INFO" ]] || rm -f "$TMP_INFO"
+  cleanup_download
 }
-trap cleanup EXIT
+trap cleanup_install EXIT
 
 TMP_BIN="$(mktemp "$INSTALL_DIR/.${BINARY_NAME}.tmp.XXXXXX")"
 install -m 0755 "$SOURCE_BIN" "$TMP_BIN"
@@ -249,6 +425,13 @@ fi
 mv -f "$TMP_BIN" "$TARGET_BIN"
 TMP_BIN=""
 
+if [[ "$INIT_CONFIG" == "1" ]]; then
+  if [[ -z "$CONFIG_HOME" ]]; then
+    CONFIG_HOME="$(default_config_home)"
+  fi
+  mkdir -p "$CONFIG_HOME"
+fi
+
 SHA256="$(compute_sha256 "$TARGET_BIN")"
 BUILT_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 TMP_INFO="$(mktemp "$INSTALL_DIR/.${BINARY_NAME}.build-info.tmp.XXXXXX")"
@@ -256,12 +439,14 @@ cat >"$TMP_INFO" <<EOF
 binary=$TARGET_BIN
 install_mode=$INSTALL_MODE
 source_binary=$SOURCE_BIN
+download_url=$DOWNLOAD_URL
 version=$VERSION
 commit=$COMMIT
 git_dirty=$GIT_DIRTY
 sha256=$SHA256
 checks_mode=$CHECKS_MODE
 smoke_test=$RUN_SMOKE_TEST
+config_home=$CONFIG_HOME
 rustc=$RUSTC_VERSION
 built_at_utc=$BUILT_AT_UTC
 source=$ROOT_DIR
@@ -271,3 +456,19 @@ TMP_INFO=""
 
 echo "[done] installed: $TARGET_BIN"
 echo "[done] build info: $TARGET_INFO"
+if [[ "$INIT_CONFIG" == "1" ]]; then
+  echo "[done] config home: $CONFIG_HOME"
+  echo "[note] selector-preferences.json and display-maps.json are created by the adapter on first session startup."
+fi
+echo
+echo "Zed settings snippet:"
+cat <<EOF
+{
+  "agent_servers": {
+    "codex-acp-cas": {
+      "type": "custom",
+      "command": "$TARGET_BIN"
+    }
+  }
+}
+EOF

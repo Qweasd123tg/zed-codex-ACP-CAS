@@ -193,8 +193,6 @@ Current gaps:
 
 ### From GitHub Releases
 
-Download the artifact for your platform from the releases page.
-
 Current release artifacts are plain binaries, `.sha256` files, and the Bash installer:
 
 - `codex-acp-linux-x86_64-gnu`
@@ -204,9 +202,24 @@ Current release artifacts are plain binaries, `.sha256` files, and the Bash inst
 - `install.sh`
 - `install.sh.sha256`
 
-On Linux/macOS, verify the downloaded binary and install it to a stable path:
+On Linux/macOS, the installer can detect the current OS/CPU, download the matching
+GitHub Release artifact, verify its `.sha256`, install it to a stable path, and
+create the adapter config directory:
 
-Linux/macOS example:
+Latest release:
+
+```bash
+curl -fsSLO https://github.com/Qweasd123tg/zed-codex-ACP-CAS/releases/latest/download/install.sh
+bash install.sh
+```
+
+Pinned release:
+
+```bash
+bash install.sh --download 0.23.5
+```
+
+Manual artifact install still works if you already downloaded the binary:
 
 ```bash
 bash install.sh --from-binary ./codex-acp-linux-x86_64-gnu --sha256 ./codex-acp-linux-x86_64-gnu.sha256
@@ -259,12 +272,14 @@ Configure Zed to launch that wrapper through `cmd.exe`:
 
 The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
 
-### Upgrade Notes For 0.23.4
+### Upgrade Notes For 0.23.5
 
 Local installs now have one canonical entrypoint: `./install.sh`. It builds from
-source by default, installs atomically to `~/.local/bin/codex-acp`, writes
-`codex-acp.build-info.txt`, and smoke-tests the installed binary before
-activation. Use `--from-binary` for downloaded release artifacts.
+source when run inside a checkout, or downloads the latest GitHub Release when run
+as a standalone release asset. It installs atomically to `~/.local/bin/codex-acp`,
+writes `codex-acp.build-info.txt`, smoke-tests the installed binary before
+activation, and creates the adapter config home. Use `--download <version>` for a
+pinned release and `--from-binary` for already downloaded artifacts.
 
 Adapter-owned state is now treated as a current local contract, not as a migration
 surface from older layouts. By default it lives in:
@@ -277,6 +292,10 @@ The adapter creates editable default `selector-preferences.json` and
 `display-maps.json` there when they are missing. It no longer scans or copies
 older `$CODEX_HOME/codex-acp/` or `$CODEX_HOME/memories/codex-acp/` files during
 startup.
+
+The installer creates the config directory only. The adapter itself writes
+`selector-preferences.json` and `display-maps.json` on first session startup so
+the generated config schema has a single source of truth in the Rust code.
 
 Existing user configs are intentionally not treated as disposable defaults. If a
 JSONC file is invalid, session startup fails with the exact file path so you can
@@ -593,6 +612,13 @@ Install from source:
 ./install.sh
 ```
 
+Install the latest release without cloning:
+
+```bash
+curl -fsSLO https://github.com/Qweasd123tg/zed-codex-ACP-CAS/releases/latest/download/install.sh
+bash install.sh
+```
+
 Install from source with the full local check set first:
 
 ```bash
@@ -638,9 +664,9 @@ For a tagged GitHub release, work from `main` and use the release helper after
 the user-facing docs and version are ready:
 
 ```bash
-script/prepare_release.sh 0.23.4
+script/prepare_release.sh 0.23.5
 git push origin main
-git push origin v0.23.4
+git push origin v0.23.5
 ```
 
 The `v*` tag triggers `.github/workflows/release.yml`, which validates the tag
