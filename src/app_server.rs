@@ -46,6 +46,15 @@ fn io_error(message: impl Into<String>) -> Error {
     Error::internal_error().data(message.into())
 }
 
+fn format_timeout_duration(timeout: std::time::Duration) -> String {
+    let millis = timeout.as_millis();
+    if millis.is_multiple_of(1000) {
+        format!("{}s", timeout.as_secs())
+    } else {
+        format!("{millis}ms")
+    }
+}
+
 pub struct AppServerProcess {
     _child: Child,
     _reader_task: tokio::task::JoinHandle<()>,
@@ -407,7 +416,7 @@ impl AppServerProcess {
     where
         T: DeserializeOwned,
     {
-        if let Some(timeout) = request_timeout(method_name) {
+        if let Some(timeout) = request_timeout(method_name).map_err(io_error)? {
             debug!(
                 method = method_name,
                 timeout_ms = timeout.as_millis() as u64,
@@ -425,8 +434,8 @@ impl AppServerProcess {
                     "Timed out waiting for app-server startup response"
                 );
                 io_error(format!(
-                    "timed out waiting for `{method_name}` response after {}s; codex app-server may be stuck during startup, auth, or early handshake",
-                    timeout.as_secs()
+                    "timed out waiting for `{method_name}` response after {}; codex app-server may be stuck during startup, auth, or early handshake",
+                    format_timeout_duration(timeout)
                 ))
             })??;
             debug!(method = method_name, "Received app-server response");

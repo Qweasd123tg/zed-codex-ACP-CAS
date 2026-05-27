@@ -258,7 +258,7 @@ Configure Zed to launch that wrapper through `cmd.exe`:
 
 The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
 
-### Upgrade Notes For 0.23.2
+### Upgrade Notes For 0.23.3
 
 Adapter-owned state is now treated as a current local contract, not as a migration
 surface from older layouts. By default it lives in:
@@ -625,9 +625,9 @@ For a tagged GitHub release, work from `main` and use the release helper after
 the user-facing docs and version are ready:
 
 ```bash
-script/prepare_release.sh 0.23.2 --checks-mode full
+script/prepare_release.sh 0.23.3 --checks-mode full
 git push origin main
-git push origin v0.23.2
+git push origin v0.23.3
 ```
 
 The `v*` tag triggers `.github/workflows/release.yml`, which validates the tag
@@ -650,6 +650,7 @@ Useful environment variables:
 - `ACP_DISABLE_AUTO_RESTORE=1` for emergency startup debugging only
 
 `CODEX_ACP_STARTUP_TIMEOUT_MS` now also bounds the `turn/start` handshake, so an app-server that stops responding before it returns a `turn_id` does not leave the ACP UI spinning forever.
+Timeout override values must be positive integer milliseconds. Invalid values now fail the request instead of silently using the built-in timeout.
 
 Do not keep `ACP_DISABLE_AUTO_RESTORE=1` in your normal Zed configuration. It suppresses the earliest startup-driven backend restore right after the agent boots, which can make history entries appear in Zed while their chat content does not load. Use it only as a temporary diagnostic option if startup restore itself is hanging.
 
