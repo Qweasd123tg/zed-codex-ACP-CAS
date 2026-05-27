@@ -258,6 +258,41 @@ Configure Zed to launch that wrapper through `cmd.exe`:
 
 The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
 
+### Upgrade Notes For 0.13.x To 0.23.0
+
+The `0.23.0` line includes the accumulated `mini` branch stabilization work:
+selector defaults and layout config, config-driven display maps, generated-image
+rendering, reconnect/status cleanup, approval parity with backend decisions, and
+the CAS home split.
+
+The main upgrade-sensitive change is that adapter-owned state moves out of
+`CODEX_HOME` and into a dedicated CAS home. By default that is:
+
+```text
+~/.codex-cas/
+```
+
+On first session startup after upgrading, the adapter handles the transition as
+follows:
+
+- Copies `selector-preferences.json` and `display-maps.json` from
+  `$CODEX_HOME/codex-acp/` only if the matching file does not already exist in
+  `~/.codex-cas/`.
+- Copies `context-usage-cache.json` from `$CODEX_HOME/memories/codex-acp/` only
+  if the new cache file does not already exist.
+- Creates editable default `selector-preferences.json` and `display-maps.json`
+  if no legacy or current file exists.
+- Leaves legacy files in place; migration is copy-only and does not delete or
+  rewrite `$CODEX_HOME`.
+
+Existing user configs are intentionally not treated as disposable defaults. If a
+new or migrated JSONC file is invalid, session startup fails with the exact file
+path so you can fix or remove that file. The adapter will not silently overwrite
+manual config.
+
+Set `CODEX_CAS_HOME=/some/path` before launching Zed if you need the adapter
+state somewhere other than `~/.codex-cas/`.
+
 ### Add To Zed
 
 1. Install or build `codex-acp` and make sure the binary path is stable.
@@ -631,12 +666,40 @@ Release-target check for Linux:
 cargo test --release --target x86_64-unknown-linux-gnu
 ```
 
+## Release Preparation
+
+Local release sanity for the Fedora/Linux target should finish with:
+
+```bash
+cargo fmt --all -- --check
+cargo test
+cargo clippy --all-targets --all-features -- -D warnings
+bash script/build_local_release.sh
+```
+
+For a tagged GitHub release, work from `main` and use the release helper after
+the user-facing docs and version are ready:
+
+```bash
+script/prepare_release.sh 0.23.0 --checks-mode full
+git push origin main
+git push origin v0.23.0
+```
+
+The `v*` tag triggers `.github/workflows/release.yml`, which validates the tag
+against `Cargo.toml` and builds the Linux, macOS Apple Silicon, and Windows
+artifacts listed above. The helper script also writes a local bundle under
+`.releases/v<version>/`; those local filenames include the version and host
+platform, while GitHub Release artifact names intentionally use the stable names
+shown in the install section.
+
 ## Configuration
 
 Useful environment variables:
 
 - `RUST_LOG=codex_acp=debug`
 - `RUST_BACKTRACE=1`
+- `CODEX_CAS_HOME=<adapter-owned config/cache directory>`
 - `CODEX_ACP_CODEX_BIN=<absolute path to codex or codex.exe>`
 - `CODEX_ACP_STARTUP_TIMEOUT_MS=<milliseconds>`
 - `CODEX_ACP_STARTUP_METADATA_TIMEOUT_MS=<milliseconds>`

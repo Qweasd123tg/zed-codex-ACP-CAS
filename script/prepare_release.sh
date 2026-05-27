@@ -99,6 +99,13 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
 fi
 
 TAG="v$VERSION"
+CURRENT_BRANCH="$(git branch --show-current 2>/dev/null || true)"
+
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+  echo "Release preparation must run from the main branch; current branch is '${CURRENT_BRANCH:-detached HEAD}'." >&2
+  echo "Move or merge the release changes into main first, then rerun this script." >&2
+  exit 1
+fi
 
 if [[ "$ALLOW_DIRTY" != "1" ]] && [[ -n "$(git status --porcelain 2>/dev/null || true)" ]]; then
   echo "Working tree is not clean. Commit/stash changes or pass --allow-dirty." >&2
