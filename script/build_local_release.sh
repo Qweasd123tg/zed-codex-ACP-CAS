@@ -7,36 +7,20 @@ cd "$ROOT_DIR"
 usage() {
   cat <<'EOF'
 Usage:
-  bash script/build_local_release.sh [--sweep] [--clean-dev]
+  bash script/build_local_release.sh
 
 Behavior:
   - builds `cargo build --release`
-  - rotates `.build/codex-acp-current` -> `.build/codex-acp-previous`
   - copies the fresh binary into `.build/codex-acp-current`
-  - writes matching build-info files for rollback/debugging
-
-Options:
-  --sweep        Run `cargo sweep --installed` after copying the release binary, if available.
-  --clean-dev    Remove Cargo dev-profile artifacts after copying the release binary.
+  - writes `.build/codex-acp-current.build-info.txt`
 EOF
 }
 
-CARGO_SWEEP_ARGS="${CARGO_SWEEP_ARGS:---installed}"
-SWEEP=0
-CLEAN_DEV=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h | --help)
       usage
       exit 0
-      ;;
-    --sweep)
-      SWEEP=1
-      shift
-      ;;
-    --clean-dev)
-      CLEAN_DEV=1
-      shift
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -52,19 +36,9 @@ cargo build --release
 ARTIFACTS_DIR="$ROOT_DIR/.build"
 SOURCE_BIN="$ROOT_DIR/target/release/codex-acp"
 CURRENT_BIN="$ARTIFACTS_DIR/codex-acp-current"
-PREVIOUS_BIN="$ARTIFACTS_DIR/codex-acp-previous"
 CURRENT_INFO="$ARTIFACTS_DIR/codex-acp-current.build-info.txt"
-PREVIOUS_INFO="$ARTIFACTS_DIR/codex-acp-previous.build-info.txt"
 
 mkdir -p "$ARTIFACTS_DIR"
-
-if [[ -f "$CURRENT_BIN" ]]; then
-  mv -f "$CURRENT_BIN" "$PREVIOUS_BIN"
-fi
-
-if [[ -f "$CURRENT_INFO" ]]; then
-  mv -f "$CURRENT_INFO" "$PREVIOUS_INFO"
-fi
 
 install -m 0755 "$SOURCE_BIN" "$CURRENT_BIN"
 
@@ -91,23 +65,4 @@ source=$ROOT_DIR
 EOF
 
 echo "[done] current:  $CURRENT_BIN"
-if [[ -f "$PREVIOUS_BIN" ]]; then
-  echo "[done] previous: $PREVIOUS_BIN"
-fi
 echo "[done] build info: $CURRENT_INFO"
-
-if [[ "$SWEEP" == "1" ]]; then
-  if command -v cargo-sweep >/dev/null 2>&1; then
-    # shellcheck disable=SC2086
-    echo "[sweep] cargo sweep $CARGO_SWEEP_ARGS"
-    # shellcheck disable=SC2086
-    cargo sweep $CARGO_SWEEP_ARGS
-  else
-    echo "[sweep] cargo-sweep is not installed; run: cargo install cargo-sweep" >&2
-  fi
-fi
-
-if [[ "$CLEAN_DEV" == "1" ]]; then
-  echo "[clean] cargo clean --profile dev"
-  cargo clean --profile dev
-fi

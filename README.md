@@ -258,7 +258,7 @@ Configure Zed to launch that wrapper through `cmd.exe`:
 
 The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
 
-### Upgrade Notes For 0.23.1
+### Upgrade Notes For 0.23.2
 
 Adapter-owned state is now treated as a current local contract, not as a migration
 surface from older layouts. By default it lives in:
@@ -293,28 +293,8 @@ pointing Zed at `.build/codex-acp-current` and rebuilding with:
 bash script/build_local_release.sh
 ```
 
-Use `--sweep` after checks to ask `cargo-sweep` to prune stale Cargo artifacts without dropping
-the whole dev cache:
-
-```bash
-cargo install cargo-sweep
-bash script/build_local_release.sh --sweep
-```
-
-If `cargo-sweep` is not installed, the script keeps the build and prints the install command.
-Set `CARGO_SWEEP_ARGS` to override the default `--installed` sweep mode.
-
-Use `--clean-dev` when disk space matters more than the next local check speed:
-
-```bash
-bash script/build_local_release.sh --clean-dev
-```
-
-That keeps `.build/codex-acp-current` and the release profile, but removes Cargo's dev-profile
-artifacts from `target/debug`.
-
-That script rotates `.build/codex-acp-current` and `.build/codex-acp-previous`. Rebuilding only
-`target/release/codex-acp` does not update the binary path if Zed is already configured to use
+That script overwrites `.build/codex-acp-current` and writes matching build info. Rebuilding only
+`target/release/codex-acp` does not update the binary path if Zed is configured to use
 `.build/codex-acp-current`.
 
 Nested selector preferences are persisted by the adapter because ACP/Zed only exposes one
@@ -612,10 +592,7 @@ Run:
 ./target/release/codex-acp --help
 ```
 
-The local release script also keeps two rollback-friendly copies in the repository:
-
-- `.build/codex-acp-current`
-- `.build/codex-acp-previous`
+The local release script writes the runnable binary to `.build/codex-acp-current`.
 
 ## Development Checks
 
@@ -648,9 +625,9 @@ For a tagged GitHub release, work from `main` and use the release helper after
 the user-facing docs and version are ready:
 
 ```bash
-script/prepare_release.sh 0.23.0 --checks-mode full
+script/prepare_release.sh 0.23.2 --checks-mode full
 git push origin main
-git push origin v0.23.0
+git push origin v0.23.2
 ```
 
 The `v*` tag triggers `.github/workflows/release.yml`, which validates the tag

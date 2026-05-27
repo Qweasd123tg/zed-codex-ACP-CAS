@@ -47,9 +47,8 @@ cargo test --release --target x86_64-unknown-linux-gnu
 bash script/build_local_release.sh
 ```
 
-- Этот локальный flow использует обычный `target/release`, но дополнительно ротирует готовые бинарники в:
+- Этот локальный flow использует обычный `target/release` и копирует готовый бинарь в:
   - `.build/codex-acp-current`
-  - `.build/codex-acp-previous`
 - Если после правок нужен только один обязательный бинарь, достаточно этого локального release-flow; отдельный `cargo build` в debug не обязателен.
 - Полный релиз (GitHub Releases, packaging и релизные процедуры проекта) делать только на финальном штрихе всего проекта.
 - Версию в `Cargo.toml` обновлять вместе с user-facing изменениями, а не откладывать "на потом".

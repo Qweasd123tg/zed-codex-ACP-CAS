@@ -21,7 +21,7 @@ pub(in crate::thread) async fn handle_plan_mode_command(
         inner
             .client
             .send_agent_text(format!(
-                "Unsupported plan mode `{raw_value}`.\nUse one of: `on`, `off`, `plan`, `default`."
+                "Unsupported plan mode `{raw_value}`.\nUse one of: `on`, `off`, `plan`."
             ))
             .await;
         return Ok(StopReason::EndTurn);
