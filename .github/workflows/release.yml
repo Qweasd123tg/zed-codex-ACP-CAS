@@ -134,6 +134,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v6
+
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -141,6 +143,10 @@ jobs:
       - name: Show downloaded artifacts
         shell: bash
         run: find artifacts -maxdepth 4 -type f | sort
+
+      - name: Prepare installer checksum
+        shell: bash
+        run: shasum -a 256 install.sh > install.sh.sha256
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
@@ -153,5 +159,7 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
+            install.sh
+            install.sh.sha256
             artifacts/**/codex-acp-*
             artifacts/**/*.sha256

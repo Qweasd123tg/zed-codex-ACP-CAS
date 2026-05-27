@@ -10,7 +10,7 @@ Usage:
   script/prepare_release.sh <version> [options]
 
 Options:
-  --checks-mode <mode>   quick|full|none (default: quick)
+  --checks-mode <mode>   quick|full|none (default: full)
   --no-tag               Do not create git tag.
   --no-build             Do not build release bundle.
   --allow-dirty          Allow running with uncommitted changes (not recommended).
@@ -25,7 +25,7 @@ EOF
 }
 
 VERSION=""
-CHECKS_MODE="quick"
+CHECKS_MODE="full"
 CREATE_TAG=1
 RUN_BUILD=1
 ALLOW_DIRTY=0
@@ -124,6 +124,8 @@ if [[ "$CARGO_VERSION" != "$VERSION" ]]; then
   echo "[release] update Cargo.toml version: $CARGO_VERSION -> $VERSION"
   sed -i.bak -E "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
   rm -f Cargo.toml.bak
+  echo "[release] refresh Cargo.lock"
+  cargo metadata --format-version 1 >/dev/null
 fi
 
 if [[ "$CHECKS_MODE" != "none" ]]; then
@@ -131,16 +133,11 @@ if [[ "$CHECKS_MODE" != "none" ]]; then
   bash script/run_live_checks.sh "$CHECKS_MODE"
 fi
 
-git add Cargo.toml
+git add Cargo.toml Cargo.lock
 if ! git diff --cached --quiet; then
   git commit -m "Release $TAG"
 else
   echo "[release] version files unchanged, skipping release commit"
-fi
-
-if [[ "$CREATE_TAG" == "1" ]]; then
-  git tag -a "$TAG" -m "Release $TAG"
-  echo "[release] created tag: $TAG"
 fi
 
 if [[ "$RUN_BUILD" == "1" ]]; then
@@ -191,6 +188,18 @@ EOF
   echo "  - $OUT_BIN.sha256"
   echo "  - $OUT_DIR/release-manifest.txt"
   echo "  - $OUT_DIR/release-notes.md"
+fi
+
+if [[ "$ALLOW_DIRTY" != "1" ]] && [[ -n "$(git status --porcelain 2>/dev/null || true)" ]]; then
+  echo "Working tree became dirty during release preparation." >&2
+  echo "Commit/stash changes or rerun with --allow-dirty only if this is intentional." >&2
+  git status --short >&2
+  exit 1
+fi
+
+if [[ "$CREATE_TAG" == "1" ]]; then
+  git tag -a "$TAG" -m "Release $TAG"
+  echo "[release] created tag: $TAG"
 fi
 
 echo

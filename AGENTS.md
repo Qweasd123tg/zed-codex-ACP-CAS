@@ -41,15 +41,17 @@ cargo test --release --target x86_64-unknown-linux-gnu
 ```
 
 ## Политика релизов
-- Для обновлений мелких и средних фич после основной проверки сразу собирать локальный release через:
+- Для обновлений мелких и средних фич после основной проверки сразу собирать локальный release-cache и проверять install-flow:
 
 ```bash
 bash script/build_local_release.sh
+./install.sh
 ```
 
-- Этот локальный flow использует обычный `target/release` и копирует готовый бинарь в:
+- `script/build_local_release.sh` — dev cache: использует обычный `target/release` и копирует готовый бинарь в:
   - `.build/codex-acp-current`
-- Если после правок нужен только один обязательный бинарь, достаточно этого локального release-flow; отдельный `cargo build` в debug не обязателен.
+- `./install.sh` — canonical local install path: ставит бинарь в `~/.local/bin/codex-acp`, пишет `codex-acp.build-info.txt` и smoke-тестит бинарь перед активацией.
+- Если после правок нужен только один обязательный installed binary, достаточно `./install.sh`; отдельный `cargo build` в debug не обязателен.
 - Полный релиз (GitHub Releases, packaging и релизные процедуры проекта) делать только на финальном штрихе всего проекта.
 - Версию в `Cargo.toml` обновлять вместе с user-facing изменениями, а не откладывать "на потом".
 - Для форка использовать простую pre-1.0 схему:

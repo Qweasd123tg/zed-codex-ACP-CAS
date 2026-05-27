@@ -44,6 +44,10 @@ jobs:
           mkdir -p dist
           cp target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }} dist/${{ env.BINARY_NAME }}-linux-x86_64-gnu
 
+      - name: Verify install script against artifact
+        shell: bash
+        run: ./install.sh --from-binary dist/${{ env.BINARY_NAME }}-linux-x86_64-gnu /tmp/codex-acp-ci codex-acp
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:

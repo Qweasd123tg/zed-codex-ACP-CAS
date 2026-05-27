@@ -135,14 +135,14 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
-    if let Some(rest) = text.strip_prefix("/archive") {
+    if let Some(rest) = slash_command_rest(text, "/archive") {
         let query = rest.trim();
         return Some(SessionCommand::Archive {
             thread_id: (!query.is_empty()).then(|| query.to_string()),
         });
     }
 
-    if let Some(rest) = text.strip_prefix("/unarchive") {
+    if let Some(rest) = slash_command_rest(text, "/unarchive") {
         let query = rest.trim();
         return Some(SessionCommand::Unarchive {
             thread_id: (!query.is_empty()).then(|| query.to_string()),

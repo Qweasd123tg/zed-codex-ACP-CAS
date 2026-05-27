@@ -37,8 +37,8 @@ if [[ $HELP_STATUS -ne 0 ]]; then
   exit 1
 fi
 
-if ! grep -q "Usage: codex-acp" <<<"$HELP_OUTPUT"; then
-  echo "[smoke] unexpected help output (missing 'Usage: codex-acp')" >&2
+if ! grep -q "Usage:" <<<"$HELP_OUTPUT" || ! grep -q -- "--config" <<<"$HELP_OUTPUT"; then
+  echo "[smoke] unexpected help output" >&2
   echo "$HELP_OUTPUT" >&2
   exit 1
 fi

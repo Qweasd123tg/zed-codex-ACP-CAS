@@ -353,6 +353,12 @@ fn parses_archive_command_with_query() {
 }
 
 #[test]
+fn does_not_parse_archive_prefix_as_command() {
+    let prompt: Vec<ContentBlock> = vec!["/archived 019d-test".into()];
+    assert_eq!(parse_session_command(&prompt), None);
+}
+
+#[test]
 fn parses_unarchive_command_with_query() {
     let prompt: Vec<ContentBlock> = vec!["/unarchive old-thread".into()];
     assert_eq!(
@@ -361,6 +367,12 @@ fn parses_unarchive_command_with_query() {
             thread_id: Some("old-thread".to_string()),
         })
     );
+}
+
+#[test]
+fn does_not_parse_unarchive_prefix_as_command() {
+    let prompt: Vec<ContentBlock> = vec!["/unarchiveX old-thread".into()];
+    assert_eq!(parse_session_command(&prompt), None);
 }
 
 #[test]

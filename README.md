@@ -195,21 +195,21 @@ Current gaps:
 
 Download the artifact for your platform from the releases page.
 
-Current release artifacts are plain binaries plus `.sha256` files:
+Current release artifacts are plain binaries, `.sha256` files, and the Bash installer:
 
 - `codex-acp-linux-x86_64-gnu`
 - `codex-acp-macos-aarch64-apple-darwin`
 - `codex-acp-windows-x86_64-pc-windows-msvc.exe`
 - matching `.sha256` files
+- `install.sh`
+- `install.sh.sha256`
 
-Place the binary somewhere stable and point Zed at that binary.
+On Linux/macOS, verify the downloaded binary and install it to a stable path:
 
 Linux/macOS example:
 
 ```bash
-mkdir -p "$HOME/.local/bin"
-mv codex-acp-linux-x86_64-gnu "$HOME/.local/bin/codex-acp"
-chmod +x "$HOME/.local/bin/codex-acp"
+bash install.sh --from-binary ./codex-acp-linux-x86_64-gnu --sha256 ./codex-acp-linux-x86_64-gnu.sha256
 ```
 
 Then configure Zed to use the binary path:
@@ -228,8 +228,9 @@ Then configure Zed to use the binary path:
 Windows example:
 
 1. Put `codex-acp-windows-x86_64-pc-windows-msvc.exe` somewhere stable and rename it to `codex-acp.exe` if desired.
-2. Make sure the `codex.exe` that provides `codex app-server` is available to the adapter. You can do that with `PATH`, or set `CODEX_ACP_CODEX_BIN` to the absolute `codex.exe` path.
-3. If you rely on the ChatGPT extension's bundled `codex.exe`, use a small wrapper next to `codex-acp.exe`:
+2. Verify the matching `.sha256` file before installing.
+3. Make sure the `codex.exe` that provides `codex app-server` is available to the adapter. You can do that with `PATH`, or set `CODEX_ACP_CODEX_BIN` to the absolute `codex.exe` path.
+4. If you rely on the ChatGPT extension's bundled `codex.exe`, use a small wrapper next to `codex-acp.exe`:
 
 ```cmd
 @echo off
@@ -258,7 +259,12 @@ Configure Zed to launch that wrapper through `cmd.exe`:
 
 The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
 
-### Upgrade Notes For 0.23.3
+### Upgrade Notes For 0.23.4
+
+Local installs now have one canonical entrypoint: `./install.sh`. It builds from
+source by default, installs atomically to `~/.local/bin/codex-acp`, writes
+`codex-acp.build-info.txt`, and smoke-tests the installed binary before
+activation. Use `--from-binary` for downloaded release artifacts.
 
 Adapter-owned state is now treated as a current local contract, not as a migration
 surface from older layouts. By default it lives in:
@@ -281,12 +287,13 @@ state somewhere other than `~/.codex-cas/`.
 
 ### Add To Zed
 
-1. Install or build `codex-acp` and make sure the binary path is stable.
+1. Install `codex-acp` with `./install.sh` or from a release artifact and make sure the binary path is stable.
 2. Open your Zed settings JSON.
 3. Add a custom agent server entry pointing to the `codex-acp` binary.
 4. Restart Zed if the new agent does not appear immediately.
 
-If you run the adapter directly from a repository checkout during local development, prefer
+For normal local use, point Zed at `~/.local/bin/codex-acp`. If you run the adapter
+directly from a repository checkout during local development, prefer
 pointing Zed at `.build/codex-acp-current` and rebuilding with:
 
 ```bash
@@ -580,19 +587,24 @@ The local helper scripts in `script/` are bash-oriented and currently target Lin
 cargo build --release --target x86_64-pc-windows-msvc
 ```
 
-Build:
+Install from source:
+
+```bash
+./install.sh
+```
+
+Install from source with the full local check set first:
+
+```bash
+./install.sh --with-checks --checks-mode full
+```
+
+The installed binary path is `~/.local/bin/codex-acp` by default. The development-only
+local release script still writes a runnable cache binary to `.build/codex-acp-current`:
 
 ```bash
 bash script/build_local_release.sh
 ```
-
-Run:
-
-```bash
-./target/release/codex-acp --help
-```
-
-The local release script writes the runnable binary to `.build/codex-acp-current`.
 
 ## Development Checks
 
@@ -619,20 +631,22 @@ cargo fmt --all -- --check
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 bash script/build_local_release.sh
+./install.sh
 ```
 
 For a tagged GitHub release, work from `main` and use the release helper after
 the user-facing docs and version are ready:
 
 ```bash
-script/prepare_release.sh 0.23.3 --checks-mode full
+script/prepare_release.sh 0.23.4
 git push origin main
-git push origin v0.23.3
+git push origin v0.23.4
 ```
 
 The `v*` tag triggers `.github/workflows/release.yml`, which validates the tag
 against `Cargo.toml` and builds the Linux, macOS Apple Silicon, and Windows
-artifacts listed above. The helper script also writes a local bundle under
+artifacts listed above. The workflow also publishes `install.sh` and
+`install.sh.sha256`. The helper script writes a local bundle under
 `.releases/v<version>/`; those local filenames include the version and host
 platform, while GitHub Release artifact names intentionally use the stable names
 shown in the install section.

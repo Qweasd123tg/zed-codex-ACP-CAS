@@ -11,8 +11,9 @@ Usage:
 
 Behavior:
   - builds `cargo build --release`
-  - copies the fresh binary into `.build/codex-acp-current`
+  - copies the fresh binary into `.build/codex-acp-current` for checkout-local dev use
   - writes `.build/codex-acp-current.build-info.txt`
+  - use `./install.sh` for the canonical local install path
 EOF
 }
 
