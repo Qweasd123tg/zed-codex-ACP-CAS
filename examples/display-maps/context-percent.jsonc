@@ -1,5 +1,5 @@
 {
-  // Old context "percent" style for the lower Context selector button.
+  // Percent context style for the lower Context selector button.
   "context": {
     "usage": "context_percent",
   },

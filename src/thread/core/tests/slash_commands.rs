@@ -388,8 +388,13 @@ fn parses_plan_command_with_on_value() {
 }
 
 #[test]
-fn parse_collaboration_mode_accepts_chat_alias() {
-    assert_eq!(parse_collaboration_mode("chat"), Some(ModeKind::Default));
+fn parse_collaboration_mode_accepts_only_current_mode_values() {
+    assert_eq!(parse_collaboration_mode("on"), Some(ModeKind::Plan));
+    assert_eq!(parse_collaboration_mode("plan"), Some(ModeKind::Plan));
+    assert_eq!(parse_collaboration_mode("off"), Some(ModeKind::Default));
+    assert_eq!(parse_collaboration_mode("chat"), None);
+    assert_eq!(parse_collaboration_mode("default"), None);
+    assert_eq!(parse_collaboration_mode("code"), None);
 }
 
 #[test]

@@ -16,8 +16,8 @@ pub(in crate::thread) fn fast_mode_value(service_tier: Option<ServiceTier>) -> &
 
 pub(in crate::thread) fn parse_fast_mode_value(value: &str) -> Option<Option<ServiceTier>> {
     match value {
-        FAST_MODE_OFF_VALUE | "off" => Some(None),
-        FAST_MODE_ON_VALUE | "on" => Some(Some(ServiceTier::Fast)),
+        FAST_MODE_OFF_VALUE => Some(None),
+        FAST_MODE_ON_VALUE => Some(Some(ServiceTier::Fast)),
         FAST_MODE_FLEX_VALUE => Some(Some(ServiceTier::Flex)),
         _ => None,
     }
@@ -62,13 +62,6 @@ mod tests {
         assert_eq!(fast_mode_value(Some(ServiceTier::Fast)), "fast");
         assert_eq!(parse_fast_mode_value("standard"), Some(None));
         assert_eq!(parse_fast_mode_value("fast"), Some(Some(ServiceTier::Fast)));
-    }
-
-    #[test]
-    fn fast_mode_parser_accepts_on_off_aliases() {
-        assert_eq!(parse_fast_mode_value("off"), Some(None));
-        assert_eq!(parse_fast_mode_value("on"), Some(Some(ServiceTier::Fast)));
-        assert_eq!(parse_fast_mode_value("invalid"), None);
     }
 
     #[test]

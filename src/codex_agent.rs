@@ -38,12 +38,7 @@ use tracing::{debug, info};
 
 use crate::thread::{Thread, build_session_mcp_setup};
 
-const EXT_THREAD_ROLLBACK_METHODS: [&str; 4] = [
-    "zed.dev/codex/thread/rollback",
-    "codex/thread/rollback",
-    "zed.dev/session/rollback",
-    "session/rollback",
-];
+const EXT_THREAD_ROLLBACK_METHOD: &str = "zed.dev/codex/thread/rollback";
 
 pub struct CodexAgent {
     auth_manager: Arc<AuthManager>,
@@ -166,18 +161,16 @@ impl CodexAgent {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ThreadRollbackExtParams {
-    #[serde(alias = "session_id")]
     session_id: SessionId,
-    #[serde(alias = "num_turns")]
     num_turns: u32,
-    #[serde(default, alias = "replay_history")]
+    #[serde(default)]
     replay_history: bool,
 }
 
 fn parse_thread_rollback_ext_params(
     args: &ExtRequest,
 ) -> Result<Option<ThreadRollbackExtParams>, Error> {
-    if !EXT_THREAD_ROLLBACK_METHODS.contains(&args.method.as_ref()) {
+    if args.method.as_ref() != EXT_THREAD_ROLLBACK_METHOD {
         return Ok(None);
     }
 
@@ -403,7 +396,7 @@ impl CodexAgent {
                             });
                         };
 
-                        if !EXT_THREAD_ROLLBACK_METHODS.contains(&request.method.as_str()) {
+                        if request.method.as_str() != EXT_THREAD_ROLLBACK_METHOD {
                             return Ok(Handled::No {
                                 message: Dispatch::Request(request, responder),
                                 retry: false,
@@ -925,7 +918,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_thread_rollback_ext_params_camel_case() {
+    fn parses_thread_rollback_ext_params() {
         let request = build_ext_request(
             "zed.dev/codex/thread/rollback",
             serde_json::json!({
@@ -941,24 +934,6 @@ mod tests {
         assert_eq!(params.session_id, SessionId::new("thread_123"));
         assert_eq!(params.num_turns, 2);
         assert!(params.replay_history);
-    }
-
-    #[test]
-    fn parses_thread_rollback_ext_params_snake_case_aliases() {
-        let request = build_ext_request(
-            "session/rollback",
-            serde_json::json!({
-                "session_id": "thread_321",
-                "num_turns": 1
-            }),
-        );
-
-        let params = parse_thread_rollback_ext_params(&request)
-            .expect("should parse")
-            .expect("known method");
-        assert_eq!(params.session_id, SessionId::new("thread_321"));
-        assert_eq!(params.num_turns, 1);
-        assert!(!params.replay_history);
     }
 
     #[test]
@@ -978,7 +953,7 @@ mod tests {
     #[test]
     fn errors_on_invalid_ext_params() {
         let request = build_ext_request(
-            "codex/thread/rollback",
+            "zed.dev/codex/thread/rollback",
             serde_json::json!({
                 "sessionId": "thread_x"
             }),

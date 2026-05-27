@@ -258,37 +258,23 @@ Configure Zed to launch that wrapper through `cmd.exe`:
 
 The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
 
-### Upgrade Notes For 0.13.x To 0.23.0
+### Upgrade Notes For 0.23.1
 
-The `0.23.0` line includes the accumulated `mini` branch stabilization work:
-selector defaults and layout config, config-driven display maps, generated-image
-rendering, reconnect/status cleanup, approval parity with backend decisions, and
-the CAS home split.
-
-The main upgrade-sensitive change is that adapter-owned state moves out of
-`CODEX_HOME` and into a dedicated CAS home. By default that is:
+Adapter-owned state is now treated as a current local contract, not as a migration
+surface from older layouts. By default it lives in:
 
 ```text
 ~/.codex-cas/
 ```
 
-On first session startup after upgrading, the adapter handles the transition as
-follows:
-
-- Copies `selector-preferences.json` and `display-maps.json` from
-  `$CODEX_HOME/codex-acp/` only if the matching file does not already exist in
-  `~/.codex-cas/`.
-- Copies `context-usage-cache.json` from `$CODEX_HOME/memories/codex-acp/` only
-  if the new cache file does not already exist.
-- Creates editable default `selector-preferences.json` and `display-maps.json`
-  if no legacy or current file exists.
-- Leaves legacy files in place; migration is copy-only and does not delete or
-  rewrite `$CODEX_HOME`.
+The adapter creates editable default `selector-preferences.json` and
+`display-maps.json` there when they are missing. It no longer scans or copies
+older `$CODEX_HOME/codex-acp/` or `$CODEX_HOME/memories/codex-acp/` files during
+startup.
 
 Existing user configs are intentionally not treated as disposable defaults. If a
-new or migrated JSONC file is invalid, session startup fails with the exact file
-path so you can fix or remove that file. The adapter will not silently overwrite
-manual config.
+JSONC file is invalid, session startup fails with the exact file path so you can
+fix or remove that file. The adapter will not silently overwrite manual config.
 
 Set `CODEX_CAS_HOME=/some/path` before launching Zed if you need the adapter
 state somewhere other than `~/.codex-cas/`.
@@ -339,8 +325,7 @@ Nested selector preferences are persisted by the adapter because ACP/Zed only ex
 ```
 
 Set `CODEX_CAS_HOME` to override this adapter-owned directory. On first startup after the path
-split, the adapter copies legacy config/cache files from `$CODEX_HOME/codex-acp/` and
-`$CODEX_HOME/memories/codex-acp/` if the new files do not already exist.
+split, the adapter creates current config files there if they do not already exist.
 
 The adapter creates this file on session startup if it is missing. Existing files are never treated
 as disposable defaults: invalid JSON/JSONC now fails session startup with the file path instead of
@@ -461,26 +446,6 @@ percent labels:
       "template": "{value}%",
       "unavailable": "---"
     },
-    "context_braille": {
-      "kind": "thresholds",
-      "values": [
-        { "min": 0, "label": "⠀" },
-        { "min": 7, "label": "⢀" },
-        { "min": 19, "label": "⣀" },
-        { "min": 32, "label": "⣄" },
-        { "min": 44, "label": "⣤" },
-        { "min": 57, "label": "⣦" },
-        { "min": 69, "label": "⣶" },
-        { "min": 82, "label": "⣷" },
-        { "min": 94, "label": "⣿" }
-      ],
-      "unavailable": "⠀"
-    },
-    "percent": {
-      "kind": "template",
-      "template": "{value}%",
-      "unavailable": "--"
-    },
     "five_hour_percent": {
       "kind": "template",
       "template": "5h {value}%",
@@ -496,13 +461,15 @@ percent labels:
 ```
 
 Maps can be `template`, `exact`, or `thresholds`. `exact` maps individual integer percentages;
-`thresholds` uses the highest row where `min <= value`. The context percent is used context, while
-limit percentages are remaining quota. The `5h` / `wk` prefixes are not special runtime labels;
-they are just part of the default templates above. Selected map ids in `context.usage`,
-`limits.primary`, and `limits.secondary` must exist in `maps`; a partial or stale file fails startup
-instead of silently falling back to a hardcoded display.
+`thresholds` uses the highest row where `min <= value`. `exact` maps must either cover every value
+from `0` through `100` or define an explicit `fallback`; `thresholds` maps must either include a
+`min: 0` row or define an explicit `fallback`. The context percent is used context, while limit
+percentages are remaining quota. The `5h` / `wk` prefixes are not special runtime labels; they are
+just part of the default templates above. Selected map ids in `context.usage`, `limits.primary`,
+and `limits.secondary` must exist in `maps`; a partial or stale file fails startup instead of
+silently falling back to a hardcoded display.
 
-Ready-to-use examples for the previous compact display variants are kept in:
+Ready-to-use display-map examples are kept in:
 
 - `examples/display-maps/context-percent.jsonc`
 - `examples/display-maps/context-braille.jsonc`

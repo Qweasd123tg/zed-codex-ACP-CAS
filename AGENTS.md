@@ -122,7 +122,7 @@ bash script/build_local_release.sh
    - стоит ли вообще держать partial support в основном коде.
 7. Если принято оставить только задел на будущее, prefer explicit unsupported/rejected path + backup/draft notes вместо частично работающей runtime-ветки.
 8. Для user-facing slash UX prefer один канонический surfaced entrypoint на workflow. Если picker или многошаговый flow уже закрывает сценарий, не плодить несколько почти одинаковых slash-команд без сильной причины.
-9. Если старые slash-команды все еще нужны как запасной путь, prefer hidden compatibility aliases вместо лишнего шума в `builtin_commands`, README и основном UX.
+9. Не добавлять hidden compatibility aliases для старых slash-команд без явной текущей зависимости клиента; prefer один поддерживаемый command path и отдельную archived note для удаленного поведения.
 10. Для локальных конфигов и UI-контрактов не держать legacy-совместимость "на всякий случай". Если новый формат уже выбран, старые поля, fallback-пути и normalization-ветки лучше удалять в том же change-set, чтобы не накапливать техдолг.
 
 ## Правила локальных конфигов

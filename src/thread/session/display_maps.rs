@@ -163,7 +163,7 @@ impl PercentDisplayMap {
                         .as_ref()
                         .map(|template| render_template(template, value))
                 })
-                .unwrap_or_else(|| fallback_percent_label(value)),
+                .expect("exact display map should validate complete values or explicit fallback"),
             Self::Thresholds {
                 values, fallback, ..
             } => values
@@ -176,7 +176,9 @@ impl PercentDisplayMap {
                         .as_ref()
                         .map(|template| render_template(template, value))
                 })
-                .unwrap_or_else(|| fallback_percent_label(value)),
+                .expect(
+                    "threshold display map should validate min 0 threshold or explicit fallback",
+                ),
         }
     }
 
@@ -236,58 +238,6 @@ fn default_percent_maps() -> BTreeMap<String, PercentDisplayMap> {
             },
         ),
         (
-            "context_braille".to_string(),
-            PercentDisplayMap::Thresholds {
-                values: vec![
-                    PercentThresholdLabel {
-                        min: 0,
-                        label: "⠀".to_string(),
-                    },
-                    PercentThresholdLabel {
-                        min: 7,
-                        label: "⢀".to_string(),
-                    },
-                    PercentThresholdLabel {
-                        min: 19,
-                        label: "⣀".to_string(),
-                    },
-                    PercentThresholdLabel {
-                        min: 32,
-                        label: "⣄".to_string(),
-                    },
-                    PercentThresholdLabel {
-                        min: 44,
-                        label: "⣤".to_string(),
-                    },
-                    PercentThresholdLabel {
-                        min: 57,
-                        label: "⣦".to_string(),
-                    },
-                    PercentThresholdLabel {
-                        min: 69,
-                        label: "⣶".to_string(),
-                    },
-                    PercentThresholdLabel {
-                        min: 82,
-                        label: "⣷".to_string(),
-                    },
-                    PercentThresholdLabel {
-                        min: 94,
-                        label: "⣿".to_string(),
-                    },
-                ],
-                fallback: Some("{value}%".to_string()),
-                unavailable: Some("⠀".to_string()),
-            },
-        ),
-        (
-            "percent".to_string(),
-            PercentDisplayMap::Template {
-                template: "{value}%".to_string(),
-                unavailable: Some("--".to_string()),
-            },
-        ),
-        (
             DEFAULT_PRIMARY_LIMITS_MAP_ID.to_string(),
             PercentDisplayMap::Template {
                 template: "5h {value}%".to_string(),
@@ -322,10 +272,6 @@ fn render_template(template: &str, value: u8) -> String {
         .replace("{percent}", &value.to_string())
 }
 
-fn fallback_percent_label(value: u8) -> String {
-    format!("{value}%")
-}
-
 fn clamp_percent(value: i32) -> u8 {
     value.clamp(0, 100) as u8
 }
@@ -345,7 +291,11 @@ fn validate_display_maps_config(config: &DisplayMapsConfig) -> std::io::Result<(
         &config.maps,
         "limits.secondary",
         config.limits.secondary.as_str(),
-    )
+    )?;
+    for (map_id, map) in &config.maps {
+        validate_percent_display_map(map_id, map)?;
+    }
+    Ok(())
 }
 
 fn validate_map_ref(
@@ -366,6 +316,41 @@ fn validate_map_ref(
         ));
     }
     Ok(())
+}
+
+fn validate_percent_display_map(map_id: &str, map: &PercentDisplayMap) -> std::io::Result<()> {
+    match map {
+        PercentDisplayMap::Template { .. } => Ok(()),
+        PercentDisplayMap::Exact {
+            values, fallback, ..
+        } => {
+            if fallback.is_some() || (0..=100).all(|value| values.contains_key(&value.to_string()))
+            {
+                Ok(())
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "display map `{map_id}` is exact but does not cover every percent value; add explicit `fallback` or all values from 0 to 100"
+                    ),
+                ))
+            }
+        }
+        PercentDisplayMap::Thresholds {
+            values, fallback, ..
+        } => {
+            if fallback.is_some() || values.iter().any(|entry| entry.min == 0) {
+                Ok(())
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "display map `{map_id}` is thresholds but has no min 0 entry; add explicit `fallback` or a threshold starting at 0"
+                    ),
+                ))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -501,6 +486,75 @@ mod tests {
             error
                 .to_string()
                 .contains("context.usage` references missing map `context_percent")
+        );
+        drop(std::fs::remove_file(path));
+    }
+
+    #[test]
+    fn rejects_partial_exact_maps_without_explicit_fallback() {
+        let path = std::env::temp_dir().join(format!(
+            "codex-acp-display-maps-partial-exact-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let contents = r#"
+        {
+          "context": { "usage": "dots" },
+          "limits": {
+            "primary": "percent",
+            "secondary": "percent"
+          },
+          "maps": {
+            "percent": { "kind": "template", "template": "{value}%" },
+            "dots": {
+              "kind": "exact",
+              "values": { "0": "", "1": "." }
+            }
+          }
+        }
+        "#;
+        std::fs::write(&path, contents).expect("display maps fixture should write");
+
+        let error = restore_display_maps(&path).expect_err("partial exact map should fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            error
+                .to_string()
+                .contains("add explicit `fallback` or all values from 0 to 100")
+        );
+        drop(std::fs::remove_file(path));
+    }
+
+    #[test]
+    fn rejects_threshold_maps_without_min_zero_or_explicit_fallback() {
+        let path = std::env::temp_dir().join(format!(
+            "codex-acp-display-maps-threshold-no-base-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let contents = r#"
+        {
+          "context": { "usage": "late" },
+          "limits": {
+            "primary": "percent",
+            "secondary": "percent"
+          },
+          "maps": {
+            "percent": { "kind": "template", "template": "{value}%" },
+            "late": {
+              "kind": "thresholds",
+              "values": [{ "min": 50, "label": "half" }]
+            }
+          }
+        }
+        "#;
+        std::fs::write(&path, contents).expect("display maps fixture should write");
+
+        let error =
+            restore_display_maps(&path).expect_err("threshold map without base should fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            error
+                .to_string()
+                .contains("add explicit `fallback` or a threshold starting at 0")
         );
         drop(std::fs::remove_file(path));
     }

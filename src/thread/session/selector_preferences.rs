@@ -565,7 +565,7 @@ mod tests {
                 models: vec![ModelSelectorModelEntry::Details(
                     ModelSelectorModelDetails {
                         id: "gpt-5.2".to_string(),
-                        name: Some("old 5.2".to_string()),
+                        name: Some("5.2".to_string()),
                         description: Some("manual description".to_string()),
                     },
                 )],
@@ -622,7 +622,7 @@ mod tests {
         let model_entry = model_selector
             .model_entry("gpt-5.2")
             .expect("model entry should restore");
-        assert_eq!(model_entry.name_override(), Some("old 5.2"));
+        assert_eq!(model_entry.name_override(), Some("5.2"));
         assert_eq!(
             model_entry.description_override(),
             Some("manual description")
@@ -681,9 +681,6 @@ mod tests {
                 "service_tier": null
               },
               "model_selector": {
-                "default_model": "gpt-5.2",
-                "default_reasoning_effort": "xhigh",
-                "default_service_tier": "fast",
                 "models": [
                   {
                     "id": "gpt-5.5",

@@ -26,10 +26,7 @@ use super::{
     ReasoningEffort, ServiceTier, SessionClient, SessionId, Thread, ThreadInner, ThreadListParams,
     ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
 };
-use crate::adapter_home::{
-    cas_home_from_codex_home, legacy_codex_acp_home, legacy_codex_acp_memories_home,
-    migrate_file_if_missing,
-};
+use crate::adapter_home::cas_home_from_codex_home;
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::session_display_maps::{
@@ -85,20 +82,6 @@ fn display_maps_error(path: &Path, error: io::Error) -> Error {
         "failed to read display maps at {}: {error}. Fix or remove this file; codex-acp will not overwrite an invalid existing config.",
         path.display()
     ))
-}
-
-fn migrate_cas_config_file(new_path: &Path, old_home: &Path, file_name: &str) -> io::Result<()> {
-    migrate_file_if_missing(new_path, &old_home.join(file_name)).map(|_| ())
-}
-
-fn migrate_cas_cache_file(new_path: &Path, old_home: &Path, file_name: &str) {
-    if let Err(error) = migrate_file_if_missing(new_path, &old_home.join(file_name)) {
-        warn!(
-            path = %new_path.display(),
-            error = %error,
-            "failed to migrate legacy codex-acp cache"
-        );
-    }
 }
 
 fn format_session_updated_at(updated_at: i64) -> String {
@@ -483,30 +466,15 @@ impl Thread {
         );
 
         let cas_home = cas_home_from_codex_home(&codex_home);
-        let legacy_config_home = legacy_codex_acp_home(&codex_home);
-        let legacy_cache_home = legacy_codex_acp_memories_home(&codex_home);
         let selector_preferences_path = selector_preferences_path(&cas_home);
-        migrate_cas_config_file(
-            &selector_preferences_path,
-            &legacy_config_home,
-            "selector-preferences.json",
-        )
-        .map_err(|error| selector_preferences_error(&selector_preferences_path, error))?;
         let should_materialize_selector_preferences = !selector_preferences_path.exists();
         let selector_preferences = restore_selector_preferences(&selector_preferences_path)
             .map_err(|error| selector_preferences_error(&selector_preferences_path, error))?;
         let display_maps_path = display_maps_path(&cas_home);
-        migrate_cas_config_file(&display_maps_path, &legacy_config_home, "display-maps.json")
-            .map_err(|error| display_maps_error(&display_maps_path, error))?;
         let should_materialize_display_maps = !display_maps_path.exists();
         let display_maps = restore_display_maps(&display_maps_path)
             .map_err(|error| display_maps_error(&display_maps_path, error))?;
         let context_usage_cache_path = context_usage_cache_path(&cas_home);
-        migrate_cas_cache_file(
-            &context_usage_cache_path,
-            &legacy_cache_home,
-            "context-usage-cache.json",
-        );
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(0_u64);
         let mut inner = ThreadInner {
             session_id: session_id.clone(),
@@ -713,11 +681,6 @@ impl Thread {
         };
         let cas_home = cas_home_from_codex_home(&config.codex_home);
         let context_usage_cache_path = context_usage_cache_path(&cas_home);
-        migrate_cas_cache_file(
-            &context_usage_cache_path,
-            &legacy_codex_acp_memories_home(&config.codex_home),
-            "context-usage-cache.json",
-        );
         let replay_turn_count = resume.thread.turns.len();
         let cached_context_usage = restore_cached_context_usage(
             &context_usage_cache_path,

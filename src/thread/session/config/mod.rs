@@ -320,16 +320,16 @@ pub(super) use context::{
     SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, build_account_status, build_mcp_summary,
     build_plugins_summary, build_skills_summary, full_status_report,
 };
-pub(super) use fast_mode::{
-    parse_fast_mode_value, service_tier_override_from_config, service_tier_override_from_session,
-};
+pub(super) use fast_mode::{service_tier_override_from_config, service_tier_override_from_session};
 pub(super) use limits::{
     RateLimitWarning, RateLimitWarningState, observe_rate_limit_snapshot, take_rate_limit_warnings,
 };
 pub(super) use model_selector::{parse_model_reasoning_value, parse_model_speed_value};
+#[cfg(test)]
+pub(super) use reasoning::parse_reasoning_effort;
 pub(super) use reasoning::{
-    find_model_for_current, normalize_reasoning_effort_for_model, parse_reasoning_effort,
-    reasoning_effort_value, resolve_reasoning_effort,
+    find_model_for_current, normalize_reasoning_effort_for_model, reasoning_effort_value,
+    resolve_reasoning_effort,
 };
 
 pub(super) fn usage_percent(used: Option<u64>, size: Option<u64>) -> Option<u64> {

@@ -3,9 +3,8 @@
 use super::session_config::{
     CONTEXT_COMBINED_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
     MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
-    find_model_for_current, normalize_reasoning_effort_for_model, parse_fast_mode_value,
-    parse_model_reasoning_value, parse_model_speed_value, parse_reasoning_effort,
-    reasoning_effort_value,
+    find_model_for_current, normalize_reasoning_effort_for_model, parse_model_reasoning_value,
+    parse_model_speed_value, reasoning_effort_value,
 };
 use super::{
     APPROVAL_PRESETS, ContextControlDisplay, DEFAULT_SESSION_MODE_ID, Error, ModeKind, ModelId,
@@ -228,18 +227,6 @@ impl Thread {
                 } else {
                     self.set_model(ModelId::new(value.0)).await
                 }
-            }
-            "fast_mode" => {
-                let service_tier = parse_fast_mode_value(&value.0)
-                    .ok_or_else(|| Error::invalid_params().data("Unsupported fast mode value"))?;
-                self.set_fast_mode(service_tier).await
-            }
-            "reasoning_effort" => {
-                let effort = parse_reasoning_effort(&value.0)
-                    .ok_or_else(|| Error::invalid_params().data("Unsupported reasoning effort"))?;
-                self.set_reasoning_effort(effort).await?;
-                self.notify_config_options_update().await;
-                Ok(())
             }
             "context_control" => self.set_context_control(value).await,
             _ => Err(Error::invalid_params().data("Unsupported config option")),

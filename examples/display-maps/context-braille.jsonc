@@ -1,5 +1,5 @@
 {
-  // Old context "braille" style for the lower Context selector button.
+  // Braille context style for the lower Context selector button.
   "context": {
     "usage": "context_braille",
   },

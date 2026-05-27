@@ -44,7 +44,7 @@ pub(in crate::thread) fn collaboration_mode_label(mode: ModeKind) -> &'static st
 pub(in crate::thread) fn parse_collaboration_mode(value: &str) -> Option<ModeKind> {
     match value {
         "plan" | "on" => Some(ModeKind::Plan),
-        "default" | "chat" | "off" | "code" => Some(ModeKind::Default),
+        "off" => Some(ModeKind::Default),
         _ => None,
     }
 }
