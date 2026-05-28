@@ -70,6 +70,7 @@ Sub-agent and collaboration tool-call rendering:
 - Session-scoped MCP passthrough for `stdio` and `http`
 - History replay after `load_session` and `resume_session`
 - ACP `agent_info.version` is published from the package version, so recent Zed External Agent settings can show the running adapter version
+- ACP `auth.logout` is advertised and handled, so recent Zed builds can use their native external-agent logout UI
 - Session commands:
   - `/init`
   - `/status`
@@ -168,7 +169,7 @@ Current gaps:
 - Manual `Plan mode` is usable, but it is not an exact match for Codex CLI `update_plan` autoplan rendering; think of it as a CLI-like collaboration flow rather than the same UI contract
 - Default-mode fallback checkpoint rendering is intentionally pragmatic ACP UI, not a pixel-for-pixel clone of Codex CLI autoplan visuals
 - `DynamicToolCall` is intentionally unsupported in runtime code for now; the old partial implementation was removed and summarized in `docs/drafts/dynamic-tool-call-backup.md`
-- Some upstream-style flows are still missing or incomplete, including `close_session` and `/logout`
+- Some upstream-style flows are still missing or incomplete, including slash-command `/logout`; native ACP `logout` is supported
 - There is still no true delete path end-to-end: `codex app-server` does not give this fork a practical hard-delete flow, and the current ACP bridge in `Zed` still does not surface `session/delete`; use `/archive` when you only need to hide a thread from normal lists
 - Slash `/new` is intentionally not surfaced anymore. Use native `Zed` `New Thread` for a real new ACP session; in-place backend switching remains only for `/fork` and archive-triggered replacement flows. Standard ACP `session/fork` is supported by the adapter, but current `Zed` still has no dedicated UI entrypoint for it, so slash `/fork` remains the practical path unless you patch the client. The old soft-new behavior is summarized in `docs/drafts/soft-new-backup.md`
 - Some behavior still depends on Zed-side ACP support
@@ -743,7 +744,7 @@ User-facing documentation stays in this README. Deeper project notes are kept se
 
 Current Zed-specific UI caveats are tracked in [docs/upstream-feature-matrix.md](docs/upstream-feature-matrix.md), especially around approval-card layout and command/review/session UX that the adapter alone cannot fully control.
 
-The latest local upstream reference sweep was run on `2026-05-16`. At that point Zed stable was `1.2.6`, preview was `1.3.3`, official `codex-acp` was `v0.14.0`, and ACP had moved to `v0.13.0` with v2/MCP-over-ACP scaffolding. Treat dependency updates as scoped migrations, not a mechanical version bump.
+The latest local upstream reference sweep was run on `2026-05-28`. At that point Zed stable was `1.4.4`, preview was `1.5.3-pre`, official `codex-acp` was `v0.15.0`, and ACP had moved to `v0.13.4` with stabilized logout, unstable plan operations, and v2/MCP-over-ACP scaffolding. Treat dependency updates as scoped migrations, not a mechanical version bump.
 
 If Zed's agent input area or lower selector toolbar looks squeezed, enable Zed's content-width
 limit:
@@ -764,7 +765,7 @@ That is a Zed panel layout setting, not an ACP adapter option.
 Near-term work:
 
 - Keep refining the compact context `%` selector and `/status` report where it helps daily use
-- Audit and selectively port upstream `codex-acp v0.14.0` parity items: terminal-output fallback memory fix and the next permission/elicitation details
+- Audit and selectively port upstream `codex-acp v0.15.0` parity items: terminal-output fallback fixes, additional permission mapping, plan update rendering, and the next permission/elicitation details
 - Keep new slash/preview UX scoped to explicit user demand; avoid adding parallel flows when Zed already has native UI
 
 Later candidates:
@@ -774,7 +775,7 @@ Later candidates:
 Not a priority for this fork right now:
 
 - `close_session` as a user-visible focus area in current Zed
-- `/logout`
+- slash-command `/logout`
 - `fs/watch`
 - app-server feature flags plumbing
 - `codex_home` surfacing

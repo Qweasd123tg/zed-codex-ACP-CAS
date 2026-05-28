@@ -4,17 +4,17 @@
 use acp::{
     Agent, Client, ConnectTo, ConnectionTo, Dispatch, Error, Handled, UntypedMessage,
     schema::{
-        AgentCapabilities, AuthMethod, AuthMethodAgent, AuthMethodId, AuthenticateRequest,
-        AuthenticateResponse, CancelNotification, ClientCapabilities, CloseSessionRequest,
-        CloseSessionResponse, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse,
-        Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
-        ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities,
-        NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse,
-        ProtocolVersion, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
-        SessionCloseCapabilities, SessionForkCapabilities, SessionId, SessionListCapabilities,
-        SessionResumeCapabilities, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-        SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
-        SetSessionModelResponse,
+        AgentAuthCapabilities, AgentCapabilities, AuthMethod, AuthMethodAgent, AuthMethodId,
+        AuthenticateRequest, AuthenticateResponse, CancelNotification, ClientCapabilities,
+        CloseSessionRequest, CloseSessionResponse, ExtRequest, ExtResponse, ForkSessionRequest,
+        ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+        ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+        LogoutCapabilities, LogoutRequest, LogoutResponse, McpCapabilities, NewSessionRequest,
+        NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse, ProtocolVersion,
+        ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
+        SessionForkCapabilities, SessionId, SessionListCapabilities, SessionResumeCapabilities,
+        SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+        SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
     },
 };
 use agent_client_protocol as acp;
@@ -211,6 +211,19 @@ impl CodexAgent {
                         let agent = agent.clone();
                         cx.spawn(async move {
                             responder.respond_with_result(agent.authenticate(request).await)
+                        })?;
+                        Ok(())
+                    }
+                },
+                acp::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let agent = agent.clone();
+                    async move |request: LogoutRequest, responder, cx: ConnectionTo<Client>| {
+                        let agent = agent.clone();
+                        cx.spawn(async move {
+                            responder.respond_with_result(agent.logout(request).await)
                         })?;
                         Ok(())
                     }
@@ -439,7 +452,8 @@ impl CodexAgent {
         let mut capabilities = AgentCapabilities::new()
             .prompt_capabilities(PromptCapabilities::new().embedded_context(true).image(true))
             .mcp_capabilities(McpCapabilities::new().http(true))
-            .load_session(true);
+            .load_session(true)
+            .auth(AgentAuthCapabilities::new().logout(LogoutCapabilities::new()));
         capabilities.session_capabilities = SessionCapabilities::new()
             .list(SessionListCapabilities::new())
             .close(SessionCloseCapabilities::new())
@@ -527,6 +541,13 @@ impl CodexAgent {
 
         self.auth_manager.reload();
         Ok(AuthenticateResponse::new())
+    }
+
+    async fn logout(&self, _request: LogoutRequest) -> Result<LogoutResponse, Error> {
+        self.auth_manager
+            .logout()
+            .map_err(Error::into_internal_error)?;
+        Ok(LogoutResponse::new())
     }
 
     async fn new_session(
@@ -986,6 +1007,10 @@ mod tests {
                 .close
                 .is_some(),
             "session/close capability should be advertised",
+        );
+        assert!(
+            response.agent_capabilities.auth.logout.is_some(),
+            "logout capability should be advertised",
         );
     }
 }
