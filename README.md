@@ -274,6 +274,15 @@ Configure Zed to launch that wrapper through `cmd.exe`:
 
 The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
 
+### Upgrade Notes For 0.25.2
+
+Command tool cards now drive the Zed-visible title/status/terminal surfaces
+directly. Shell commands use ACP `Terminal` content plus Zed's display-only
+terminal metadata when the client advertises terminal output support, while
+read/list/search commands keep concise text output such as empty-directory
+summaries. This is the path Zed uses for copied transcripts like
+`**Tool Call: ...**`, `Status: Completed`, and `Terminal:`.
+
 ### Upgrade Notes For 0.25.1
 
 Command tool cards now use a Zed-style transcript body. The visible content

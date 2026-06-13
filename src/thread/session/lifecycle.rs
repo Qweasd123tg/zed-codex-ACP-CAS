@@ -522,6 +522,8 @@ impl Thread {
             active_turn_saw_plan_item: false,
             active_turn_saw_plan_delta: false,
             started_tool_calls: HashSet::new(),
+            terminal_tool_call_ids: HashSet::new(),
+            terminal_tool_call_output_seen: HashSet::new(),
             last_completed_turn_id: None,
             last_turn_error_notice: None,
             turn_plan_updates_seen: HashSet::new(),

@@ -176,6 +176,8 @@ struct ThreadInner {
     active_turn_saw_plan_item: bool,
     active_turn_saw_plan_delta: bool,
     started_tool_calls: HashSet<String>,
+    terminal_tool_call_ids: HashSet<String>,
+    terminal_tool_call_output_seen: HashSet<String>,
     last_completed_turn_id: Option<String>,
     last_turn_error_notice: Option<(String, String)>,
     turn_plan_updates_seen: HashSet<String>,

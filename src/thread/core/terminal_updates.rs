@@ -18,7 +18,12 @@ pub(super) async fn handle_command_output_delta(
         inner.mark_turn_progress();
     }
 
-    let update = if inner.client.supports_terminal_output() {
+    let update = if inner.terminal_tool_call_ids.contains(&payload.item_id) {
+        if !payload.delta.is_empty() {
+            inner
+                .terminal_tool_call_output_seen
+                .insert(payload.item_id.clone());
+        }
         ToolCallUpdate::new(
             ToolCallId::new(payload.item_id.clone()),
             ToolCallUpdateFields::new(),
@@ -51,7 +56,7 @@ pub(super) async fn handle_terminal_interaction(
         inner.mark_turn_progress();
     }
 
-    if inner.client.supports_terminal_output() {
+    if inner.terminal_tool_call_ids.contains(&payload.item_id) {
         inner
             .client
             .send_tool_call_update(

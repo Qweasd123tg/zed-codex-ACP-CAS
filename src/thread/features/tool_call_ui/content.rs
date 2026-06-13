@@ -16,57 +16,30 @@ pub(in crate::thread) fn command_tool_started_content(
     cwd: &Path,
     command_actions: &[CommandAction],
 ) -> Vec<ToolCallContent> {
-    vec![
-        command_card_body(
-            command,
-            cwd,
-            command_actions,
-            CommandExecutionStatus::InProgress,
-            None,
-        )
-        .into(),
-    ]
+    vec![command_started_details(command, cwd, command_actions).into()]
 }
 
 pub(in crate::thread) fn command_tool_completed_content(
-    command: &str,
-    cwd: &Path,
+    _command: &str,
+    _cwd: &Path,
     command_actions: &[CommandAction],
     status: CommandExecutionStatus,
     aggregated_output: Option<&str>,
 ) -> Vec<ToolCallContent> {
-    vec![
-        command_card_body(
-            command,
-            cwd,
-            command_actions,
-            status.clone(),
-            Some(command_output_section(
-                status,
-                command_actions,
-                aggregated_output,
-            )),
-        )
-        .into(),
-    ]
+    vec![command_output_section(status, command_actions, aggregated_output).into()]
 }
 
-fn command_card_body(
-    command: &str,
-    cwd: &Path,
-    command_actions: &[CommandAction],
-    status: CommandExecutionStatus,
-    output_section: Option<String>,
-) -> String {
+fn command_started_details(command: &str, cwd: &Path, command_actions: &[CommandAction]) -> String {
     let mut body = String::new();
-    body.push_str("**Tool Call: ");
-    body.push_str(&tool_call_label(command, cwd, command_actions));
-    body.push_str("**\nStatus: ");
-    body.push_str(command_status_label(status));
+    body.push_str("Command\n");
+    body.push_str(&fenced_code("sh", command.trim()));
+    body.push_str("\n\ncwd: ");
+    body.push_str(&cwd.display().to_string());
 
-    if let Some(output_section) = output_section {
-        body.push_str("\n\n");
-        body.push_str(&output_section);
+    let label = command_tool_label(command, cwd, command_actions);
+    if !label.is_empty() {
+        body.push_str("\n\nSummary: ");
+        body.push_str(&label);
     }
 
     body
@@ -172,7 +145,11 @@ fn should_render_plain_output(command_actions: &[CommandAction], output: &str) -
         && output.chars().count() <= 500
 }
 
-fn tool_call_label(command: &str, cwd: &Path, command_actions: &[CommandAction]) -> String {
+pub(in crate::thread) fn command_tool_label(
+    command: &str,
+    cwd: &Path,
+    command_actions: &[CommandAction],
+) -> String {
     match command_actions {
         [CommandAction::Read { path, .. }] => {
             format!("Read {}", code_span(&display_path(cwd, path)))
@@ -207,15 +184,6 @@ fn shell_tool_call_label(command: &str) -> String {
         "Run shell command".to_string()
     } else {
         label
-    }
-}
-
-fn command_status_label(status: CommandExecutionStatus) -> &'static str {
-    match status {
-        CommandExecutionStatus::Completed => "Completed",
-        CommandExecutionStatus::Failed => "Failed",
-        CommandExecutionStatus::Declined => "Declined",
-        CommandExecutionStatus::InProgress => "Running",
     }
 }
 
@@ -299,7 +267,20 @@ mod tests {
     }
 
     #[test]
-    fn command_started_content_uses_zed_transcript_heading() {
+    fn command_tool_label_uses_zed_transcript_label() {
+        let actions = vec![CommandAction::Read {
+            command: "cat src/lib.rs".to_string(),
+            name: "cat".to_string(),
+            path: PathBuf::from("src/lib.rs"),
+        }];
+
+        let label = super::command_tool_label("cat src/lib.rs", Path::new("/repo"), &actions);
+
+        assert_eq!(label, "Read `/repo/src/lib.rs`");
+    }
+
+    #[test]
+    fn command_started_content_keeps_expandable_details_without_transcript_chrome() {
         let actions = vec![CommandAction::Read {
             command: "cat src/lib.rs".to_string(),
             name: "cat".to_string(),
@@ -312,9 +293,11 @@ mod tests {
             &actions,
         ));
 
-        assert!(text.starts_with("**Tool Call: Read `/repo/src/lib.rs`**\nStatus: Running"));
-        assert!(!text.contains("Command\n"));
-        assert!(!text.contains("Actions\n"));
+        assert!(text.contains("Command\n```sh\ncat src/lib.rs\n```"));
+        assert!(text.contains("cwd: /repo"));
+        assert!(text.contains("Summary: Read `/repo/src/lib.rs`"));
+        assert!(!text.contains("**Tool Call:"));
+        assert!(!text.contains("Status:"));
     }
 
     #[test]
@@ -327,13 +310,13 @@ mod tests {
             Some("Hello from terminal!\nSun Jun 14 00:06:51 MSK 2026"),
         ));
 
-        assert!(text.contains("**Tool Call: echo \"Hello from terminal!\" && date**"));
-        assert!(text.contains("Status: Completed"));
         assert!(
             text.contains(
                 "Terminal:\n```\nHello from terminal!\nSun Jun 14 00:06:51 MSK 2026\n```"
             )
         );
+        assert!(!text.contains("**Tool Call:"));
+        assert!(!text.contains("Status:"));
     }
 
     #[test]
@@ -351,10 +334,7 @@ mod tests {
             Some("/home/qweasd123tg/Code/1 is empty."),
         ));
 
-        assert!(text.starts_with(
-            "**Tool Call: List the `/home/qweasd123tg/Code/1` directory's contents**\nStatus: Completed"
-        ));
-        assert!(text.contains("\n\n/home/qweasd123tg/Code/1 is empty."));
+        assert_eq!(text, "/home/qweasd123tg/Code/1 is empty.");
         assert!(!text.contains("Terminal:"));
     }
 
@@ -373,7 +353,6 @@ mod tests {
             Some(&output),
         ));
 
-        assert!(text.contains("Status: Completed"));
         assert!(text.contains("Terminal (showing first 80 and last 80 lines):"));
         assert!(text.contains("[... 40 line(s) omitted ...]"));
         assert!(text.contains("line 199"));
