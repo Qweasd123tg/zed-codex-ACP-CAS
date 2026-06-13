@@ -5,7 +5,6 @@ use std::path::Path;
 use agent_client_protocol::schema::ToolCallContent;
 use codex_app_server_protocol::{CommandAction, CommandExecutionStatus};
 
-const ACTION_PREVIEW_LIMIT: usize = 8;
 const OUTPUT_HEAD_LINES: usize = 80;
 const OUTPUT_TAIL_LINES: usize = 80;
 const OUTPUT_MAX_CHARS: usize = 24_000;
@@ -17,7 +16,16 @@ pub(in crate::thread) fn command_tool_started_content(
     cwd: &Path,
     command_actions: &[CommandAction],
 ) -> Vec<ToolCallContent> {
-    vec![command_card_body(command, cwd, command_actions, Some("running"), None).into()]
+    vec![
+        command_card_body(
+            command,
+            cwd,
+            command_actions,
+            CommandExecutionStatus::InProgress,
+            None,
+        )
+        .into(),
+    ]
 }
 
 pub(in crate::thread) fn command_tool_completed_content(
@@ -32,8 +40,12 @@ pub(in crate::thread) fn command_tool_completed_content(
             command,
             cwd,
             command_actions,
-            Some(command_status_label(status.clone())),
-            Some(command_output_section(status, aggregated_output)),
+            status.clone(),
+            Some(command_output_section(
+                status,
+                command_actions,
+                aggregated_output,
+            )),
         )
         .into(),
     ]
@@ -43,27 +55,14 @@ fn command_card_body(
     command: &str,
     cwd: &Path,
     command_actions: &[CommandAction],
-    status: Option<&str>,
+    status: CommandExecutionStatus,
     output_section: Option<String>,
 ) -> String {
     let mut body = String::new();
-    if let Some(status) = status {
-        body.push_str("Status: ");
-        body.push_str(status);
-        body.push_str("\n\n");
-    }
-
-    body.push_str("Command\n");
-    body.push_str(&fenced_code("sh", command.trim()));
-    body.push_str("\n\n");
-    body.push_str("cwd: ");
-    body.push_str(&cwd.display().to_string());
-
-    let action_lines = command_action_lines(command_actions);
-    if !action_lines.is_empty() {
-        body.push_str("\n\nActions\n");
-        body.push_str(&action_lines.join("\n"));
-    }
+    body.push_str("**Tool Call: ");
+    body.push_str(&tool_call_label(command, cwd, command_actions));
+    body.push_str("**\nStatus: ");
+    body.push_str(command_status_label(status));
 
     if let Some(output_section) = output_section {
         body.push_str("\n\n");
@@ -75,6 +74,7 @@ fn command_card_body(
 
 fn command_output_section(
     status: CommandExecutionStatus,
+    command_actions: &[CommandAction],
     aggregated_output: Option<&str>,
 ) -> String {
     let Some(output) = aggregated_output
@@ -85,15 +85,26 @@ fn command_output_section(
     };
 
     let preview = output_preview(output);
+    if should_render_plain_output(command_actions, &preview.text) {
+        let mut section = String::new();
+        if let Some(summary) = preview.omission_summary.as_ref() {
+            section.push_str("Output (");
+            section.push_str(summary);
+            section.push_str(")\n");
+        }
+        section.push_str(&preview.text);
+        return section;
+    }
+
     let mut section = String::new();
-    section.push_str("Output");
+    section.push_str("Terminal");
     if let Some(summary) = preview.omission_summary.as_ref() {
         section.push_str(" (");
         section.push_str(summary);
         section.push(')');
     }
-    section.push('\n');
-    section.push_str(&fenced_code("text", &preview.text));
+    section.push_str(":\n");
+    section.push_str(&fenced_code("", &preview.text));
     section
 }
 
@@ -148,64 +159,63 @@ fn output_preview(output: &str) -> OutputPreview {
     }
 }
 
-fn command_action_lines(command_actions: &[CommandAction]) -> Vec<String> {
-    let mut lines = command_actions
-        .iter()
-        .take(ACTION_PREVIEW_LIMIT)
-        .map(command_action_line)
-        .collect::<Vec<_>>();
-    let remaining = command_actions.len().saturating_sub(ACTION_PREVIEW_LIMIT);
-    if remaining > 0 {
-        lines.push(format!("- ... {remaining} more action(s)"));
-    }
-    lines
+fn should_render_plain_output(command_actions: &[CommandAction], output: &str) -> bool {
+    command_actions.iter().any(|action| {
+        matches!(
+            action,
+            CommandAction::ListFiles {
+                path: _,
+                command: _
+            }
+        )
+    }) && output.lines().count() <= 4
+        && output.chars().count() <= 500
 }
 
-fn command_action_line(action: &CommandAction) -> String {
-    match action {
-        CommandAction::Read { name, path, .. } => {
-            let mut line = format!("- read {}", path.display());
-            let name = compact_inline(name);
-            if !name.is_empty() {
-                line.push_str(" via ");
-                line.push_str(&name);
-            }
-            line
+fn tool_call_label(command: &str, cwd: &Path, command_actions: &[CommandAction]) -> String {
+    match command_actions {
+        [CommandAction::Read { path, .. }] => {
+            format!("Read {}", code_span(&display_path(cwd, path)))
         }
-        CommandAction::ListFiles { path, command } => {
-            let target = path.as_deref().unwrap_or(".");
+        [CommandAction::ListFiles { path, .. }] => {
             format!(
-                "- list files in {} ({})",
-                compact_inline(target),
-                compact_inline(command)
+                "List the {} directory's contents",
+                code_span(&display_optional_path(cwd, path.as_deref()))
             )
         }
-        CommandAction::Search {
-            query,
-            path,
-            command,
-        } => {
-            let query = query.as_deref().unwrap_or("*");
-            let target = path.as_deref().unwrap_or(".");
+        [CommandAction::Search { query, path, .. }] => {
+            let query = query
+                .as_deref()
+                .map(str::trim)
+                .filter(|query| !query.is_empty())
+                .unwrap_or("*");
             format!(
-                "- search {} in {} ({})",
-                compact_inline(query),
-                compact_inline(target),
-                compact_inline(command)
+                "Search for {} in {}",
+                code_span(query),
+                code_span(&display_optional_path(cwd, path.as_deref()))
             )
         }
-        CommandAction::Unknown { command } => {
-            format!("- run {}", compact_inline(command))
-        }
+        [CommandAction::Unknown { .. }] | [] => shell_tool_call_label(command),
+        _ => super::title::command_tool_title(command, command_actions),
+    }
+}
+
+fn shell_tool_call_label(command: &str) -> String {
+    let inner = super::kind::extract_inner_shell_command(command);
+    let label = compact_inline(&inner);
+    if label.is_empty() {
+        "Run shell command".to_string()
+    } else {
+        label
     }
 }
 
 fn command_status_label(status: CommandExecutionStatus) -> &'static str {
     match status {
-        CommandExecutionStatus::Completed => "completed",
-        CommandExecutionStatus::Failed => "failed",
-        CommandExecutionStatus::Declined => "declined",
-        CommandExecutionStatus::InProgress => "running",
+        CommandExecutionStatus::Completed => "Completed",
+        CommandExecutionStatus::Failed => "Failed",
+        CommandExecutionStatus::Declined => "Declined",
+        CommandExecutionStatus::InProgress => "Running",
     }
 }
 
@@ -216,6 +226,24 @@ fn command_completion_summary(status: CommandExecutionStatus) -> &'static str {
         CommandExecutionStatus::Declined => "Command was declined.",
         CommandExecutionStatus::InProgress => "Command is still running.",
     }
+}
+
+fn display_optional_path(cwd: &Path, path: Option<&str>) -> String {
+    let path = path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or(".");
+    display_path(cwd, Path::new(path))
+}
+
+fn display_path(cwd: &Path, path: &Path) -> String {
+    if path.as_os_str().is_empty() || path == Path::new(".") {
+        return cwd.display().to_string();
+    }
+    if path.is_absolute() {
+        return path.display().to_string();
+    }
+    cwd.join(path).display().to_string()
 }
 
 fn fenced_code(language: &str, text: &str) -> String {
@@ -232,6 +260,21 @@ fn fenced_code(language: &str, text: &str) -> String {
     let longest_backtick_run = longest_run.saturating_add(1).max(3);
     let fence = "`".repeat(longest_backtick_run);
     format!("{fence}{language}\n{text}\n{fence}")
+}
+
+fn code_span(text: &str) -> String {
+    let mut longest_run = 0usize;
+    let mut current_run = 0usize;
+    for ch in text.chars() {
+        if ch == '`' {
+            current_run += 1;
+            longest_run = longest_run.max(current_run);
+        } else {
+            current_run = 0;
+        }
+    }
+    let fence = "`".repeat(longest_run.saturating_add(1).max(1));
+    format!("{fence}{text}{fence}")
 }
 
 fn compact_inline(value: &str) -> String {
@@ -256,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn command_started_content_shows_command_cwd_and_actions() {
+    fn command_started_content_uses_zed_transcript_heading() {
         let actions = vec![CommandAction::Read {
             command: "cat src/lib.rs".to_string(),
             name: "cat".to_string(),
@@ -269,14 +312,54 @@ mod tests {
             &actions,
         ));
 
-        assert!(text.contains("Status: running"));
-        assert!(text.contains("```sh\ncat src/lib.rs\n```"));
-        assert!(text.contains("cwd: /repo"));
-        assert!(text.contains("Actions\n- read src/lib.rs via cat"));
+        assert!(text.starts_with("**Tool Call: Read `/repo/src/lib.rs`**\nStatus: Running"));
+        assert!(!text.contains("Command\n"));
+        assert!(!text.contains("Actions\n"));
     }
 
     #[test]
-    fn command_completed_content_keeps_context_and_caps_long_output() {
+    fn command_completed_content_uses_terminal_block_for_shell_output() {
+        let text = first_text(command_tool_completed_content(
+            "bash -lc 'echo \"Hello from terminal!\" && date'",
+            Path::new("/repo"),
+            &[],
+            CommandExecutionStatus::Completed,
+            Some("Hello from terminal!\nSun Jun 14 00:06:51 MSK 2026"),
+        ));
+
+        assert!(text.contains("**Tool Call: echo \"Hello from terminal!\" && date**"));
+        assert!(text.contains("Status: Completed"));
+        assert!(
+            text.contains(
+                "Terminal:\n```\nHello from terminal!\nSun Jun 14 00:06:51 MSK 2026\n```"
+            )
+        );
+    }
+
+    #[test]
+    fn command_completed_content_renders_short_list_output_as_plain_text() {
+        let actions = vec![CommandAction::ListFiles {
+            path: None,
+            command: "ls".to_string(),
+        }];
+
+        let text = first_text(command_tool_completed_content(
+            "ls",
+            Path::new("/home/qweasd123tg/Code/1"),
+            &actions,
+            CommandExecutionStatus::Completed,
+            Some("/home/qweasd123tg/Code/1 is empty."),
+        ));
+
+        assert!(text.starts_with(
+            "**Tool Call: List the `/home/qweasd123tg/Code/1` directory's contents**\nStatus: Completed"
+        ));
+        assert!(text.contains("\n\n/home/qweasd123tg/Code/1 is empty."));
+        assert!(!text.contains("Terminal:"));
+    }
+
+    #[test]
+    fn command_completed_content_caps_long_output() {
         let output = (0..200)
             .map(|index| format!("line {index}"))
             .collect::<Vec<_>>()
@@ -290,9 +373,8 @@ mod tests {
             Some(&output),
         ));
 
-        assert!(text.contains("Status: completed"));
-        assert!(text.contains("Command\n```sh\ncargo test\n```"));
-        assert!(text.contains("Output (showing first 80 and last 80 lines)"));
+        assert!(text.contains("Status: Completed"));
+        assert!(text.contains("Terminal (showing first 80 and last 80 lines):"));
         assert!(text.contains("[... 40 line(s) omitted ...]"));
         assert!(text.contains("line 199"));
     }

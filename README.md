@@ -274,6 +274,15 @@ Configure Zed to launch that wrapper through `cmd.exe`:
 
 The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
 
+### Upgrade Notes For 0.25.1
+
+Command tool cards now use a Zed-style transcript body. The visible content
+starts with `**Tool Call: ...**`, uses title-case status labels, shows short
+list-directory results as plain text, and puts normal terminal output under a
+`Terminal:` fenced block. Raw Input still carries the exact command and parsed
+actions, while Raw Output keeps the exit/status payload when the backend provides
+one.
+
 ### Upgrade Notes For 0.25.0
 
 Command tool cards are no longer bare placeholders. Started/completed/replayed
