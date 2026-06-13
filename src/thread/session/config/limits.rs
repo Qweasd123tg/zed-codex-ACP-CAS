@@ -45,11 +45,18 @@ pub(in crate::thread) fn limits_status_description(
     snapshot: Option<&RateLimitSnapshot>,
     display_maps: &DisplayMapsConfig,
 ) -> String {
-    format!(
-        "{}\n{}",
-        combined_limits_status_label(snapshot, display_maps),
-        combined_limits_reset_message(snapshot)
-    )
+    let mut lines = Vec::new();
+    lines.push(combined_limits_status_label(snapshot, display_maps));
+    if let Some(snapshot) = snapshot {
+        if let Some(identity) = rate_limit_identity_line(snapshot) {
+            lines.push(identity);
+        }
+        if let Some(credits) = credits_line(snapshot) {
+            lines.push(credits);
+        }
+    }
+    lines.push(combined_limits_reset_message(snapshot));
+    lines.join("\n")
 }
 
 pub(in crate::thread) fn five_hour_status_label(
@@ -212,6 +219,39 @@ fn format_reset_timestamp(unix_seconds: i64) -> String {
     format_relative_timestamp(unix_seconds)
 }
 
+fn rate_limit_identity_line(snapshot: &RateLimitSnapshot) -> Option<String> {
+    match (
+        snapshot.limit_name.as_deref().map(str::trim),
+        snapshot.limit_id.as_deref().map(str::trim),
+    ) {
+        (Some(name), Some(id)) if !name.is_empty() && !id.is_empty() && name != id => {
+            Some(format!("Limit: {name} ({id})"))
+        }
+        (Some(name), _) if !name.is_empty() => Some(format!("Limit: {name}")),
+        (_, Some(id)) if !id.is_empty() => Some(format!("Limit: {id}")),
+        _ => None,
+    }
+}
+
+fn credits_line(snapshot: &RateLimitSnapshot) -> Option<String> {
+    let credits = snapshot.credits.as_ref()?;
+    if credits.unlimited {
+        return Some("Credits: unlimited".to_string());
+    }
+    if credits.has_credits {
+        return Some(
+            credits
+                .balance
+                .as_deref()
+                .map(str::trim)
+                .filter(|balance| !balance.is_empty())
+                .map(|balance| format!("Credits: {balance}"))
+                .unwrap_or_else(|| "Credits: available".to_string()),
+        );
+    }
+    Some("Credits: unavailable".to_string())
+}
+
 fn format_reset_delta(delta: u64) -> String {
     const MINUTE: u64 = 60;
     const HOUR: u64 = 60 * MINUTE;
@@ -276,11 +316,11 @@ mod tests {
     use super::{
         RateLimitWarning, RateLimitWarningState, combined_limits_reset_message,
         combined_limits_status_label, five_hour_reset_message, five_hour_status_label,
-        format_reset_delta, observe_rate_limit_snapshot, take_rate_limit_warnings,
-        weekly_reset_message, weekly_status_label,
+        format_reset_delta, limits_status_description, observe_rate_limit_snapshot,
+        take_rate_limit_warnings, weekly_reset_message, weekly_status_label,
     };
     use crate::thread::session_display_maps::DisplayMapsConfig;
-    use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow};
+    use codex_app_server_protocol::{CreditsSnapshot, RateLimitSnapshot, RateLimitWindow};
     use codex_protocol::account::PlanType;
 
     #[test]
@@ -341,6 +381,32 @@ mod tests {
             combined_limits_status_label(Some(&snapshot), &display_maps),
             "5h 58% · wk 95%"
         );
+    }
+
+    #[test]
+    fn rate_limit_description_includes_identity_and_credits() {
+        let snapshot = RateLimitSnapshot {
+            limit_id: Some("codex".to_string()),
+            limit_name: Some("Codex".to_string()),
+            primary: Some(RateLimitWindow {
+                used_percent: 42,
+                window_duration_mins: Some(300),
+                resets_at: Some(4_102_444_800),
+            }),
+            secondary: None,
+            credits: Some(CreditsSnapshot {
+                has_credits: true,
+                unlimited: false,
+                balance: Some("$12.34".to_string()),
+            }),
+            plan_type: Some(PlanType::Pro),
+        };
+
+        let description = limits_status_description(Some(&snapshot), &DisplayMapsConfig::default());
+
+        assert!(description.contains("Limit: Codex (codex)"));
+        assert!(description.contains("Credits: $12.34"));
+        assert!(description.contains("5-hour: resets"));
     }
 
     #[test]

@@ -48,6 +48,7 @@ impl ContextControlDisplay {
 // Входные параметры для сборки списка session config options.
 pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) workspace_cwd: &'a std::path::Path,
+    pub(in crate::thread) backend_cli_version: &'a str,
     pub(in crate::thread) models: &'a [AppModel],
     pub(in crate::thread) current_model: &'a str,
     pub(in crate::thread) current_service_tier: Option<ServiceTier>,
@@ -77,6 +78,7 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
 pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOptionsInput<'_> {
     ConfigOptionsInput {
         workspace_cwd: &inner.workspace_cwd,
+        backend_cli_version: &inner.backend_cli_version,
         models: &inner.models,
         current_model: &inner.current_model,
         current_service_tier: inner.service_tier,
@@ -105,6 +107,7 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
 pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfigOption> {
     let ConfigOptionsInput {
         workspace_cwd,
+        backend_cli_version,
         models,
         current_model,
         current_service_tier,
@@ -231,6 +234,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 "context_control",
                 context::context_control_option_groups(
                     workspace_cwd,
+                    backend_cli_version,
                     account_status,
                     total_token_usage,
                     current_used_tokens,
@@ -393,6 +397,7 @@ mod tests {
 
         let options = config_options(ConfigOptionsInput {
             workspace_cwd: std::path::Path::new("/tmp"),
+            backend_cli_version: "0.0.0",
             models: &models,
             current_model: "gpt-5.5",
             current_service_tier: Some(ServiceTier::Fast),
@@ -491,6 +496,7 @@ mod tests {
 
         let options = config_options(ConfigOptionsInput {
             workspace_cwd: std::path::Path::new("/tmp"),
+            backend_cli_version: "0.0.0",
             models: &models,
             current_model: "gpt-5.5",
             current_service_tier: Some(ServiceTier::Fast),
@@ -611,6 +617,7 @@ mod tests {
 
         let options = config_options(ConfigOptionsInput {
             workspace_cwd: std::path::Path::new("/tmp"),
+            backend_cli_version: "0.0.0",
             models: &models,
             current_model: "gpt-5.5",
             current_service_tier: None,
@@ -713,6 +720,7 @@ mod tests {
 
         let options = config_options(ConfigOptionsInput {
             workspace_cwd: std::path::Path::new("/tmp"),
+            backend_cli_version: "0.0.0",
             models: &[],
             current_model: "gpt-5.5",
             current_service_tier: None,
@@ -776,6 +784,7 @@ mod tests {
 
         let options = config_options(ConfigOptionsInput {
             workspace_cwd: std::path::Path::new("/tmp"),
+            backend_cli_version: "0.0.0",
             models: &[],
             current_model: "gpt-5.5",
             current_service_tier: None,
@@ -880,6 +889,7 @@ mod tests {
 
         let options = config_options(ConfigOptionsInput {
             workspace_cwd: std::path::Path::new("/tmp"),
+            backend_cli_version: "0.0.0",
             models: &[],
             current_model: "gpt-5.5",
             current_service_tier: None,

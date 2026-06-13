@@ -138,6 +138,7 @@ struct ThreadInner {
     cas_home: PathBuf,
     bundled_skills_enabled: bool,
     thread_id: String,
+    backend_cli_version: String,
     context_usage_cache_path: PathBuf,
     selector_preferences_path: PathBuf,
     selector_layout: session_selector_preferences::SelectorLayoutPreferences,

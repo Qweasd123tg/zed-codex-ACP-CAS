@@ -53,6 +53,7 @@ pub struct CodexAgent {
 
 const STARTUP_RESTORE_GUARD_WINDOW: Duration = Duration::from_secs(5);
 const STARTUP_COMMANDS_SYNC_DELAY: Duration = Duration::from_millis(200);
+const SLOW_STARTUP_NOTICE_THRESHOLD: Duration = Duration::from_millis(1500);
 
 impl CodexAgent {
     fn auto_restore_enabled_from_env() -> bool {
@@ -102,7 +103,11 @@ impl CodexAgent {
         Ok(())
     }
 
-    fn spawn_post_load_startup_tasks(thread: Arc<Thread>, replay_loaded_history: bool) {
+    fn spawn_post_load_startup_tasks(
+        thread: Arc<Thread>,
+        replay_loaded_history: bool,
+        startup_elapsed: Duration,
+    ) {
         let notify_thread = thread.clone();
         tokio::task::spawn(async move {
             // Сначала отдаём клиенту session response, затем публикуем динамические
@@ -111,6 +116,11 @@ impl CodexAgent {
             tokio::time::sleep(STARTUP_COMMANDS_SYNC_DELAY).await;
             notify_thread.notify_usage_update().await;
             notify_thread.notify_available_commands().await;
+            if startup_elapsed >= SLOW_STARTUP_NOTICE_THRESHOLD {
+                notify_thread
+                    .notify_slow_startup_ready(startup_elapsed)
+                    .await;
+            }
             if replay_loaded_history {
                 notify_thread.replay_loaded_history().await;
             }
@@ -126,12 +136,17 @@ impl CodexAgent {
         session_id: SessionId,
         thread: Arc<Thread>,
         replay_loaded_history: bool,
+        started_at: Instant,
     ) -> Result<LoadSessionResponse, Error> {
         let load = thread.load().await?;
         if replay_loaded_history {
             thread.mark_history_replay_pending().await;
         }
-        Self::spawn_post_load_startup_tasks(thread.clone(), replay_loaded_history);
+        Self::spawn_post_load_startup_tasks(
+            thread.clone(),
+            replay_loaded_history,
+            started_at.elapsed(),
+        );
         self.sessions
             .lock()
             .map_err(|_| Error::internal_error().data("session registry lock poisoned"))?
@@ -586,7 +601,7 @@ impl CodexAgent {
         .await?;
         let thread = Arc::new(thread);
         let load = self
-            .load_and_register_session(session_id.clone(), thread, false)
+            .load_and_register_session(session_id.clone(), thread, false, started_at)
             .await?;
 
         info!(
@@ -652,7 +667,7 @@ impl CodexAgent {
         // При обычном load-сценарии реплеим историю; если сработал startup guard,
         // открываем свежий backend-thread под тем же ACP session handle.
         let load = self
-            .load_and_register_session(session_id, thread, !bypass_startup_restore)
+            .load_and_register_session(session_id, thread, !bypass_startup_restore, started_at)
             .await?;
 
         info!(
@@ -714,7 +729,7 @@ impl CodexAgent {
 
         // Для session/resume не реплеим историю, но обновляем динамические команды после старта.
         let load = self
-            .load_and_register_session(session_id, thread, false)
+            .load_and_register_session(session_id, thread, false, started_at)
             .await?;
 
         info!(
@@ -780,7 +795,7 @@ impl CodexAgent {
 
         let thread = Arc::new(thread);
         let load = self
-            .load_and_register_session(forked_session_id.clone(), thread, false)
+            .load_and_register_session(forked_session_id.clone(), thread, false, started_at)
             .await?;
 
         info!(

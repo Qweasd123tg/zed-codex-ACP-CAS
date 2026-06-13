@@ -1,6 +1,6 @@
 //! Загрузчики session view и метаданных, которые ACP использует для resume и восстановления контекста.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tracing::{info, warn};
 
@@ -130,6 +130,33 @@ impl Thread {
             .await;
     }
 
+    pub async fn notify_slow_startup_ready(&self, startup_elapsed: Duration) {
+        let (client, thread_id, backend_cli_version, workspace_cwd, model, model_provider) = {
+            let inner = self.inner.lock().await;
+            (
+                inner.client.clone(),
+                inner.thread_id.clone(),
+                inner.backend_cli_version.clone(),
+                inner.workspace_cwd.clone(),
+                inner.current_model.clone(),
+                inner.current_model_provider.clone(),
+            )
+        };
+
+        let body = format!(
+            "Adapter: codex-acp-cas {}\nBackend: {}\nThread: {thread_id}\nWorkspace: {}\nModel: {} ({})\nStartup: {}\nMetadata: account, limits, skills and plugins continue loading in the background.",
+            env!("CARGO_PKG_VERSION"),
+            backend_version_detail(&backend_cli_version),
+            workspace_cwd.display(),
+            model,
+            model_provider,
+            format_duration(startup_elapsed),
+        );
+        client
+            .send_system_message("status", "Codex CAS ready", body)
+            .await;
+    }
+
     pub async fn refresh_startup_metadata(&self) {
         let started_at = Instant::now();
         let (thread_id, workspace_cwd, codex_home, bundled_skills_enabled, app) = {
@@ -252,4 +279,22 @@ impl Thread {
         let mut inner = self.inner.lock().await;
         inner.history_replay_in_progress = false;
     }
+}
+
+fn backend_version_detail(backend_cli_version: &str) -> String {
+    let version = backend_cli_version.trim();
+    if version.is_empty() {
+        "codex unknown".to_string()
+    } else {
+        format!("codex {version}")
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    let millis = duration.as_millis();
+    if millis < 1_000 {
+        return format!("{millis}ms");
+    }
+    let seconds = millis as f64 / 1_000.0;
+    format!("{seconds:.1}s")
 }

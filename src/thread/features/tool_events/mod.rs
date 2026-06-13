@@ -71,17 +71,26 @@ pub(in crate::thread) async fn handle_item_completed(
     match item {
         ThreadItem::CommandExecution {
             id,
+            command,
+            cwd,
             status,
+            command_actions,
             aggregated_output,
             exit_code,
             ..
         } => {
             command::emit_command_execution_completed(
                 inner,
-                id,
-                status,
-                aggregated_output,
-                exit_code.map(|code| serde_json::json!({ "exit_code": code })),
+                command::CompletedCommandExecution {
+                    id,
+                    command,
+                    cwd,
+                    status,
+                    command_actions,
+                    aggregated_output,
+                    exit_code_raw_output: exit_code
+                        .map(|code| serde_json::json!({ "exit_code": code })),
+                },
             )
             .await;
             None

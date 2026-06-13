@@ -268,6 +268,7 @@ pub(super) async fn dispatch_session_command(
                     "Session status",
                     crate::thread::session_config::full_status_report(
                         &inner.workspace_cwd,
+                        &inner.backend_cli_version,
                         &inner.account_status,
                         inner.total_token_usage.as_ref(),
                         inner.last_used_tokens,

@@ -457,6 +457,7 @@ impl Thread {
             resolve_reasoning_effort(&models, &bootstrap.model, bootstrap.reasoning_effort);
         let thread = bootstrap.thread;
         let thread_id = thread.id;
+        let backend_cli_version = thread.cli_version;
         let mut agent_labels = HashMap::new();
         remember_agent_label(
             &mut agent_labels,
@@ -483,6 +484,7 @@ impl Thread {
             cas_home,
             bundled_skills_enabled,
             thread_id,
+            backend_cli_version,
             context_usage_cache_path,
             selector_preferences_path,
             selector_layout: Default::default(),

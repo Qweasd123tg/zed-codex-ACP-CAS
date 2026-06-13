@@ -56,6 +56,7 @@ pub(crate) struct AccountStatus {
 #[allow(clippy::too_many_arguments)]
 pub(in crate::thread) fn context_control_options(
     workspace_cwd: &Path,
+    backend_cli_version: &str,
     account_status: &AccountStatus,
     total_token_usage: Option<&TokenUsageBreakdown>,
     used: Option<u64>,
@@ -71,6 +72,7 @@ pub(in crate::thread) fn context_control_options(
 ) -> Vec<SessionConfigSelectOption> {
     let status_summary = session_status_summary(
         workspace_cwd,
+        backend_cli_version,
         account_status,
         total_token_usage,
         rate_limits,
@@ -135,6 +137,7 @@ pub(in crate::thread) fn context_control_options(
 #[allow(clippy::too_many_arguments)]
 pub(in crate::thread) fn context_control_option_groups(
     workspace_cwd: &Path,
+    backend_cli_version: &str,
     account_status: &AccountStatus,
     total_token_usage: Option<&TokenUsageBreakdown>,
     used: Option<u64>,
@@ -150,6 +153,7 @@ pub(in crate::thread) fn context_control_option_groups(
 ) -> Vec<SessionConfigSelectGroup> {
     let mut options = context_control_options(
         workspace_cwd,
+        backend_cli_version,
         account_status,
         total_token_usage,
         used,
@@ -189,6 +193,7 @@ pub(in crate::thread) fn context_control_option_groups(
 
 pub(in crate::thread) fn session_status_message(
     workspace_cwd: &Path,
+    backend_cli_version: &str,
     account_status: &AccountStatus,
     total_token_usage: Option<&TokenUsageBreakdown>,
     rate_limits: Option<&RateLimitSnapshot>,
@@ -197,6 +202,7 @@ pub(in crate::thread) fn session_status_message(
         "Chat status\n\n{}",
         session_status_detail(
             workspace_cwd,
+            backend_cli_version,
             account_status,
             total_token_usage,
             rate_limits
@@ -207,6 +213,7 @@ pub(in crate::thread) fn session_status_message(
 #[allow(clippy::too_many_arguments)]
 pub(in crate::thread) fn full_status_report(
     workspace_cwd: &Path,
+    backend_cli_version: &str,
     account_status: &AccountStatus,
     total_token_usage: Option<&TokenUsageBreakdown>,
     used: Option<u64>,
@@ -240,6 +247,7 @@ pub(in crate::thread) fn full_status_report(
             "Session\n{}",
             session_status_detail(
                 workspace_cwd,
+                backend_cli_version,
                 account_status,
                 total_token_usage,
                 rate_limits
@@ -256,12 +264,15 @@ pub(in crate::thread) fn full_status_report(
 
 fn session_status_detail(
     workspace_cwd: &Path,
+    backend_cli_version: &str,
     account_status: &AccountStatus,
     total_token_usage: Option<&TokenUsageBreakdown>,
     rate_limits: Option<&RateLimitSnapshot>,
 ) -> String {
     format!(
-        "Workspace: {}\nAccount: {}\nTokens: {}",
+        "Adapter: codex-acp-cas {}\nBackend: {}\nWorkspace: {}\nAccount: {}\nTokens: {}",
+        env!("CARGO_PKG_VERSION"),
+        backend_version_detail(backend_cli_version),
         workspace_cwd.display(),
         account_detail(account_status, rate_limits),
         token_usage_summary_line(total_token_usage)
@@ -297,6 +308,7 @@ pub(in crate::thread) fn build_account_status(account: Option<Account>) -> Accou
 
 fn session_status_summary(
     workspace_cwd: &Path,
+    backend_cli_version: &str,
     account_status: &AccountStatus,
     total_token_usage: Option<&TokenUsageBreakdown>,
     rate_limits: Option<&RateLimitSnapshot>,
@@ -309,17 +321,29 @@ fn session_status_summary(
             rate_limits,
         ),
         description: format!(
-            "Workspace: {}\nAccount: {}\nTokens: {}",
+            "Adapter: codex-acp-cas {}\nBackend: {}\nWorkspace: {}\nAccount: {}\nTokens: {}",
+            env!("CARGO_PKG_VERSION"),
+            backend_version_detail(backend_cli_version),
             workspace_cwd.display(),
             account_detail(account_status, rate_limits),
             token_usage_summary_line(total_token_usage),
         ),
         report: session_status_message(
             workspace_cwd,
+            backend_cli_version,
             account_status,
             total_token_usage,
             rate_limits,
         ),
+    }
+}
+
+fn backend_version_detail(backend_cli_version: &str) -> String {
+    let version = backend_cli_version.trim();
+    if version.is_empty() {
+        "codex unknown".to_string()
+    } else {
+        format!("codex {version}")
     }
 }
 
@@ -615,6 +639,7 @@ mod tests {
         let empty_summary = empty_summary("none");
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
+            "0.0.0",
             &AccountStatus::default(),
             None,
             Some(157_835),
@@ -643,6 +668,7 @@ mod tests {
         let empty_summary = empty_summary("none");
         let groups = context_control_option_groups(
             PathBuf::from("/tmp/workspace").as_path(),
+            "0.0.0",
             &AccountStatus::default(),
             None,
             Some(157_835),
@@ -678,6 +704,7 @@ mod tests {
         let empty_summary = empty_summary("MCP · none");
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
+            "0.0.0",
             &AccountStatus::default(),
             None,
             None,
@@ -702,6 +729,7 @@ mod tests {
         let empty_summary = empty_summary("none");
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
+            "0.0.0",
             &AccountStatus::default(),
             None,
             Some(195_499),
@@ -757,6 +785,7 @@ mod tests {
         let empty_summary = empty_summary("none");
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
+            "0.0.0",
             &AccountStatus::default(),
             None,
             Some(195_499),
@@ -784,6 +813,7 @@ mod tests {
     fn session_status_focuses_on_workspace_account_and_tokens() {
         let options = context_control_options(
             PathBuf::from("/tmp/workspace").as_path(),
+            "0.0.0",
             &AccountStatus {
                 auth_kind: super::AccountAuthKind::Chatgpt,
                 email: Some("dev@example.com".to_string()),
@@ -809,18 +839,18 @@ mod tests {
         );
 
         assert_eq!(options[3].name, "Status · 9.01M used");
-        assert_eq!(
-            options[3].description.as_deref(),
-            Some(
-                "Workspace: /tmp/workspace\nAccount: dev@example.com · ChatGPT Plus\nTokens: 9.01M used · 8.97M in · 37.3K out"
-            )
+        let expected = format!(
+            "Adapter: codex-acp-cas {}\nBackend: codex 0.0.0\nWorkspace: /tmp/workspace\nAccount: dev@example.com · ChatGPT Plus\nTokens: 9.01M used · 8.97M in · 37.3K out",
+            env!("CARGO_PKG_VERSION")
         );
+        assert_eq!(options[3].description.as_deref(), Some(expected.as_str()));
     }
 
     #[test]
     fn session_status_message_shows_api_key_and_cached_reasoning_tokens() {
         let message = session_status_message(
             PathBuf::from("/tmp/workspace").as_path(),
+            "0.0.0",
             &AccountStatus {
                 auth_kind: super::AccountAuthKind::ApiKey,
                 email: None,
@@ -838,7 +868,10 @@ mod tests {
 
         assert_eq!(
             message,
-            "Chat status\n\nWorkspace: /tmp/workspace\nAccount: API key auth\nTokens: 650K used · 600K in · 50K out"
+            format!(
+                "Chat status\n\nAdapter: codex-acp-cas {}\nBackend: codex 0.0.0\nWorkspace: /tmp/workspace\nAccount: API key auth\nTokens: 650K used · 600K in · 50K out",
+                env!("CARGO_PKG_VERSION")
+            )
         );
     }
 
@@ -1016,6 +1049,7 @@ mod tests {
     fn full_status_report_includes_plugins_and_compaction() {
         let report = full_status_report(
             PathBuf::from("/tmp/workspace").as_path(),
+            "0.0.0",
             &AccountStatus::default(),
             None,
             Some(1_000),
@@ -1034,7 +1068,9 @@ mod tests {
         assert!(report.contains("Tokens: 1000/2000"));
         assert!(report.contains("Status: compacting"));
         assert!(report.contains("Limits\n5h -- · wk --"));
-        assert!(report.contains("Session\nWorkspace: /tmp/workspace"));
+        assert!(report.contains("Session\nAdapter: codex-acp-cas "));
+        assert!(report.contains("Backend: codex 0.0.0"));
+        assert!(report.contains("Workspace: /tmp/workspace"));
         assert!(report.contains("Integrations\n\nMCP report"));
         assert!(report.contains("MCP report"));
         assert!(report.contains("Skills report"));
@@ -1054,6 +1090,7 @@ mod tests {
     fn full_status_report_handles_pending_context_usage() {
         let report = full_status_report(
             PathBuf::from("/tmp/workspace").as_path(),
+            "0.0.0",
             &AccountStatus::default(),
             None,
             None,

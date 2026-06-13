@@ -1,6 +1,5 @@
-//! Формирование заголовков и placeholder-контента для shell tool-call карточек.
+//! Формирование заголовков для shell tool-call карточек.
 
-use agent_client_protocol::schema::ToolCallContent;
 use codex_app_server_protocol::CommandAction;
 
 // Строим стабильные заголовки команд, чтобы повторные обновления маппились в ту же строку tool call.
@@ -9,14 +8,6 @@ pub(in crate::thread) fn command_tool_title(
     command_actions: &[CommandAction],
 ) -> String {
     command_title_from_actions(command_actions).unwrap_or_else(|| command_title_from_shell(command))
-}
-
-pub(in crate::thread) fn command_tool_placeholder_content() -> Vec<ToolCallContent> {
-    vec![
-        "Command details are available in Raw Input."
-            .to_string()
-            .into(),
-    ]
 }
 
 fn command_title_from_actions(command_actions: &[CommandAction]) -> Option<String> {

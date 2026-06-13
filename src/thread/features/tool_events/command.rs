@@ -12,13 +12,25 @@ use crate::thread::{
     features::{
         file::changes as file_changes,
         status_mapping,
-        tool_call_ui::{kind, location, raw, title},
+        tool_call_ui::{content, kind, location, raw, title},
     },
 };
 
 #[derive(Debug)]
 // Replay-пакет для shell command item, чтобы не передавать много аргументов.
 pub(in crate::thread) struct ReplayCommandExecution {
+    pub(in crate::thread) id: String,
+    pub(in crate::thread) command: String,
+    pub(in crate::thread) cwd: PathBuf,
+    pub(in crate::thread) status: CommandExecutionStatus,
+    pub(in crate::thread) command_actions: Vec<CommandAction>,
+    pub(in crate::thread) aggregated_output: Option<String>,
+    pub(in crate::thread) exit_code_raw_output: Option<Value>,
+}
+
+#[derive(Debug)]
+// Completed-пакет для shell-команды, чтобы live/replay render имели одинаковый shape.
+pub(in crate::thread) struct CompletedCommandExecution {
     pub(in crate::thread) id: String,
     pub(in crate::thread) command: String,
     pub(in crate::thread) cwd: PathBuf,
@@ -64,7 +76,11 @@ pub(in crate::thread) async fn emit_command_execution_started(
                 .kind(tool_kind)
                 .status(tool_status)
                 .locations(locations)
-                .content(title::command_tool_placeholder_content())
+                .content(content::command_tool_started_content(
+                    &command,
+                    &cwd,
+                    &command_actions,
+                ))
                 .raw_input(raw_input),
         )
         .await;
@@ -73,21 +89,27 @@ pub(in crate::thread) async fn emit_command_execution_started(
 // Публикуем завершение shell-команды с агрегированным stdout/stderr и exit code.
 pub(in crate::thread) async fn emit_command_execution_completed(
     inner: &mut ThreadInner,
-    id: String,
-    status: CommandExecutionStatus,
-    aggregated_output: Option<String>,
-    exit_code_raw_output: Option<Value>,
+    data: CompletedCommandExecution,
 ) {
+    let CompletedCommandExecution {
+        id,
+        command,
+        cwd,
+        status,
+        command_actions,
+        aggregated_output,
+        exit_code_raw_output,
+    } = data;
+
     let mut fields = ToolCallUpdateFields::new()
         .status(status_mapping::map_command_status(status.clone(), false));
-    match aggregated_output {
-        Some(output) => {
-            fields = fields.content(vec![format!("```sh\n{}\n```", output.trim_end()).into()]);
-        }
-        None => {
-            fields = fields.content(vec![command_completion_summary(status).into()]);
-        }
-    }
+    fields = fields.content(content::command_tool_completed_content(
+        &command,
+        &cwd,
+        &command_actions,
+        status,
+        aggregated_output.as_deref(),
+    ));
     if let Some(raw_output) = exit_code_raw_output {
         fields = fields.raw_output(raw_output);
     }
@@ -124,34 +146,28 @@ pub(in crate::thread) async fn replay_command_execution(
                 .kind(tool_kind)
                 .status(status_mapping::map_command_status(status.clone(), false))
                 .locations(locations)
-                .content(title::command_tool_placeholder_content())
+                .content(content::command_tool_started_content(
+                    &command,
+                    &cwd,
+                    &command_actions,
+                ))
                 .raw_input(raw_input),
         )
         .await;
 
     let mut fields = ToolCallUpdateFields::new()
         .status(status_mapping::map_command_status(status.clone(), false));
-    match aggregated_output {
-        Some(output) => {
-            fields = fields.content(vec![format!("```sh\n{}\n```", output.trim_end()).into()]);
-        }
-        None => {
-            fields = fields.content(vec![command_completion_summary(status).into()]);
-        }
-    }
+    fields = fields.content(content::command_tool_completed_content(
+        &command,
+        &cwd,
+        &command_actions,
+        status,
+        aggregated_output.as_deref(),
+    ));
     if let Some(raw_output) = exit_code_raw_output {
         fields = fields.raw_output(raw_output);
     }
     client
         .send_tool_call_update(ToolCallUpdate::new(ToolCallId::new(id), fields))
         .await;
-}
-
-fn command_completion_summary(status: CommandExecutionStatus) -> &'static str {
-    match status {
-        CommandExecutionStatus::Completed => "Command completed without output.",
-        CommandExecutionStatus::Failed => "Command failed without output.",
-        CommandExecutionStatus::Declined => "Command was declined.",
-        CommandExecutionStatus::InProgress => "Command is still running.",
-    }
 }

@@ -89,9 +89,10 @@ Sub-agent and collaboration tool-call rendering:
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
 - Standard ACP `session/fork` plus practical in-place `/fork` support on top of native `thread/fork`
 - Tool call cards for command, MCP, web, image, generated-image, file, and collab branches
+- Command cards now show command, cwd, parsed actions, status, and capped head/tail output instead of forcing you into Raw Input for basic context
 - Generated images are also surfaced as inline markdown images and saved under `~/.codex-cas/generated-images/`.
   This is a pragmatic adapter-side rendering path for current Zed/ACP behavior, not the ideal final contract; a future protocol/Zed path should surface generated images and saved-file links natively.
-- Clearer status surfacing through `/status` and the compact context `%` selector
+- Clearer status surfacing through `/status` and the compact context `%` selector, including adapter/backend version and richer account-limit details when available
 - Compact context selector summaries for session status, context usage, MCP, skills, plugins, limits, and compaction
 - More reliable context compaction in Zed: `/compact` and the compact context selector now keep draining background app-server notifications until completion/failure, so the selector should not stay stuck on `Compacting...`
 - Compact chat warnings when account limits cross 75%, 90%, 95%, and exhausted thresholds
@@ -99,7 +100,7 @@ Sub-agent and collaboration tool-call rendering:
 - Grouped `Model` selector entries for model choice, reasoning effort, and Codex app-server `service_tier` speed
 - Practical plan mode support
 - Better default-mode fallback plan progress for long step lists: visible checkpoints now advance across the list instead of only snapping at the very end of work
-- Better startup and reconnect diagnostics
+- Better startup and reconnect diagnostics, including a slow-start ready notice with version/thread/model context after long session startup paths
 - Shorter first-open loading pulse: skills/account/limits metadata now hydrate right after the initial session response instead of blocking `new_session` / `load_session` / `resume_session`
 - Safer turn-start timeout and stale turn-tail cleanup around reconnects
 - Safer history replay fencing for `/undo` and auto-restored session history
@@ -272,6 +273,23 @@ Configure Zed to launch that wrapper through `cmd.exe`:
 ```
 
 The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
+
+### Upgrade Notes For 0.25.0
+
+Command tool cards are no longer bare placeholders. Started/completed/replayed
+command cards include the command, cwd, parsed actions, status, and a bounded
+head/tail output preview while keeping Raw Input/Raw Output for exact protocol
+payloads.
+
+`/status` and the `Context` selector's session status now include the running
+adapter version and the backend Codex CLI version captured from the app-server
+thread. Account-limit details also surface the limit id/name and credits when
+the current pinned app-server protocol provides them.
+
+If session startup takes more than a short threshold, the adapter emits a compact
+system status message after the ACP session is ready. The earlier Zed registry
+download/install indicator is still Zed-side UI; CAS can only report status
+after Zed has connected the ACP session.
 
 ### Upgrade Notes For 0.23.5
 
@@ -744,7 +762,7 @@ User-facing documentation stays in this README. Deeper project notes are kept se
 
 Current Zed-specific UI caveats are tracked in [docs/upstream-feature-matrix.md](docs/upstream-feature-matrix.md), especially around approval-card layout and command/review/session UX that the adapter alone cannot fully control.
 
-The latest local upstream reference sweep was run on `2026-05-28`. At that point Zed stable was `1.4.4`, preview was `1.5.3-pre`, official `codex-acp` was `v0.15.0`, and ACP had moved to `v0.13.4` with stabilized logout, unstable plan operations, and v2/MCP-over-ACP scaffolding. Treat dependency updates as scoped migrations, not a mechanical version bump.
+The latest local upstream reference sweep was run on `2026-06-13`. At that point Zed stable was `1.6.3`, preview was `1.7.2`, official `codex-acp` was `v0.16.0`, and ACP had moved through `v0.13.6` with stabilized `additionalDirectories`, session usage updates, and `session/delete`. Treat dependency updates as scoped migrations, not a mechanical version bump.
 
 If Zed's agent input area or lower selector toolbar looks squeezed, enable Zed's content-width
 limit:
@@ -765,7 +783,7 @@ That is a Zed panel layout setting, not an ACP adapter option.
 Near-term work:
 
 - Keep refining the compact context `%` selector and `/status` report where it helps daily use
-- Audit and selectively port upstream `codex-acp v0.15.0` parity items: terminal-output fallback fixes, additional permission mapping, plan update rendering, and the next permission/elicitation details
+- Audit and selectively port upstream `codex-acp v0.16.0` parity items: `additionalDirectories`, session usage/delete semantics, richer permission/account-limit mapping, plan update rendering, and the next permission/elicitation details
 - Keep new slash/preview UX scoped to explicit user demand; avoid adding parallel flows when Zed already has native UI
 
 Later candidates:
