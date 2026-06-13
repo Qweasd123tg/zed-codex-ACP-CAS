@@ -97,6 +97,7 @@ Sub-agent and collaboration tool-call rendering:
 - More reliable context compaction in Zed: `/compact` and the compact context selector now keep draining background app-server notifications until completion/failure, so the selector should not stay stuck on `Compacting...`
 - Compact chat warnings when account limits cross 75%, 90%, 95%, and exhausted thresholds
 - Command approval popups now follow Codex app-server `available_decisions`, including session/matching-command approvals when the backend offers them
+- Plain shell command approvals use the same Zed terminal-card path as running command tool calls when the client advertises terminal output support; network/additional-permission approvals stay in the detailed text card
 - Grouped `Model` selector entries for model choice, reasoning effort, and Codex app-server `service_tier` speed
 - Practical plan mode support
 - Better default-mode fallback plan progress for long step lists: visible checkpoints now advance across the list instead of only snapping at the very end of work

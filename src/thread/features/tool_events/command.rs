@@ -227,7 +227,7 @@ fn command_started_content(
     }
 }
 
-fn command_uses_native_terminal(command_actions: &[CommandAction]) -> bool {
+pub(in crate::thread) fn command_uses_native_terminal(command_actions: &[CommandAction]) -> bool {
     command_actions.is_empty()
         || command_actions
             .iter()
@@ -246,7 +246,7 @@ fn command_tool_kind(
     }
 }
 
-fn terminal_info_meta(id: &str, cwd: &Path) -> Meta {
+pub(in crate::thread) fn terminal_info_meta(id: &str, cwd: &Path) -> Meta {
     Meta::from_iter([(
         "terminal_info".to_owned(),
         serde_json::json!({

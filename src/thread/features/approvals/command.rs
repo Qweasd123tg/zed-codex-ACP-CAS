@@ -1,13 +1,13 @@
 //! Обработка подтверждений запуска shell-команд (command approval).
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use agent_client_protocol::{
     Error,
     schema::{
         PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
-        SelectedPermissionOutcome, ToolCallContent, ToolCallId, ToolCallStatus, ToolCallUpdate,
-        ToolCallUpdateFields, ToolKind,
+        SelectedPermissionOutcome, Terminal, ToolCall, ToolCallContent, ToolCallId, ToolCallStatus,
+        ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     },
 };
 use codex_app_server_protocol::{
@@ -21,14 +21,29 @@ use crate::thread::features::tool_call_ui::kind::{
 };
 use crate::thread::features::tool_call_ui::location::command_tool_locations;
 use crate::thread::features::tool_call_ui::title::command_tool_title;
+use crate::thread::features::{tool_call_ui::content, tool_events};
 use crate::thread::{ALLOW_ONCE, CANCEL_TURN, REJECT_ONCE, SessionClient, ThreadInner};
 
 pub(in crate::thread) struct CommandApprovalPending {
     pub(in crate::thread) client: SessionClient,
     pub(in crate::thread) request_id: codex_app_server_protocol::RequestId,
+    pub(in crate::thread) preflight_tool_call: Option<ToolCall>,
     pub(in crate::thread) tool_call: ToolCallUpdate,
     pub(in crate::thread) options: Vec<PermissionOption>,
     pub(in crate::thread) decisions_by_option_id: HashMap<String, CommandExecutionApprovalDecision>,
+}
+
+impl CommandApprovalPending {
+    pub(in crate::thread) async fn request_permission(
+        &mut self,
+    ) -> Result<RequestPermissionOutcome, Error> {
+        if let Some(tool_call) = self.preflight_tool_call.take() {
+            self.client.send_tool_call(tool_call).await;
+        }
+        self.client
+            .request_permission(self.tool_call.clone(), self.options.clone())
+            .await
+    }
 }
 
 // Отправляем решения по подтверждению команд обратно в app-server и зеркалим результат в ACP UI.
@@ -37,11 +52,8 @@ pub(in crate::thread) async fn handle_command_approval(
     request_id: codex_app_server_protocol::RequestId,
     params: CommandExecutionRequestApprovalParams,
 ) -> Result<(), Error> {
-    let pending = prepare_command_approval(inner, request_id, params);
-    let outcome = pending
-        .client
-        .request_permission(pending.tool_call, pending.options)
-        .await?;
+    let mut pending = prepare_command_approval(inner, request_id, params);
+    let outcome = pending.request_permission().await?;
     let decision = command_approval_decision_from_outcome(outcome, &pending.decisions_by_option_id);
 
     inner
@@ -64,23 +76,35 @@ pub(in crate::thread) fn prepare_command_approval(
 
     let command = params.command.as_deref().unwrap_or_default();
     let command_actions = params.command_actions.as_deref().unwrap_or_default();
+    let use_terminal_preflight = should_use_terminal_approval_preflight(
+        inner.client.supports_terminal_output(),
+        &params,
+        command,
+        command_actions,
+    );
 
-    let mut fields = ToolCallUpdateFields::new()
-        .title(command_approval_title(&params, command, command_actions))
-        .kind(ToolKind::Execute)
-        .status(ToolCallStatus::Pending)
-        .content(command_approval_content(&params));
-    if params.cwd.is_some() || !command.trim().is_empty() || !command_actions.is_empty() {
-        let cwd = params.cwd.as_deref().unwrap_or(&inner.workspace_cwd);
-        fields = fields.locations(command_tool_locations(cwd, command, command_actions));
-    }
-    fields = fields.raw_input(serde_json::to_value(&params).ok());
+    let fields = command_approval_fields(
+        &params,
+        &inner.workspace_cwd,
+        command,
+        command_actions,
+        use_terminal_preflight,
+    );
+    let preflight_tool_call = use_terminal_preflight.then(|| {
+        command_approval_preflight_tool_call(
+            &params,
+            &inner.workspace_cwd,
+            command,
+            command_actions,
+        )
+    });
 
     let (options, decisions_by_option_id) = command_approval_options(&params);
 
     Box::new(CommandApprovalPending {
         client: inner.client.clone(),
         request_id,
+        preflight_tool_call,
         tool_call: ToolCallUpdate::new(tool_call_id, fields),
         options,
         decisions_by_option_id,
@@ -113,6 +137,71 @@ fn command_approval_title(
             }
         })
         .unwrap_or_else(|| "Command approval".to_string())
+}
+
+fn command_approval_fields(
+    params: &CommandExecutionRequestApprovalParams,
+    workspace_cwd: &Path,
+    command: &str,
+    command_actions: &[codex_app_server_protocol::CommandAction],
+    use_terminal_preflight: bool,
+) -> ToolCallUpdateFields {
+    let cwd = params.cwd.as_deref().unwrap_or(workspace_cwd);
+    let title = if use_terminal_preflight {
+        content::command_tool_label(command, cwd, command_actions)
+    } else {
+        command_approval_title(params, command, command_actions)
+    };
+    let mut fields = ToolCallUpdateFields::new()
+        .title(title)
+        .kind(ToolKind::Execute)
+        .status(ToolCallStatus::Pending);
+
+    if !use_terminal_preflight {
+        fields = fields.content(command_approval_content(params));
+    }
+    if params.cwd.is_some() || !command.trim().is_empty() || !command_actions.is_empty() {
+        fields = fields.locations(command_tool_locations(cwd, command, command_actions));
+    }
+    fields.raw_input(serde_json::to_value(params).ok())
+}
+
+fn should_use_terminal_approval_preflight(
+    supports_terminal_output: bool,
+    params: &CommandExecutionRequestApprovalParams,
+    command: &str,
+    command_actions: &[codex_app_server_protocol::CommandAction],
+) -> bool {
+    supports_terminal_output
+        && !command.trim().is_empty()
+        && tool_events::command::command_uses_native_terminal(command_actions)
+        && params.network_approval_context.is_none()
+        && params.additional_permissions.is_none()
+        && params.skill_metadata.is_none()
+}
+
+fn command_approval_preflight_tool_call(
+    params: &CommandExecutionRequestApprovalParams,
+    workspace_cwd: &Path,
+    command: &str,
+    command_actions: &[codex_app_server_protocol::CommandAction],
+) -> ToolCall {
+    let cwd = params.cwd.as_deref().unwrap_or(workspace_cwd);
+    ToolCall::new(
+        ToolCallId::new(params.item_id.clone()),
+        content::command_tool_label(command, cwd, command_actions),
+    )
+    .kind(ToolKind::Execute)
+    .status(ToolCallStatus::Pending)
+    .locations(command_tool_locations(cwd, command, command_actions))
+    .content(vec![ToolCallContent::Terminal(Terminal::new(
+        params.item_id.clone(),
+    ))])
+    .raw_input(serde_json::to_value(params).ok())
+    .meta(tool_events::command::terminal_info_meta(
+        &params.item_id,
+        cwd,
+    ))
 }
 
 pub(in crate::thread) fn command_approval_decision_from_outcome(
@@ -349,12 +438,15 @@ fn indented(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{
-        command_approval_decision_from_outcome, command_approval_lines, command_approval_options,
-        command_approval_title,
+        command_approval_decision_from_outcome, command_approval_fields, command_approval_lines,
+        command_approval_options, command_approval_preflight_tool_call, command_approval_title,
+        should_use_terminal_approval_preflight,
     };
     use agent_client_protocol::schema::{
-        PermissionOptionKind, RequestPermissionOutcome, SelectedPermissionOutcome,
+        PermissionOptionKind, RequestPermissionOutcome, SelectedPermissionOutcome, ToolCallContent,
     };
     use codex_app_server_protocol::{
         CommandExecutionApprovalDecision, CommandExecutionRequestApprovalParams,
@@ -442,6 +534,112 @@ mod tests {
             ),
             "Network access: example.com"
         );
+    }
+
+    #[test]
+    fn shell_command_approval_uses_terminal_preflight_when_supported() {
+        let params: CommandExecutionRequestApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "threadId": "thread_1",
+                "turnId": "turn_1",
+                "itemId": "call_1",
+                "reason": "Need to run a shell command",
+                "command": "/bin/bash -lc 'echo hi && date'",
+                "cwd": "/tmp/workspace",
+                "commandActions": [
+                    {
+                        "type": "unknown",
+                        "command": "echo hi && date"
+                    }
+                ]
+            }))
+            .expect("valid command approval params");
+        let command = params.command.as_deref().unwrap_or_default();
+        let actions = params.command_actions.as_deref().unwrap_or_default();
+
+        assert!(should_use_terminal_approval_preflight(
+            true, &params, command, actions
+        ));
+
+        let preflight =
+            command_approval_preflight_tool_call(&params, Path::new("/repo"), command, actions);
+
+        assert_eq!(preflight.tool_call_id.0.as_ref(), "call_1");
+        assert_eq!(preflight.title, "echo hi && date");
+        assert!(matches!(
+            preflight.content.as_slice(),
+            [ToolCallContent::Terminal(terminal)] if terminal.terminal_id.0.as_ref() == "call_1"
+        ));
+        let terminal_info = preflight
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("terminal_info"))
+            .expect("terminal_info meta");
+        assert_eq!(
+            terminal_info.get("terminal_id").and_then(|id| id.as_str()),
+            Some("call_1")
+        );
+        assert_eq!(
+            terminal_info.get("cwd").and_then(|cwd| cwd.as_str()),
+            Some("/tmp/workspace")
+        );
+    }
+
+    #[test]
+    fn terminal_preflight_request_fields_do_not_replace_terminal_content() {
+        let params: CommandExecutionRequestApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "threadId": "thread_1",
+                "turnId": "turn_1",
+                "itemId": "call_1",
+                "reason": "Need to run a shell command",
+                "command": "/bin/bash -lc 'cargo test'",
+                "cwd": "/tmp/workspace",
+                "commandActions": [
+                    {
+                        "type": "unknown",
+                        "command": "cargo test"
+                    }
+                ]
+            }))
+            .expect("valid command approval params");
+        let command = params.command.as_deref().unwrap_or_default();
+        let actions = params.command_actions.as_deref().unwrap_or_default();
+
+        let fields = command_approval_fields(&params, Path::new("/repo"), command, actions, true);
+
+        assert!(fields.content.is_none());
+        assert_eq!(fields.title.as_deref(), Some("cargo test"));
+        assert!(fields.locations.as_ref().is_some_and(|locations| {
+            locations.len() == 1 && locations[0].path == Path::new("/tmp/workspace")
+        }));
+        assert!(fields.raw_input.is_some());
+    }
+
+    #[test]
+    fn special_permission_command_approval_keeps_detailed_body() {
+        let params: CommandExecutionRequestApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "threadId": "thread_1",
+                "turnId": "turn_1",
+                "itemId": "call_1",
+                "command": "curl -I https://example.com",
+                "networkApprovalContext": {
+                    "host": "example.com",
+                    "protocol": "https"
+                }
+            }))
+            .expect("valid command approval params");
+        let command = params.command.as_deref().unwrap_or_default();
+        let actions = params.command_actions.as_deref().unwrap_or_default();
+
+        assert!(!should_use_terminal_approval_preflight(
+            true, &params, command, actions
+        ));
+
+        let fields = command_approval_fields(&params, Path::new("/repo"), command, actions, false);
+
+        assert!(fields.content.is_some());
     }
 
     #[test]

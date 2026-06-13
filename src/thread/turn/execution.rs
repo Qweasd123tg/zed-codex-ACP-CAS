@@ -547,16 +547,14 @@ impl Thread {
                 );
                 let request_id = pending.request_id.clone();
                 let turn_id = turn_id.to_string();
-                let client = pending.client;
-                let tool_call = pending.tool_call;
-                let options = pending.options;
-                let decisions_by_option_id = pending.decisions_by_option_id;
+                let decisions_by_option_id = pending.decisions_by_option_id.clone();
                 PendingTurnCommandApproval {
                     turn_id,
                     request_id,
                     decisions_by_option_id,
                     outcome_fut: Box::pin(async move {
-                        client.request_permission(tool_call, options).await
+                        let mut pending = pending;
+                        pending.request_permission().await
                     }),
                 }
             };
