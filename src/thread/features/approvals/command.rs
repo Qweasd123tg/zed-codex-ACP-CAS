@@ -174,7 +174,7 @@ fn should_use_terminal_approval_preflight(
 ) -> bool {
     supports_terminal_output
         && !command.trim().is_empty()
-        && tool_events::command::command_uses_native_terminal(command_actions)
+        && tool_events::command::command_uses_native_terminal(command, command_actions)
         && params.network_approval_context.is_none()
         && params.additional_permissions.is_none()
         && params.skill_metadata.is_none()

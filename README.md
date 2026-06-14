@@ -90,6 +90,7 @@ Sub-agent and collaboration tool-call rendering:
 - Standard ACP `session/fork` plus practical in-place `/fork` support on top of native `thread/fork`
 - Tool call cards for command, MCP, web, image, generated-image, file, and collab branches
 - Command cards now show command, cwd, parsed actions, status, and capped head/tail output instead of forcing you into Raw Input for basic context
+- Shell-backed `fetch`, `copy`, `move`, `delete`, `mkdir`, and `touch` commands are classified into closer Zed-style tool kinds/titles instead of always looking like generic terminal commands
 - Generated images are also surfaced as inline markdown images and saved under `~/.codex-cas/generated-images/`.
   This is a pragmatic adapter-side rendering path for current Zed/ACP behavior, not the ideal final contract; a future protocol/Zed path should surface generated images and saved-file links natively.
 - Clearer status surfacing through `/status` and the compact context `%` selector, including adapter/backend version and richer account-limit details when available

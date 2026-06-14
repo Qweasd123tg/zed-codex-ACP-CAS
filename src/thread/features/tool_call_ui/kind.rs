@@ -5,6 +5,17 @@ use std::path::Path;
 use agent_client_protocol::schema::ToolKind;
 use codex_app_server_protocol::CommandAction;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::thread) enum ShellOperation {
+    Fetch { url: String },
+    Copy { source: String, destination: String },
+    Move { source: String, destination: String },
+    Delete { path: String },
+    CreateDirectory { path: String },
+    CreateFile { path: String },
+    Modify { path: String },
+}
+
 // Определяем ToolKind для shell-команды по command_actions и fallback-эвристикам текста команды.
 pub(in crate::thread) fn command_tool_kind(
     command: &str,
@@ -32,6 +43,16 @@ pub(in crate::thread) fn command_tool_kind(
 
     let inner = extract_inner_shell_command(command);
     let normalized = inner.to_ascii_lowercase();
+    if let Some(operation) = shell_operation_from_inner_command(&inner) {
+        return match operation {
+            ShellOperation::Fetch { .. } => ToolKind::Fetch,
+            ShellOperation::Copy { .. } | ShellOperation::Move { .. } => ToolKind::Move,
+            ShellOperation::Delete { .. } => ToolKind::Delete,
+            ShellOperation::CreateDirectory { .. }
+            | ShellOperation::CreateFile { .. }
+            | ShellOperation::Modify { .. } => ToolKind::Edit,
+        };
+    }
     if looks_like_search_command(&normalized) || looks_like_listing_command(&normalized) {
         return ToolKind::Search;
     }
@@ -42,6 +63,108 @@ pub(in crate::thread) fn command_tool_kind(
     // Оставляем карточки команд в общем сворачиваемом tool UI (не terminal-card),
     // чтобы пользователь мог по запросу раскрыть и посмотреть сырой command input.
     ToolKind::Think
+}
+
+pub(in crate::thread) fn shell_operation(command: &str) -> Option<ShellOperation> {
+    shell_operation_from_inner_command(&extract_inner_shell_command(command))
+}
+
+fn shell_operation_from_inner_command(command: &str) -> Option<ShellOperation> {
+    if has_shell_control(command) {
+        return None;
+    }
+
+    let parts = shlex::split(command)?;
+    let program = parts
+        .first()
+        .map(|part| command_name(part).to_ascii_lowercase())?;
+    let args = parts.iter().skip(1).map(String::as_str).collect::<Vec<_>>();
+
+    match program.as_str() {
+        "curl" | "wget" | "http" | "https" | "xh" | "invoke-webrequest" | "iwr" => {
+            first_url_arg(&args).map(|url| ShellOperation::Fetch {
+                url: url.to_string(),
+            })
+        }
+        "cp" => {
+            let paths = path_args(&args);
+            (paths.len() >= 2).then(|| ShellOperation::Copy {
+                source: paths[paths.len() - 2].to_string(),
+                destination: paths[paths.len() - 1].to_string(),
+            })
+        }
+        "mv" => {
+            let paths = path_args(&args);
+            (paths.len() >= 2).then(|| ShellOperation::Move {
+                source: paths[paths.len() - 2].to_string(),
+                destination: paths[paths.len() - 1].to_string(),
+            })
+        }
+        "rm" | "unlink" => path_args(&args).last().map(|path| ShellOperation::Delete {
+            path: (*path).to_string(),
+        }),
+        "mkdir" => path_args(&args)
+            .last()
+            .map(|path| ShellOperation::CreateDirectory {
+                path: (*path).to_string(),
+            }),
+        "touch" => path_args(&args)
+            .last()
+            .map(|path| ShellOperation::CreateFile {
+                path: (*path).to_string(),
+            }),
+        "chmod" | "chown" | "truncate" => {
+            path_args(&args).last().map(|path| ShellOperation::Modify {
+                path: (*path).to_string(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn has_shell_control(command: &str) -> bool {
+    command.contains(['|', ';', '<', '>'])
+        || command.split_whitespace().any(|part| {
+            matches!(
+                part,
+                "&&" | "||" | "&" | "2>&1" | "1>&2" | "2>" | "1>" | ">>" | "<<"
+            )
+        })
+}
+
+fn command_name(program: &str) -> String {
+    Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(program)
+        .to_string()
+}
+
+fn first_url_arg<'a>(args: &'a [&str]) -> Option<&'a str> {
+    args.iter()
+        .copied()
+        .find(|arg| arg.starts_with("http://") || arg.starts_with("https://"))
+}
+
+fn path_args<'a>(args: &'a [&str]) -> Vec<&'a str> {
+    args.iter()
+        .copied()
+        .filter(|arg| is_path_like_arg(arg))
+        .collect()
+}
+
+fn is_path_like_arg(arg: &str) -> bool {
+    let trimmed = arg.trim();
+    !trimmed.is_empty()
+        && trimmed != "-"
+        && !trimmed.starts_with('-')
+        && !trimmed.starts_with("http://")
+        && !trimmed.starts_with("https://")
+        && !trimmed.contains('*')
+        && !trimmed.contains('?')
 }
 
 pub(in crate::thread) fn command_looks_like_verification(command: &str) -> bool {

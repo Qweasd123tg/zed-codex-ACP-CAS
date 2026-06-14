@@ -2,6 +2,8 @@
 
 use codex_app_server_protocol::CommandAction;
 
+use super::kind::ShellOperation;
+
 // Строим стабильные заголовки команд, чтобы повторные обновления маппились в ту же строку tool call.
 pub(in crate::thread) fn command_tool_title(
     command: &str,
@@ -66,6 +68,9 @@ fn command_title_from_shell(command: &str) -> String {
     let inner_command = super::kind::extract_inner_shell_command(command);
     let normalized = inner_command.to_ascii_lowercase();
 
+    if let Some(operation) = super::kind::shell_operation(&inner_command) {
+        return shell_operation_title(&operation);
+    }
     if let Some(host) = network_host_from_shell_command(&inner_command) {
         return format!("Network access: {host}");
     }
@@ -89,6 +94,30 @@ fn command_title_from_shell(command: &str) -> String {
     }
 
     "Run shell command".to_string()
+}
+
+pub(in crate::thread) fn shell_operation_title(operation: &ShellOperation) -> String {
+    match operation {
+        ShellOperation::Fetch { url } => format!("Fetch {}", code_span(url)),
+        ShellOperation::Copy {
+            source,
+            destination,
+        } => {
+            format!("Copy {} to {}", code_span(source), code_span(destination))
+        }
+        ShellOperation::Move {
+            source,
+            destination,
+        } => {
+            format!("Move {} to {}", code_span(source), code_span(destination))
+        }
+        ShellOperation::Delete { path } => format!("Delete {}", code_span(path)),
+        ShellOperation::CreateDirectory { path } => {
+            format!("Create directory {}", code_span(path))
+        }
+        ShellOperation::CreateFile { path } => format!("Create file {}", code_span(path)),
+        ShellOperation::Modify { path } => format!("Modify {}", code_span(path)),
+    }
 }
 
 fn network_host_from_shell_command(command: &str) -> Option<String> {
@@ -179,4 +208,19 @@ fn path_display_name(path: &str) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or(path)
         .to_string()
+}
+
+fn code_span(text: &str) -> String {
+    let mut longest_run = 0usize;
+    let mut current_run = 0usize;
+    for ch in text.chars() {
+        if ch == '`' {
+            current_run += 1;
+            longest_run = longest_run.max(current_run);
+        } else {
+            current_run = 0;
+        }
+    }
+    let fence = "`".repeat(longest_run.saturating_add(1).max(1));
+    format!("{fence}{text}{fence}")
 }

@@ -70,8 +70,8 @@ pub(in crate::thread) async fn emit_command_execution_started(
     let tool_status = status_mapping::map_command_status(status, true);
     let title = content::command_tool_label(&command, &cwd, &command_actions);
     let raw_input = raw::command_tool_raw_input(&command, &command_actions);
-    let use_native_terminal =
-        inner.client.supports_terminal_output() && command_uses_native_terminal(&command_actions);
+    let use_native_terminal = inner.client.supports_terminal_output()
+        && command_uses_native_terminal(&command, &command_actions);
     if use_native_terminal {
         inner.terminal_tool_call_ids.insert(id.clone());
     }
@@ -157,8 +157,8 @@ pub(in crate::thread) async fn replay_command_execution(
 
     let title = content::command_tool_label(&command, &cwd, &command_actions);
     let raw_input = raw::command_tool_raw_input(&command, &command_actions);
-    let use_native_terminal =
-        client.supports_terminal_output() && command_uses_native_terminal(&command_actions);
+    let use_native_terminal = client.supports_terminal_output()
+        && command_uses_native_terminal(&command, &command_actions);
     let tool_kind = command_tool_kind(&command, &command_actions, use_native_terminal);
     let locations = location::command_tool_locations(&cwd, &command, &command_actions);
     let initial_content = if use_native_terminal {
@@ -227,11 +227,15 @@ fn command_started_content(
     }
 }
 
-pub(in crate::thread) fn command_uses_native_terminal(command_actions: &[CommandAction]) -> bool {
-    command_actions.is_empty()
+pub(in crate::thread) fn command_uses_native_terminal(
+    command: &str,
+    command_actions: &[CommandAction],
+) -> bool {
+    (command_actions.is_empty()
         || command_actions
             .iter()
-            .all(|action| matches!(action, CommandAction::Unknown { .. }))
+            .all(|action| matches!(action, CommandAction::Unknown { .. })))
+        && kind::shell_operation(command).is_none()
 }
 
 fn command_tool_kind(
@@ -307,19 +311,36 @@ mod tests {
 
     #[test]
     fn native_terminal_is_reserved_for_shell_or_unknown_commands() {
-        assert!(command_uses_native_terminal(&[]));
-        assert!(command_uses_native_terminal(&[CommandAction::Unknown {
-            command: "echo hi".to_string(),
-        }]));
-        assert!(!command_uses_native_terminal(&[CommandAction::ListFiles {
-            path: None,
-            command: "ls".to_string(),
-        }]));
-        assert!(!command_uses_native_terminal(&[CommandAction::Read {
-            command: "cat src/lib.rs".to_string(),
-            name: "cat".to_string(),
-            path: PathBuf::from("src/lib.rs"),
-        }]));
+        assert!(command_uses_native_terminal("echo hi", &[]));
+        assert!(command_uses_native_terminal(
+            "echo hi",
+            &[CommandAction::Unknown {
+                command: "echo hi".to_string(),
+            }]
+        ));
+        assert!(!command_uses_native_terminal(
+            "ls",
+            &[CommandAction::ListFiles {
+                path: None,
+                command: "ls".to_string(),
+            }]
+        ));
+        assert!(!command_uses_native_terminal(
+            "cat src/lib.rs",
+            &[CommandAction::Read {
+                command: "cat src/lib.rs".to_string(),
+                name: "cat".to_string(),
+                path: PathBuf::from("src/lib.rs"),
+            }]
+        ));
+        assert!(!command_uses_native_terminal(
+            "curl -I https://example.com",
+            &[]
+        ));
+        assert!(!command_uses_native_terminal(
+            "cp README.md docs/README.md",
+            &[]
+        ));
     }
 
     #[test]

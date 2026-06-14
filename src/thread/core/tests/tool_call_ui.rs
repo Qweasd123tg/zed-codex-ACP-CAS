@@ -70,14 +70,14 @@ fn command_title_maps_common_shell_search_and_check_commands() {
 fn command_title_maps_common_network_commands() {
     assert_eq!(
         command_tool_title("/bin/bash -lc 'curl -I https://example.com'", &[]),
-        "Network access: example.com"
+        "Fetch `https://example.com`"
     );
     assert_eq!(
         command_tool_title(
             r#"pwsh.exe -NoProfile -Command "iwr https://example.com/path""#,
             &[]
         ),
-        "Network access: example.com"
+        "Fetch `https://example.com/path`"
     );
 }
 
@@ -88,18 +88,26 @@ fn command_title_maps_common_file_operation_commands() {
             "/bin/bash -lc 'touch /home/qweasd123tg/codex-acp-outside-workspace-test.txt'",
             &[]
         ),
-        "Create file: codex-acp-outside-workspace-test.txt"
+        "Create file `/home/qweasd123tg/codex-acp-outside-workspace-test.txt`"
     );
     assert_eq!(
         command_tool_title("/bin/bash -lc 'mkdir -p /tmp/codex-acp-test-dir'", &[]),
-        "Create folder: codex-acp-test-dir"
+        "Create directory `/tmp/codex-acp-test-dir`"
     );
     assert_eq!(
         command_tool_title(
             "/bin/bash -lc 'rm -f /tmp/codex-acp-test-dir/file.txt'",
             &[]
         ),
-        "Delete path: file.txt"
+        "Delete `/tmp/codex-acp-test-dir/file.txt`"
+    );
+    assert_eq!(
+        command_tool_title("/bin/bash -lc 'cp README.md docs/README.md'", &[]),
+        "Copy `README.md` to `docs/README.md`"
+    );
+    assert_eq!(
+        command_tool_title("/bin/bash -lc 'mv docs/README-copy.md docs/README.md'", &[]),
+        "Move `docs/README-copy.md` to `docs/README.md`"
     );
 }
 
@@ -145,5 +153,29 @@ fn command_tool_kind_falls_back_to_think_for_other_shell_commands() {
     assert_eq!(
         command_tool_kind("/bin/bash -lc 'echo done'", &[]),
         ToolKind::Think
+    );
+}
+
+#[test]
+fn command_tool_kind_maps_file_and_fetch_shell_operations() {
+    assert_eq!(
+        command_tool_kind("/bin/bash -lc 'curl -I https://example.com'", &[]),
+        ToolKind::Fetch
+    );
+    assert_eq!(
+        command_tool_kind("/bin/bash -lc 'cp README.md docs/README.md'", &[]),
+        ToolKind::Move
+    );
+    assert_eq!(
+        command_tool_kind("/bin/bash -lc 'mv docs/a.md docs/b.md'", &[]),
+        ToolKind::Move
+    );
+    assert_eq!(
+        command_tool_kind("/bin/bash -lc 'rm -f docs/b.md'", &[]),
+        ToolKind::Delete
+    );
+    assert_eq!(
+        command_tool_kind("/bin/bash -lc 'mkdir -p docs'", &[]),
+        ToolKind::Edit
     );
 }

@@ -20,13 +20,13 @@ pub(in crate::thread) fn command_tool_started_content(
 }
 
 pub(in crate::thread) fn command_tool_completed_content(
-    _command: &str,
+    command: &str,
     _cwd: &Path,
     command_actions: &[CommandAction],
     status: CommandExecutionStatus,
     aggregated_output: Option<&str>,
 ) -> Vec<ToolCallContent> {
-    vec![command_output_section(status, command_actions, aggregated_output).into()]
+    vec![command_output_section(command, status, command_actions, aggregated_output).into()]
 }
 
 fn command_started_details(command: &str, cwd: &Path, command_actions: &[CommandAction]) -> String {
@@ -46,19 +46,28 @@ fn command_started_details(command: &str, cwd: &Path, command_actions: &[Command
 }
 
 fn command_output_section(
+    command: &str,
     status: CommandExecutionStatus,
     command_actions: &[CommandAction],
     aggregated_output: Option<&str>,
 ) -> String {
+    let operation = super::kind::shell_operation(command);
     let Some(output) = aggregated_output
         .map(str::trim_end)
         .filter(|output| !output.is_empty())
     else {
-        return command_completion_summary(status).to_string();
+        return operation
+            .as_ref()
+            .and_then(|operation| operation_completion_summary(operation, &status))
+            .unwrap_or_else(|| command_completion_summary(&status).to_string());
     };
 
     let preview = output_preview(output);
-    if should_render_plain_output(command_actions, &preview.text) {
+    if operation
+        .as_ref()
+        .is_some_and(|operation| matches!(operation, super::kind::ShellOperation::Fetch { .. }))
+        || should_render_plain_output(command_actions, &preview.text)
+    {
         let mut section = String::new();
         if let Some(summary) = preview.omission_summary.as_ref() {
             section.push_str("Output (");
@@ -178,6 +187,9 @@ pub(in crate::thread) fn command_tool_label(
 }
 
 fn shell_tool_call_label(command: &str) -> String {
+    if let Some(operation) = super::kind::shell_operation(command) {
+        return super::title::shell_operation_title(&operation);
+    }
     let inner = super::kind::extract_inner_shell_command(command);
     let label = compact_inline(&inner);
     if label.is_empty() {
@@ -187,7 +199,33 @@ fn shell_tool_call_label(command: &str) -> String {
     }
 }
 
-fn command_completion_summary(status: CommandExecutionStatus) -> &'static str {
+fn operation_completion_summary(
+    operation: &super::kind::ShellOperation,
+    status: &CommandExecutionStatus,
+) -> Option<String> {
+    if *status != CommandExecutionStatus::Completed {
+        return None;
+    }
+    match operation {
+        super::kind::ShellOperation::Fetch { url } => Some(format!("Fetched {url}")),
+        super::kind::ShellOperation::Copy {
+            source,
+            destination,
+        } => Some(format!("Copied {source} to {destination}")),
+        super::kind::ShellOperation::Move {
+            source,
+            destination,
+        } => Some(format!("Moved {source} to {destination}")),
+        super::kind::ShellOperation::Delete { path } => Some(format!("Deleted {path}")),
+        super::kind::ShellOperation::CreateDirectory { path } => {
+            Some(format!("Created directory {path}"))
+        }
+        super::kind::ShellOperation::CreateFile { path } => Some(format!("Created file {path}")),
+        super::kind::ShellOperation::Modify { path } => Some(format!("Modified {path}")),
+    }
+}
+
+fn command_completion_summary(status: &CommandExecutionStatus) -> &'static str {
     match status {
         CommandExecutionStatus::Completed => "Command completed without output.",
         CommandExecutionStatus::Failed => "Command failed without output.",
@@ -336,6 +374,33 @@ mod tests {
 
         assert_eq!(text, "/home/qweasd123tg/Code/1 is empty.");
         assert!(!text.contains("Terminal:"));
+    }
+
+    #[test]
+    fn command_completed_content_renders_fetch_output_as_plain_text() {
+        let text = first_text(command_tool_completed_content(
+            "curl https://example.com",
+            Path::new("/repo"),
+            &[],
+            CommandExecutionStatus::Completed,
+            Some("# Example Domain\n\nLearn more"),
+        ));
+
+        assert_eq!(text, "# Example Domain\n\nLearn more");
+        assert!(!text.contains("Terminal:"));
+    }
+
+    #[test]
+    fn command_completed_content_summarizes_file_operations_without_output() {
+        let text = first_text(command_tool_completed_content(
+            "cp README.md docs/README.md",
+            Path::new("/repo"),
+            &[],
+            CommandExecutionStatus::Completed,
+            None,
+        ));
+
+        assert_eq!(text, "Copied README.md to docs/README.md");
     }
 
     #[test]
