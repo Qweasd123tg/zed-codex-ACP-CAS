@@ -135,8 +135,13 @@ pub(super) async fn emit_finalized_turn_diff_snapshot(
             continue;
         };
 
-        match snapshot.client.write_text_file(path.clone(), content).await {
-            Ok(()) => synced_paths.push(path),
+        match snapshot
+            .client
+            .sync_text_file_if_changed(path.clone(), content)
+            .await
+        {
+            Ok(true) => synced_paths.push(path),
+            Ok(false) => {}
             Err(err) => {
                 warn!(
                     "Failed to sync turn diff into ACP buffer for {}: {err:?}",

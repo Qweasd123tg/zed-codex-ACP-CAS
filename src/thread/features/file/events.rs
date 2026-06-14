@@ -309,10 +309,15 @@ pub(in crate::thread) async fn emit_file_change_completed(
         .await;
 
     for (path, content) in writeback_targets {
-        match snapshot.client.write_text_file(path.clone(), content).await {
-            Ok(()) => {
+        match snapshot
+            .client
+            .sync_text_file_if_changed(path.clone(), content)
+            .await
+        {
+            Ok(true) => {
                 inner.synced_paths_this_turn.insert(path);
             }
+            Ok(false) => {}
             Err(err) => {
                 warn!(
                     "Failed to sync file change into ACP buffer for {}: {err:?}",

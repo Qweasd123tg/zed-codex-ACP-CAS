@@ -118,6 +118,7 @@ Sub-agent and collaboration tool-call rendering:
 - Less reconnect spam: reconnect warnings now collapse into one normalized status line while reconnect-assisted stalled turns still abort cleanly
 - Less brittle transport cleanup: background drain and thread-switch flush now wait for the queue to go quiet instead of assuming `64` messages or one tiny timeout is enough
 - Less turn-completion lock contention: turn diff rendering now runs outside the main session mutex and optional ACP buffer writeback skips paths already reserved by file-change lifecycle
+- Safer Zed buffer writeback after backend edits: the adapter refreshes the current ACP buffer snapshot and skips no-op writes before asking Zed to update an open document, reducing duplicate insertions and format-on-save loops
 - Less sparse completed tool cards: no-output commands, MCP results, and completed collab/sub-agent calls now keep a short visible summary while retaining raw details
 - Less transport serialization during quiet backend periods: app-server stdout now has a dedicated reader/inbox, so cancel, interrupt, post-turn drain, and thread-switch cleanup do not sit behind one long `next_message()` mutex wait
 - `/diff` slash-command: replays the diff of the last turn as an ACP diff card, with `/diff --session`, `/diff --last N`, and optional path filters for wider or narrower review. Diff history is kept in-memory per thread and is cleared on thread switch

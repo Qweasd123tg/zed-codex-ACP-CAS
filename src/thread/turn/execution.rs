@@ -414,8 +414,12 @@ impl Thread {
                     break;
                 }
 
-                match snapshot.client.write_text_file(path.clone(), content).await {
-                    Ok(()) => {
+                match snapshot
+                    .client
+                    .sync_text_file_if_changed(path.clone(), content)
+                    .await
+                {
+                    Ok(true) => {
                         let mut inner = self.inner.lock().await;
                         if inner.active_turn_id.as_deref() == Some(turn_id) {
                             inner.synced_paths_this_turn.insert(path);
@@ -423,6 +427,7 @@ impl Thread {
                             break;
                         }
                     }
+                    Ok(false) => {}
                     Err(err) => {
                         warn!(
                             "Failed to sync file change into ACP buffer for {}: {err:?}",

@@ -138,12 +138,29 @@ impl SessionClient {
         Ok(())
     }
 
-    pub(super) async fn prime_file_snapshot(&self, path: PathBuf) -> Result<(), Error> {
-        self.client
+    pub(super) async fn sync_text_file_if_changed(
+        &self,
+        path: PathBuf,
+        content: String,
+    ) -> Result<bool, Error> {
+        if self.supports_read_text_file() {
+            let current = self.prime_file_snapshot(path.clone()).await?;
+            if current == content {
+                return Ok(false);
+            }
+        }
+
+        self.write_text_file(path, content).await?;
+        Ok(true)
+    }
+
+    pub(super) async fn prime_file_snapshot(&self, path: PathBuf) -> Result<String, Error> {
+        let response = self
+            .client
             .send_request(ReadTextFileRequest::new(self.session_id.clone(), path))
             .block_task()
             .await?;
-        Ok(())
+        Ok(response.content)
     }
 
     pub(super) async fn send_usage_update(&self, used: u64, size: u64) {
