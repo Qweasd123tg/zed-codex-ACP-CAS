@@ -17,7 +17,7 @@ use codex_app_server_protocol::{
 };
 
 use crate::thread::features::tool_call_ui::kind::{
-    command_looks_like_verification, extract_inner_shell_command,
+    command_looks_like_verification, command_tool_kind, extract_inner_shell_command,
 };
 use crate::thread::features::tool_call_ui::location::command_tool_locations;
 use crate::thread::features::tool_call_ui::title::command_tool_title;
@@ -154,7 +154,11 @@ fn command_approval_fields(
     };
     let mut fields = ToolCallUpdateFields::new()
         .title(title)
-        .kind(ToolKind::Execute)
+        .kind(command_approval_kind(
+            command,
+            command_actions,
+            use_terminal_preflight,
+        ))
         .status(ToolCallStatus::Pending);
 
     if !use_terminal_preflight {
@@ -164,6 +168,21 @@ fn command_approval_fields(
         fields = fields.locations(command_tool_locations(cwd, command, command_actions));
     }
     fields.raw_input(serde_json::to_value(params).ok())
+}
+
+fn command_approval_kind(
+    command: &str,
+    command_actions: &[codex_app_server_protocol::CommandAction],
+    use_terminal_preflight: bool,
+) -> ToolKind {
+    if use_terminal_preflight {
+        return ToolKind::Execute;
+    }
+
+    match command_tool_kind(command, command_actions) {
+        ToolKind::Think => ToolKind::Execute,
+        kind => kind,
+    }
 }
 
 fn should_use_terminal_approval_preflight(
@@ -447,6 +466,7 @@ mod tests {
     };
     use agent_client_protocol::schema::{
         PermissionOptionKind, RequestPermissionOutcome, SelectedPermissionOutcome, ToolCallContent,
+        ToolKind,
     };
     use codex_app_server_protocol::{
         CommandExecutionApprovalDecision, CommandExecutionRequestApprovalParams,
@@ -639,6 +659,32 @@ mod tests {
 
         let fields = command_approval_fields(&params, Path::new("/repo"), command, actions, false);
 
+        assert!(fields.content.is_some());
+        assert_eq!(fields.kind, Some(ToolKind::Fetch));
+    }
+
+    #[test]
+    fn delete_command_approval_uses_delete_kind_without_terminal_preflight() {
+        let params: CommandExecutionRequestApprovalParams =
+            serde_json::from_value(serde_json::json!({
+                "threadId": "thread_1",
+                "turnId": "turn_1",
+                "itemId": "call_1",
+                "reason": "Need to remove a generated file",
+                "command": "rm -f /tmp/generated.md",
+                "cwd": "/tmp/workspace"
+            }))
+            .expect("valid command approval params");
+        let command = params.command.as_deref().unwrap_or_default();
+        let actions = params.command_actions.as_deref().unwrap_or_default();
+
+        assert!(!should_use_terminal_approval_preflight(
+            true, &params, command, actions
+        ));
+
+        let fields = command_approval_fields(&params, Path::new("/repo"), command, actions, false);
+
+        assert_eq!(fields.kind, Some(ToolKind::Delete));
         assert!(fields.content.is_some());
     }
 
