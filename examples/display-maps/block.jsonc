@@ -1,19 +1,11 @@
 {
   // Old "block" style for the primary 5-hour limit.
   // Buckets match the previous rounded 8-level block formatter.
-  "context": {
-    "usage": "context_percent",
-  },
   "limits": {
     "primary": "five_hour_block",
     "secondary": "weekly_percent",
   },
   "maps": {
-    "context_percent": {
-      "kind": "template",
-      "template": "{value}%",
-      "unavailable": "---",
-    },
     "percent": {
       "kind": "template",
       "template": "{value}%",

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use agent_client_protocol::schema::ToolCallLocation;
+use agent_client_protocol::schema::v1::ToolCallLocation;
 use codex_app_server_protocol::CommandAction;
 
 use super::kind::extract_inner_shell_command;

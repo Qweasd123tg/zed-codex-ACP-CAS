@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use agent_client_protocol::{
     Error,
-    schema::{
+    schema::v1::{
         PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
         SelectedPermissionOutcome, ToolCall, ToolCallId, ToolCallStatus, ToolCallUpdate,
         ToolCallUpdateFields, ToolKind,

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio, SessionInfo,
 };
 use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
@@ -27,6 +27,7 @@ use super::{
     ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
 };
 use crate::adapter_home::cas_home_from_codex_home;
+use crate::app_server::ThreadDeleteParams;
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::session_display_maps::{
@@ -507,7 +508,6 @@ impl Thread {
             model_selector: Default::default(),
             agent_labels,
             compaction_in_progress: false,
-            context_control_display: Default::default(),
             display_maps_path,
             display_maps,
             last_used_tokens: cached_context_usage.map(|(used, _)| used),
@@ -920,6 +920,33 @@ impl Thread {
         .await
     }
 
+    pub async fn delete_backend_thread(&self) -> Result<(), Error> {
+        let (app, thread_id) = {
+            let inner = self.inner.lock().await;
+            (inner.app.clone(), inner.thread_id.clone())
+        };
+
+        app.lock()
+            .await
+            .thread_delete(ThreadDeleteParams { thread_id })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete_session(session_id: SessionId) -> Result<(), Error> {
+        info!(
+            session_id = %session_id,
+            "Deleting ACP session via codex app-server"
+        );
+        let mut app = spawn_initialized_app(Some(&session_id)).await?;
+        app.thread_delete(ThreadDeleteParams {
+            thread_id: session_id.0.to_string(),
+        })
+        .await
+        .map_err(|error| startup_error("failed to delete backend thread", error))?;
+        Ok(())
+    }
+
     pub async fn list_sessions(
         config: &Config,
         cwd: Option<PathBuf>,
@@ -978,7 +1005,7 @@ mod tests {
     };
     use agent_client_protocol::{
         Error,
-        schema::{McpServer, McpServerHttp, McpServerSse, McpServerStdio},
+        schema::v1::{McpServer, McpServerHttp, McpServerSse, McpServerStdio},
     };
     use codex_app_server_protocol::ThreadResumeParams;
     use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};

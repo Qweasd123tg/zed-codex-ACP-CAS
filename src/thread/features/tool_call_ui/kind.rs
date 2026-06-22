@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use agent_client_protocol::schema::ToolKind;
+use agent_client_protocol::schema::v1::ToolKind;
 use codex_app_server_protocol::CommandAction;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

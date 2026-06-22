@@ -78,10 +78,10 @@ pub(super) fn materialized_selector_layout(
             "Model",
             &["models", "effort", "speed"],
         )),
-        context_control: Some(materialized_selector_entry(
-            layout.context_control.as_ref(),
-            "Context",
-            &["display", "integrations", "actions"],
+        status: Some(materialized_selector_entry(
+            layout.status.as_ref(),
+            "Status",
+            &["status", "integrations", "actions"],
         )),
     }
 }
@@ -114,7 +114,7 @@ fn materialized_selector_entry(
 }
 
 fn default_selector_order() -> Vec<String> {
-    ["permissions", "model", "context_control"]
+    ["permissions", "model", "status"]
         .into_iter()
         .map(str::to_string)
         .collect()

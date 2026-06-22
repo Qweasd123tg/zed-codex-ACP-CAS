@@ -4,7 +4,7 @@ use std::{collections::HashMap, path::Path};
 
 use agent_client_protocol::{
     Error,
-    schema::{
+    schema::v1::{
         PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
         SelectedPermissionOutcome, Terminal, ToolCall, ToolCallContent, ToolCallId, ToolCallStatus,
         ToolCallUpdate, ToolCallUpdateFields, ToolKind,
@@ -464,7 +464,7 @@ mod tests {
         command_approval_options, command_approval_preflight_tool_call, command_approval_title,
         should_use_terminal_approval_preflight,
     };
-    use agent_client_protocol::schema::{
+    use agent_client_protocol::schema::v1::{
         PermissionOptionKind, RequestPermissionOutcome, SelectedPermissionOutcome, ToolCallContent,
         ToolKind,
     };

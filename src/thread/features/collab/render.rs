@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::thread::{SessionClient, ThreadInner};
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     ToolCall, ToolCallId, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use codex_app_server_protocol::{CollabAgentTool, CollabAgentToolCallStatus};

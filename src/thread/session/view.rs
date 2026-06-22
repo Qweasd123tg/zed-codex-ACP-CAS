@@ -55,10 +55,6 @@ impl Thread {
 
         let inner = self.inner.lock().await;
         Ok(LoadSessionResponse::new()
-            .models(session_config::session_model_state(
-                &inner.models,
-                &inner.current_model,
-            ))
             .modes(Some(session_config::mode_state(
                 inner.collaboration_mode_kind,
             )))

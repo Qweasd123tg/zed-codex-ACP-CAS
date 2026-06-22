@@ -1,6 +1,6 @@
 //! Fallback state-machine plan-режима (инициализация и переходы фаз).
 
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, SessionUpdate,
 };
 use codex_protocol::config_types::ModeKind;

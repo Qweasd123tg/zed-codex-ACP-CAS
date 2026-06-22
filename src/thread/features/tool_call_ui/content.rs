@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use agent_client_protocol::schema::ToolCallContent;
+use agent_client_protocol::schema::v1::ToolCallContent;
 use codex_app_server_protocol::{CommandAction, CommandExecutionStatus};
 
 const OUTPUT_HEAD_LINES: usize = 80;
@@ -297,7 +297,9 @@ mod tests {
     fn first_text(content: Vec<ToolCallContent>) -> String {
         match content.into_iter().next().expect("content") {
             ToolCallContent::Content(content) => match content.content {
-                agent_client_protocol::schema::ContentBlock::Text(text) => text.text.to_string(),
+                agent_client_protocol::schema::v1::ContentBlock::Text(text) => {
+                    text.text.to_string()
+                }
                 _ => panic!("expected text content"),
             },
             _ => panic!("expected content block"),

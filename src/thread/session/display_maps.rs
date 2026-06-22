@@ -12,22 +12,13 @@ mod jsonc;
 
 const DEFAULT_PRIMARY_LIMITS_MAP_ID: &str = "five_hour_percent";
 const DEFAULT_SECONDARY_LIMITS_MAP_ID: &str = "weekly_percent";
-const DEFAULT_CONTEXT_USAGE_MAP_ID: &str = "context_percent";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::thread) struct DisplayMapsConfig {
     #[serde(default)]
-    pub(in crate::thread) context: ContextDisplayMapSelection,
-    #[serde(default)]
     pub(in crate::thread) limits: LimitsDisplayMapSelection,
     #[serde(default = "default_percent_maps")]
     maps: BTreeMap<String, PercentDisplayMap>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(in crate::thread) struct ContextDisplayMapSelection {
-    #[serde(default = "default_context_usage_map_id")]
-    usage: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,17 +62,8 @@ pub(in crate::thread) struct PercentThresholdLabel {
 impl Default for DisplayMapsConfig {
     fn default() -> Self {
         Self {
-            context: ContextDisplayMapSelection::default(),
             limits: LimitsDisplayMapSelection::default(),
             maps: default_percent_maps(),
-        }
-    }
-}
-
-impl Default for ContextDisplayMapSelection {
-    fn default() -> Self {
-        Self {
-            usage: default_context_usage_map_id(),
         }
     }
 }
@@ -96,27 +78,6 @@ impl Default for LimitsDisplayMapSelection {
 }
 
 impl DisplayMapsConfig {
-    pub(in crate::thread) fn render_context_usage(
-        &self,
-        usage_percent: Option<u64>,
-        unavailable_override: Option<&str>,
-    ) -> String {
-        let map = self
-            .maps
-            .get(self.context.usage.as_str())
-            .expect("display maps config should validate context usage map");
-        match usage_percent {
-            Some(usage_percent) => {
-                let value = clamp_percent_u64(usage_percent);
-                map.render(value)
-            }
-            None => unavailable_override
-                .map(ToString::to_string)
-                .or_else(|| map.unavailable_label().map(ToString::to_string))
-                .unwrap_or_else(|| "---".to_string()),
-        }
-    }
-
     pub(in crate::thread) fn render_primary_limit_remaining(
         &self,
         remaining_percent: Option<i32>,
@@ -231,13 +192,6 @@ fn write_display_maps(path: &Path, config: &DisplayMapsConfig) -> std::io::Resul
 fn default_percent_maps() -> BTreeMap<String, PercentDisplayMap> {
     BTreeMap::from([
         (
-            DEFAULT_CONTEXT_USAGE_MAP_ID.to_string(),
-            PercentDisplayMap::Template {
-                template: "{value}%".to_string(),
-                unavailable: Some("---".to_string()),
-            },
-        ),
-        (
             DEFAULT_PRIMARY_LIMITS_MAP_ID.to_string(),
             PercentDisplayMap::Template {
                 template: "5h {value}%".to_string(),
@@ -262,10 +216,6 @@ fn default_secondary_limits_map_id() -> String {
     DEFAULT_SECONDARY_LIMITS_MAP_ID.to_string()
 }
 
-fn default_context_usage_map_id() -> String {
-    DEFAULT_CONTEXT_USAGE_MAP_ID.to_string()
-}
-
 fn render_template(template: &str, value: u8) -> String {
     template
         .replace("{value}", &value.to_string())
@@ -276,12 +226,7 @@ fn clamp_percent(value: i32) -> u8 {
     value.clamp(0, 100) as u8
 }
 
-fn clamp_percent_u64(value: u64) -> u8 {
-    value.min(100) as u8
-}
-
 fn validate_display_maps_config(config: &DisplayMapsConfig) -> std::io::Result<()> {
-    validate_map_ref(&config.maps, "context.usage", config.context.usage.as_str())?;
     validate_map_ref(
         &config.maps,
         "limits.primary",
@@ -356,9 +301,8 @@ fn validate_percent_display_map(map_id: &str, map: &PercentDisplayMap) -> std::i
 #[cfg(test)]
 mod tests {
     use super::{
-        ContextDisplayMapSelection, DisplayMapsConfig, LimitsDisplayMapSelection,
-        PercentDisplayMap, PercentThresholdLabel, display_maps_path, persist_display_maps,
-        restore_display_maps,
+        DisplayMapsConfig, LimitsDisplayMapSelection, PercentDisplayMap, PercentThresholdLabel,
+        display_maps_path, persist_display_maps, restore_display_maps,
     };
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -373,20 +317,11 @@ mod tests {
         assert_eq!(maps.render_primary_limit_remaining(None), "5h --");
         assert_eq!(maps.render_secondary_limit_remaining(Some(42)), "wk 42%");
         assert_eq!(maps.render_secondary_limit_remaining(None), "wk --");
-        assert_eq!(maps.render_context_usage(Some(42), None), "42%");
-        assert_eq!(maps.render_context_usage(None, None), "---");
-        assert_eq!(
-            maps.render_context_usage(None, Some("157K tok")),
-            "157K tok"
-        );
     }
 
     #[test]
     fn threshold_maps_render_highest_matching_label() {
         let maps = DisplayMapsConfig {
-            context: ContextDisplayMapSelection {
-                usage: "braille".to_string(),
-            },
             limits: LimitsDisplayMapSelection {
                 primary: "braille".to_string(),
                 secondary: "braille".to_string(),
@@ -418,7 +353,6 @@ mod tests {
         assert_eq!(maps.render_primary_limit_remaining(Some(12)), "a");
         assert_eq!(maps.render_primary_limit_remaining(Some(13)), "b");
         assert_eq!(maps.render_primary_limit_remaining(None), "?");
-        assert_eq!(maps.render_context_usage(Some(13), None), "b");
     }
 
     #[test]
@@ -430,9 +364,6 @@ mod tests {
         let contents = r#"
         {
           // Active account limit maps.
-          "context": {
-            "usage": "dots",
-          },
           "limits": {
             "primary": "dots",
             "secondary": "percent",
@@ -453,8 +384,6 @@ mod tests {
         std::fs::write(&path, contents).expect("display maps fixture should write");
 
         let restored = restore_display_maps(&path).expect("display maps should restore");
-        assert_eq!(restored.render_context_usage(Some(1), None), ".");
-        assert_eq!(restored.render_context_usage(Some(2), None), "2%");
         assert_eq!(restored.render_primary_limit_remaining(Some(1)), ".");
         assert_eq!(restored.render_primary_limit_remaining(Some(2)), "2%");
         assert_eq!(restored.render_secondary_limit_remaining(Some(2)), "2%");
@@ -471,7 +400,7 @@ mod tests {
         {
           "limits": {
             "primary": "percent",
-            "secondary": "percent"
+            "secondary": "missing"
           },
           "maps": {
             "percent": { "kind": "template", "template": "{value}%" }
@@ -480,12 +409,12 @@ mod tests {
         "#;
         std::fs::write(&path, contents).expect("display maps fixture should write");
 
-        let error = restore_display_maps(&path).expect_err("missing context map should fail");
+        let error = restore_display_maps(&path).expect_err("missing limit map should fail");
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert!(
             error
                 .to_string()
-                .contains("context.usage` references missing map `context_percent")
+                .contains("limits.secondary` references missing map `missing")
         );
         drop(std::fs::remove_file(path));
     }
@@ -498,9 +427,8 @@ mod tests {
         ));
         let contents = r#"
         {
-          "context": { "usage": "dots" },
           "limits": {
-            "primary": "percent",
+            "primary": "dots",
             "secondary": "percent"
           },
           "maps": {
@@ -532,9 +460,8 @@ mod tests {
         ));
         let contents = r#"
         {
-          "context": { "usage": "late" },
           "limits": {
-            "primary": "percent",
+            "primary": "late",
             "secondary": "percent"
           },
           "maps": {
@@ -583,13 +510,11 @@ mod tests {
 
         let text =
             restore_display_maps(&examples_dir.join("text.jsonc")).expect("text example restores");
-        assert_eq!(text.render_context_usage(Some(80), None), "80%");
         assert_eq!(text.render_primary_limit_remaining(Some(80)), "5h 80%");
         assert_eq!(text.render_secondary_limit_remaining(Some(6)), "wk 6%");
 
         let bars =
             restore_display_maps(&examples_dir.join("bars.jsonc")).expect("bars example restores");
-        assert_eq!(bars.render_context_usage(Some(80), None), "80%");
         assert_eq!(bars.render_primary_limit_remaining(Some(0)), "▱▱▱▱▱");
         assert_eq!(bars.render_primary_limit_remaining(Some(1)), "▰▱▱▱▱");
         assert_eq!(bars.render_primary_limit_remaining(Some(80)), "▰▰▰▰▱");
@@ -598,23 +523,10 @@ mod tests {
 
         let block = restore_display_maps(&examples_dir.join("block.jsonc"))
             .expect("block example restores");
-        assert_eq!(block.render_context_usage(Some(80), None), "80%");
         assert_eq!(block.render_primary_limit_remaining(Some(7)), "▁");
         assert_eq!(block.render_primary_limit_remaining(Some(8)), "▂");
         assert_eq!(block.render_primary_limit_remaining(Some(80)), "▇");
         assert_eq!(block.render_primary_limit_remaining(Some(93)), "█");
         assert_eq!(block.render_secondary_limit_remaining(Some(6)), "wk 6%");
-
-        let context_percent = restore_display_maps(&examples_dir.join("context-percent.jsonc"))
-            .expect("context percent example restores");
-        assert_eq!(context_percent.render_context_usage(Some(76), None), "76%");
-        assert_eq!(context_percent.render_context_usage(None, None), "---");
-
-        let context_braille = restore_display_maps(&examples_dir.join("context-braille.jsonc"))
-            .expect("context braille example restores");
-        assert_eq!(context_braille.render_context_usage(Some(0), None), "⠀");
-        assert_eq!(context_braille.render_context_usage(Some(12), None), "⢀");
-        assert_eq!(context_braille.render_context_usage(Some(76), None), "⣶");
-        assert_eq!(context_braille.render_context_usage(Some(100), None), "⣿");
     }
 }

@@ -59,6 +59,15 @@ bash script/build_local_release.sh
   - `0.x.y` — мелкие фиксы, polish, docs, локальные UX-доработки без новой крупной возможности.
 - Если в одном change-set есть новая заметная фича, prefer bump `minor`, а не очередной patch.
 
+## Правила обновления upstream references
+При `script/update_references.sh`, сравнении «что нового» или планировании parity/update-работы сначала читать GitHub Releases, release notes и changelog соответствующих upstream-репозиториев. Кодовые diff использовать только вторым шагом: для проверки конкретного кандидата, ownership, API/enum drift и точного implementation риска.
+
+Практический порядок:
+1. Сначала выписать user-facing изменения из GitHub Releases / release notes по `agent-client-protocol`, `zed-industries/codex-acp`, `openai/codex` и `zed-industries/zed`.
+2. Отфильтровать пункты, которые реально касаются ACP, external agents, Codex app-server protocol, Zed ACP UI, permissions, sessions, history, usage/context или subagents.
+3. Только после этого открывать кодовые diff/refs для выбранных пунктов, чтобы подтвердить контракт и место реализации.
+4. Не начинать широкий code archaeology до release-note pass: лимиты и время тратить на проверку конкретных сигналов, а не на поиск вслепую.
+
 ## Стиль кода и соглашения
 - Rust edition: `2024`.
 - Форматирование: `rustfmt`.

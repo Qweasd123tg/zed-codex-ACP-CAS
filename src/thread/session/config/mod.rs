@@ -1,13 +1,12 @@
 //! Маппинг конфигурации сессии между ACP-опциями и runtime-настройками Codex app-server.
 
-use crate::thread::session_display_maps::DisplayMapsConfig;
 use crate::thread::session_selector_preferences::{
     ModelSelectorPreferences, SelectorLayoutPreferences,
 };
 use crate::thread::{
-    AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextUsageSource,
-    ModeKind, PLAN_SESSION_MODE_ID, ReasoningEffort, ServiceTier, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigSelectGroup, SessionConfigSelectOption, ThreadInner,
+    AppAskForApproval, AppModel, AppSandboxMode, ModeKind, PLAN_SESSION_MODE_ID, ReasoningEffort,
+    ServiceTier, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectGroup,
+    SessionConfigSelectOption, ThreadInner,
 };
 
 #[path = "context.rs"]
@@ -31,18 +30,8 @@ use self::model_selector::{
 };
 pub(super) use modes::{
     current_permission_mode_id, i64_to_u64_saturating, mode_state, permission_modes,
-    policy_to_mode, session_model_state, to_app_approval, to_app_sandbox_mode,
+    policy_to_mode, to_app_approval, to_app_sandbox_mode,
 };
-
-impl ContextControlDisplay {
-    fn value_id(self) -> &'static str {
-        match self {
-            Self::Context => context::CONTEXT_STATUS_VALUE,
-            Self::Limits => context::CONTEXT_LIMITS_VALUE,
-            Self::ContextAndLimits => context::CONTEXT_COMBINED_VALUE,
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug)]
 // Входные параметры для сборки списка session config options.
@@ -54,12 +43,7 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) current_service_tier: Option<ServiceTier>,
     pub(in crate::thread) current_reasoning_effort: ReasoningEffort,
     pub(in crate::thread) model_selector: &'a ModelSelectorPreferences,
-    pub(in crate::thread) current_used_tokens: Option<u64>,
-    pub(in crate::thread) current_context_window_size: Option<u64>,
-    pub(in crate::thread) current_usage_percent: Option<u64>,
-    pub(in crate::thread) current_context_usage_source: Option<ContextUsageSource>,
-    pub(in crate::thread) current_context_display: ContextControlDisplay,
-    pub(in crate::thread) display_maps: &'a DisplayMapsConfig,
+    pub(in crate::thread) display_maps: &'a crate::thread::session_display_maps::DisplayMapsConfig,
     pub(in crate::thread) current_account_rate_limits:
         Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
     pub(in crate::thread) compaction_in_progress: bool,
@@ -84,11 +68,6 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         current_service_tier: inner.service_tier,
         current_reasoning_effort: inner.reasoning_effort,
         model_selector: &inner.model_selector,
-        current_used_tokens: inner.last_used_tokens,
-        current_context_window_size: inner.context_window_size,
-        current_usage_percent: usage_percent(inner.last_used_tokens, inner.context_window_size),
-        current_context_usage_source: inner.context_usage_source,
-        current_context_display: inner.context_control_display,
         display_maps: &inner.display_maps,
         current_account_rate_limits: inner.account_rate_limits.as_ref(),
         compaction_in_progress: inner.compaction_in_progress,
@@ -113,11 +92,6 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         current_service_tier,
         current_reasoning_effort,
         model_selector,
-        current_used_tokens,
-        current_context_window_size,
-        current_usage_percent,
-        current_context_usage_source,
-        current_context_display,
         display_maps,
         current_account_rate_limits,
         compaction_in_progress,
@@ -224,25 +198,25 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
     ));
 
     options.push((
-        "context_control",
+        "status",
         SessionConfigOption::select(
-            "context_control",
-            selector_name(selector_layout, "context_control", "Context"),
-            current_context_display.value_id(),
+            "status",
+            selector_name(selector_layout, "status", "Status"),
+            if compaction_in_progress {
+                context::STATUS_COMPACT_VALUE.to_string()
+            } else {
+                context::STATUS_LIMITS_VALUE.to_string()
+            },
             apply_group_layout(
                 selector_layout,
-                "context_control",
-                context::context_control_option_groups(
+                "status",
+                context::status_control_option_groups(
                     workspace_cwd,
                     backend_cli_version,
                     account_status,
                     total_token_usage,
-                    current_used_tokens,
-                    current_context_window_size,
-                    current_usage_percent,
-                    current_context_usage_source,
-                    display_maps,
                     current_account_rate_limits,
+                    display_maps,
                     compaction_in_progress,
                     session_mcp_summary,
                     session_skills_summary,
@@ -250,14 +224,16 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 ),
             ),
         )
-        .description(context_selector_description(
-            current_used_tokens,
-            current_context_window_size,
-            current_usage_percent,
-            current_context_usage_source,
+        .description(context::full_status_report(
+            workspace_cwd,
+            backend_cli_version,
+            account_status,
+            total_token_usage,
             current_account_rate_limits,
             display_maps,
-            compaction_in_progress,
+            session_mcp_summary,
+            session_skills_summary,
+            session_plugins_summary,
         )),
     ));
 
@@ -291,38 +267,11 @@ fn current_permission_mode_description(
         .and_then(|mode| mode.description)
 }
 
-fn context_selector_description(
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_percent: Option<u64>,
-    usage_source: Option<ContextUsageSource>,
-    rate_limits: Option<&codex_app_server_protocol::RateLimitSnapshot>,
-    display_maps: &DisplayMapsConfig,
-    compaction_in_progress: bool,
-) -> String {
-    let mut sections = vec![
-        context::context_status_description(
-            used,
-            size,
-            usage_percent,
-            usage_source,
-            compaction_in_progress,
-        ),
-        limits::limits_status_description(rate_limits, display_maps),
-    ];
-
-    if compaction_in_progress {
-        sections.push("Context compaction is currently running.".to_string());
-    }
-
-    sections.join("\n\n")
-}
-
 pub(super) use context::{
-    AccountStatus, CONTEXT_COMBINED_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE,
-    CONTEXT_STATUS_VALUE, ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE,
-    SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, build_account_status, build_mcp_summary,
-    build_plugins_summary, build_skills_summary, full_status_report,
+    AccountStatus, ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE,
+    SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, STATUS_COMPACT_VALUE, STATUS_LIMITS_VALUE,
+    build_account_status, build_mcp_summary, build_plugins_summary, build_skills_summary,
+    full_status_report,
 };
 pub(super) use fast_mode::{service_tier_override_from_config, service_tier_override_from_session};
 pub(super) use limits::{
@@ -336,18 +285,6 @@ pub(super) use reasoning::{
     resolve_reasoning_effort,
 };
 
-pub(super) fn usage_percent(used: Option<u64>, size: Option<u64>) -> Option<u64> {
-    let used = used?;
-    let size = size?;
-    if size == 0 {
-        return None;
-    }
-    // Round to nearest integer without floating point: floor((used*100 + size/2) / size).
-    let clamped = used.min(size);
-    let numerator = clamped.saturating_mul(100).saturating_add(size / 2);
-    Some(numerator / size)
-}
-
 #[cfg(test)]
 mod tests {
     use super::model_selector::{model_reasoning_value, model_speed_value};
@@ -360,21 +297,15 @@ mod tests {
         SelectorLayoutEntry, SelectorLayoutPreferences,
     };
     use crate::thread::{
-        AppAskForApproval, AppModel, AppSandboxMode, ContextControlDisplay, ContextUsageSource,
-        ModeKind, ReasoningEffort, ServiceTier,
+        AppAskForApproval, AppModel, AppSandboxMode, ModeKind, ReasoningEffort, ServiceTier,
     };
-    use agent_client_protocol::schema::{
+    use agent_client_protocol::schema::v1::{
         SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
     };
-    use codex_app_server_protocol::{RateLimitSnapshot, RateLimitWindow, ReasoningEffortOption};
-    use codex_protocol::account::PlanType;
+    use codex_app_server_protocol::ReasoningEffortOption;
 
     #[test]
     fn model_selector_uses_backend_model_names_by_default() {
-        let account_status = super::AccountStatus::default();
-        let mcp_summary = super::ContextSelectorSummary::default();
-        let skills_summary = super::ContextSelectorSummary::default();
-        let plugins_summary = super::ContextSelectorSummary::default();
         let selector_layout = SelectorLayoutPreferences::default();
         let models = vec![AppModel {
             id: "gpt-5.5".to_string(),
@@ -396,29 +327,24 @@ mod tests {
         }];
 
         let options = config_options(ConfigOptionsInput {
-            workspace_cwd: std::path::Path::new("/tmp"),
-            backend_cli_version: "0.0.0",
             models: &models,
             current_model: "gpt-5.5",
             current_service_tier: Some(ServiceTier::Fast),
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
-            current_used_tokens: None,
-            current_context_window_size: None,
-            current_usage_percent: None,
-            current_context_usage_source: None::<ContextUsageSource>,
-            current_context_display: ContextControlDisplay::Context,
+            workspace_cwd: std::path::Path::new("/tmp/workspace"),
+            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
+            account_status: &Default::default(),
+            total_token_usage: None,
+            session_mcp_summary: &Default::default(),
+            session_skills_summary: &Default::default(),
+            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
             collaboration_mode_kind: ModeKind::Default,
-            account_status: &account_status,
-            total_token_usage: None,
-            session_mcp_summary: &mcp_summary,
-            session_skills_summary: &skills_summary,
-            session_plugins_summary: &plugins_summary,
             selector_layout: &selector_layout,
         });
 
@@ -466,14 +392,35 @@ mod tests {
         assert!(groups[2].options.iter().any(|option| {
             option.value.0.as_ref() == "speed:fast" && option.name == "★ Fast"
         }));
+
+        let status = options
+            .iter()
+            .find(|option| option.id.0.as_ref() == "status")
+            .expect("status selector exists");
+        let SessionConfigKind::Select(select) = &status.kind else {
+            panic!("status selector should be a select config option");
+        };
+        assert_eq!(select.current_value.0.as_ref(), "limits_status");
+        let SessionConfigSelectOptions::Grouped(groups) = &select.options else {
+            panic!("status selector should use grouped options");
+        };
+        assert_eq!(
+            groups
+                .iter()
+                .map(|group| group.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Status", "Integrations", "Actions"]
+        );
+        assert!(groups[0].options.iter().any(|option| {
+            option.value.0.as_ref() == "limits_status" && option.name == "5h -- · wk --"
+        }));
+        assert!(groups[2].options.iter().any(|option| {
+            option.value.0.as_ref() == "compact_now" && option.name == "Compact now"
+        }));
     }
 
     #[test]
     fn model_selector_keeps_raw_display_names_without_formatting() {
-        let account_status = super::AccountStatus::default();
-        let mcp_summary = super::ContextSelectorSummary::default();
-        let skills_summary = super::ContextSelectorSummary::default();
-        let plugins_summary = super::ContextSelectorSummary::default();
         let selector_layout = SelectorLayoutPreferences::default();
         let models = vec![AppModel {
             id: "gpt-5.5".to_string(),
@@ -495,29 +442,24 @@ mod tests {
         }];
 
         let options = config_options(ConfigOptionsInput {
-            workspace_cwd: std::path::Path::new("/tmp"),
-            backend_cli_version: "0.0.0",
             models: &models,
             current_model: "gpt-5.5",
             current_service_tier: Some(ServiceTier::Fast),
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
-            current_used_tokens: None,
-            current_context_window_size: None,
-            current_usage_percent: None,
-            current_context_usage_source: None::<ContextUsageSource>,
-            current_context_display: ContextControlDisplay::Context,
+            workspace_cwd: std::path::Path::new("/tmp/workspace"),
+            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
+            account_status: &Default::default(),
+            total_token_usage: None,
+            session_mcp_summary: &Default::default(),
+            session_skills_summary: &Default::default(),
+            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
             collaboration_mode_kind: ModeKind::Default,
-            account_status: &account_status,
-            total_token_usage: None,
-            session_mcp_summary: &mcp_summary,
-            session_skills_summary: &skills_summary,
-            session_plugins_summary: &plugins_summary,
             selector_layout: &selector_layout,
         });
 
@@ -545,10 +487,6 @@ mod tests {
 
     #[test]
     fn model_selector_preferences_filter_models_and_efforts() {
-        let account_status = super::AccountStatus::default();
-        let mcp_summary = super::ContextSelectorSummary::default();
-        let skills_summary = super::ContextSelectorSummary::default();
-        let plugins_summary = super::ContextSelectorSummary::default();
         let selector_layout = SelectorLayoutPreferences::default();
         let model_selector = ModelSelectorPreferences {
             default_model: None,
@@ -616,29 +554,24 @@ mod tests {
         ];
 
         let options = config_options(ConfigOptionsInput {
-            workspace_cwd: std::path::Path::new("/tmp"),
-            backend_cli_version: "0.0.0",
             models: &models,
             current_model: "gpt-5.5",
             current_service_tier: None,
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &model_selector,
-            current_used_tokens: None,
-            current_context_window_size: None,
-            current_usage_percent: None,
-            current_context_usage_source: None::<ContextUsageSource>,
-            current_context_display: ContextControlDisplay::Context,
+            workspace_cwd: std::path::Path::new("/tmp/workspace"),
+            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
+            account_status: &Default::default(),
+            total_token_usage: None,
+            session_mcp_summary: &Default::default(),
+            session_skills_summary: &Default::default(),
+            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
             collaboration_mode_kind: ModeKind::Default,
-            account_status: &account_status,
-            total_token_usage: None,
-            session_mcp_summary: &mcp_summary,
-            session_skills_summary: &skills_summary,
-            session_plugins_summary: &plugins_summary,
             selector_layout: &selector_layout,
         });
 
@@ -695,117 +628,28 @@ mod tests {
     }
 
     #[test]
-    fn context_selector_current_value_tracks_display_preference() {
-        let account_status = super::AccountStatus::default();
-        let mcp_summary = super::ContextSelectorSummary::default();
-        let skills_summary = super::ContextSelectorSummary::default();
-        let plugins_summary = super::ContextSelectorSummary::default();
-        let selector_layout = SelectorLayoutPreferences::default();
-        let rate_limits = RateLimitSnapshot {
-            limit_id: Some("codex".to_string()),
-            limit_name: None,
-            primary: Some(RateLimitWindow {
-                used_percent: 20,
-                window_duration_mins: Some(300),
-                resets_at: None,
-            }),
-            secondary: Some(RateLimitWindow {
-                used_percent: 6,
-                window_duration_mins: Some(10_080),
-                resets_at: None,
-            }),
-            credits: None,
-            plan_type: Some(PlanType::Plus),
-        };
-
-        let options = config_options(ConfigOptionsInput {
-            workspace_cwd: std::path::Path::new("/tmp"),
-            backend_cli_version: "0.0.0",
-            models: &[],
-            current_model: "gpt-5.5",
-            current_service_tier: None,
-            current_reasoning_effort: ReasoningEffort::High,
-            model_selector: &Default::default(),
-            current_used_tokens: Some(195_499),
-            current_context_window_size: Some(258_400),
-            current_usage_percent: Some(76),
-            current_context_usage_source: Some(ContextUsageSource::Live),
-            current_context_display: ContextControlDisplay::Limits,
-            display_maps: &Default::default(),
-            current_account_rate_limits: Some(&rate_limits),
-            compaction_in_progress: false,
-            approval: AppAskForApproval::OnRequest,
-            sandbox: AppSandboxMode::WorkspaceWrite,
-            collaboration_mode_kind: ModeKind::Default,
-            account_status: &account_status,
-            total_token_usage: None,
-            session_mcp_summary: &mcp_summary,
-            session_skills_summary: &skills_summary,
-            session_plugins_summary: &plugins_summary,
-            selector_layout: &selector_layout,
-        });
-
-        let context = options
-            .iter()
-            .find(|option| option.id.0.as_ref() == "context_control")
-            .expect("context selector exists");
-        assert_eq!(context.name, "Context");
-        assert!(context.description.as_deref().is_some_and(|description| {
-            description.contains("Context: ⣶ 76%")
-                && description.contains("Tokens: 195499/258400")
-                && description.contains("Status: live")
-                && description.contains("5h 80% · wk 94%")
-                && description.contains("5-hour: resets -")
-                && description.contains("Weekly: resets -")
-        }));
-        let SessionConfigKind::Select(select) = &context.kind else {
-            panic!("context selector should be a select config option");
-        };
-        assert_eq!(select.current_value.0.as_ref(), "limits_status");
-        let SessionConfigSelectOptions::Grouped(groups) = &select.options else {
-            panic!("context selector should use grouped options");
-        };
-        assert!(
-            groups
-                .iter()
-                .flat_map(|group| &group.options)
-                .any(|option| option.value.0.as_ref() == "limits_status"
-                    && option.name == "5h 80%")
-        );
-    }
-
-    #[test]
     fn permissions_selector_embeds_plan_mode_without_losing_permission_state() {
-        let account_status = super::AccountStatus::default();
-        let mcp_summary = super::ContextSelectorSummary::default();
-        let skills_summary = super::ContextSelectorSummary::default();
-        let plugins_summary = super::ContextSelectorSummary::default();
         let selector_layout = SelectorLayoutPreferences::default();
 
         let options = config_options(ConfigOptionsInput {
-            workspace_cwd: std::path::Path::new("/tmp"),
-            backend_cli_version: "0.0.0",
             models: &[],
             current_model: "gpt-5.5",
             current_service_tier: None,
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
-            current_used_tokens: Some(1_000),
-            current_context_window_size: Some(2_000),
-            current_usage_percent: Some(50),
-            current_context_usage_source: Some(ContextUsageSource::Cached),
-            current_context_display: ContextControlDisplay::Context,
+            workspace_cwd: std::path::Path::new("/tmp/workspace"),
+            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
-            compaction_in_progress: true,
+            compaction_in_progress: false,
+            account_status: &Default::default(),
+            total_token_usage: None,
+            session_mcp_summary: &Default::default(),
+            session_skills_summary: &Default::default(),
+            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::Never,
             sandbox: AppSandboxMode::ReadOnly,
             collaboration_mode_kind: ModeKind::Plan,
-            account_status: &account_status,
-            total_token_usage: None,
-            session_mcp_summary: &mcp_summary,
-            session_skills_summary: &skills_summary,
-            session_plugins_summary: &plugins_summary,
             selector_layout: &selector_layout,
         });
 
@@ -845,31 +689,12 @@ mod tests {
         assert!(groups[1].options.iter().any(|option| {
             option.value.0.as_ref() == "read-only" && option.name == "Read only"
         }));
-
-        let context = options
-            .iter()
-            .find(|option| option.id.0.as_ref() == "context_control")
-            .expect("context selector exists");
-        assert!(context.description.as_deref().is_some_and(|description| {
-            description.contains("Context: ⣤ 50%")
-                && description.contains("Tokens: 1000/2000")
-                && description.contains("Status: compacting")
-                && description.contains("Context compaction is currently running.")
-        }));
     }
 
     #[test]
     fn selector_layout_can_rename_reorder_hide_and_filter_groups() {
-        let account_status = super::AccountStatus::default();
-        let mcp_summary = super::ContextSelectorSummary::default();
-        let skills_summary = super::ContextSelectorSummary::default();
-        let plugins_summary = super::ContextSelectorSummary::default();
         let selector_layout = SelectorLayoutPreferences {
-            order: Some(vec![
-                "context_control".to_string(),
-                "permissions".to_string(),
-                "model".to_string(),
-            ]),
+            order: Some(vec!["permissions".to_string(), "model".to_string()]),
             permissions: Some(SelectorLayoutEntry {
                 visible: Some(true),
                 name: Some("Mode".to_string()),
@@ -880,37 +705,32 @@ mod tests {
                 name: None,
                 groups: None,
             }),
-            context_control: Some(SelectorLayoutEntry {
-                visible: Some(true),
-                name: Some("Ctx".to_string()),
-                groups: Some(vec!["actions".to_string(), "display".to_string()]),
+            status: Some(SelectorLayoutEntry {
+                visible: Some(false),
+                name: None,
+                groups: None,
             }),
         };
 
         let options = config_options(ConfigOptionsInput {
-            workspace_cwd: std::path::Path::new("/tmp"),
-            backend_cli_version: "0.0.0",
             models: &[],
             current_model: "gpt-5.5",
             current_service_tier: None,
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
-            current_used_tokens: Some(1_000),
-            current_context_window_size: Some(2_000),
-            current_usage_percent: Some(50),
-            current_context_usage_source: Some(ContextUsageSource::Cached),
-            current_context_display: ContextControlDisplay::Context,
+            workspace_cwd: std::path::Path::new("/tmp/workspace"),
+            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
+            account_status: &Default::default(),
+            total_token_usage: None,
+            session_mcp_summary: &Default::default(),
+            session_skills_summary: &Default::default(),
+            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
             collaboration_mode_kind: ModeKind::Default,
-            account_status: &account_status,
-            total_token_usage: None,
-            session_mcp_summary: &mcp_summary,
-            session_skills_summary: &skills_summary,
-            session_plugins_summary: &plugins_summary,
             selector_layout: &selector_layout,
         });
 
@@ -919,25 +739,11 @@ mod tests {
                 .iter()
                 .map(|option| option.id.0.as_ref())
                 .collect::<Vec<_>>(),
-            vec!["context_control", "permissions"]
-        );
-        assert_eq!(options[0].name, "Ctx");
-        let SessionConfigKind::Select(context_select) = &options[0].kind else {
-            panic!("context selector should be a select config option");
-        };
-        let SessionConfigSelectOptions::Grouped(context_groups) = &context_select.options else {
-            panic!("context selector should use grouped options");
-        };
-        assert_eq!(
-            context_groups
-                .iter()
-                .map(|group| group.group.0.as_ref())
-                .collect::<Vec<_>>(),
-            vec!["actions", "display"]
+            vec!["permissions"]
         );
 
-        assert_eq!(options[1].name, "Mode");
-        let SessionConfigKind::Select(permissions_select) = &options[1].kind else {
+        assert_eq!(options[0].name, "Mode");
+        let SessionConfigKind::Select(permissions_select) = &options[0].kind else {
             panic!("permissions selector should be a select config option");
         };
         let SessionConfigSelectOptions::Grouped(permission_groups) = &permissions_select.options

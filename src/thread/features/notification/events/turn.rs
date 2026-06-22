@@ -1,6 +1,6 @@
 //! Turn-level notification-ветки (plan updates, turn completion/errors).
 
-use agent_client_protocol::schema::{Plan, SessionUpdate, StopReason};
+use agent_client_protocol::schema::v1::{Plan, SessionUpdate, StopReason};
 use codex_app_server_protocol::{Turn as AppTurn, TurnPlanStep, TurnStatus};
 use codex_protocol::config_types::ModeKind;
 

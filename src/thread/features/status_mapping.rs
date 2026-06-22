@@ -1,6 +1,6 @@
 //! Доменные трансляторы статусов app-server -> ACP для tool-call карточек.
 
-use agent_client_protocol::schema::ToolCallStatus;
+use agent_client_protocol::schema::v1::ToolCallStatus;
 use codex_app_server_protocol::{CommandExecutionStatus, McpToolCallStatus, PatchApplyStatus};
 
 // Держим маппинг статусов команд явным, чтобы UI-бейджи были предсказуемыми.

@@ -1,14 +1,14 @@
 //! Обновления runtime-настроек сессии (mode/model/reasoning/context), доступные ACP-клиентам.
 
 use super::session_config::{
-    CONTEXT_COMBINED_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE, CONTEXT_STATUS_VALUE,
     MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
-    find_model_for_current, normalize_reasoning_effort_for_model, parse_model_reasoning_value,
-    parse_model_speed_value, reasoning_effort_value,
+    STATUS_COMPACT_VALUE, STATUS_LIMITS_VALUE, find_model_for_current,
+    normalize_reasoning_effort_for_model, parse_model_reasoning_value, parse_model_speed_value,
+    reasoning_effort_value,
 };
 use super::{
-    APPROVAL_PRESETS, ContextControlDisplay, DEFAULT_SESSION_MODE_ID, Error, ModeKind, ModelId,
-    PLAN_SESSION_MODE_ID, ReasoningEffort, SessionConfigId, SessionModeId, Thread, replay,
+    APPROVAL_PRESETS, DEFAULT_SESSION_MODE_ID, Error, ModeKind, PLAN_SESSION_MODE_ID,
+    ReasoningEffort, SessionConfigId, SessionModeId, Thread, replay,
 };
 use crate::thread::features::{
     collab::{remember_agent_label, warm_agent_labels_for_turns},
@@ -17,7 +17,7 @@ use crate::thread::features::{
     },
 };
 use crate::thread::session_selector_preferences::persist_selector_preferences;
-use agent_client_protocol::schema::SessionConfigValueId;
+use agent_client_protocol::schema::v1::SessionConfigValueId;
 use codex_app_server_protocol::ThreadRollbackParams;
 use tracing::warn;
 
@@ -80,9 +80,9 @@ impl Thread {
         Ok(())
     }
 
-    pub async fn set_model(&self, model: ModelId) -> Result<(), Error> {
+    pub async fn set_model(&self, model: String) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
-        inner.current_model = model.0.to_string();
+        inner.current_model = model;
         if !inner
             .model_selector
             .explicitly_enables_reasoning_effort(inner.reasoning_effort)
@@ -135,50 +135,11 @@ impl Thread {
         Ok(())
     }
 
-    pub async fn set_context_control(&self, value: SessionConfigValueId) -> Result<(), Error> {
-        let mut inner = self.inner.lock().await;
-        let mut notify_options_update = false;
+    pub async fn set_status_control(&self, value: SessionConfigValueId) -> Result<(), Error> {
         match value.0.as_ref() {
-            SESSION_STATUS_VALUE | MCP_STATUS_VALUE | SKILLS_STATUS_VALUE
+            STATUS_LIMITS_VALUE | SESSION_STATUS_VALUE | MCP_STATUS_VALUE | SKILLS_STATUS_VALUE
             | PLUGINS_STATUS_VALUE => Ok(()),
-            CONTEXT_STATUS_VALUE => {
-                if inner.context_control_display != ContextControlDisplay::Context {
-                    inner.context_control_display = ContextControlDisplay::Context;
-                    persist_selector_preferences_or_warn(&inner);
-                    notify_options_update = true;
-                }
-                drop(inner);
-                if notify_options_update {
-                    self.notify_config_options_update().await;
-                }
-                Ok(())
-            }
-            CONTEXT_LIMITS_VALUE => {
-                if inner.context_control_display != ContextControlDisplay::Limits {
-                    inner.context_control_display = ContextControlDisplay::Limits;
-                    persist_selector_preferences_or_warn(&inner);
-                    notify_options_update = true;
-                }
-                drop(inner);
-                if notify_options_update {
-                    self.notify_config_options_update().await;
-                }
-                Ok(())
-            }
-            CONTEXT_COMBINED_VALUE => {
-                if inner.context_control_display != ContextControlDisplay::ContextAndLimits {
-                    inner.context_control_display = ContextControlDisplay::ContextAndLimits;
-                    persist_selector_preferences_or_warn(&inner);
-                    notify_options_update = true;
-                }
-                drop(inner);
-                if notify_options_update {
-                    self.notify_config_options_update().await;
-                }
-                Ok(())
-            }
-            CONTEXT_COMPACT_VALUE => {
-                drop(inner);
+            STATUS_COMPACT_VALUE => {
                 if self.request_context_compaction_ext().await? {
                     self.spawn_compaction_drain_task();
                     let drain_outcome = self
@@ -188,13 +149,13 @@ impl Thread {
                         warn!(
                             processed_messages = drain_outcome.processed(),
                             outcome = ?drain_outcome,
-                            "context compact action drain stopped before the queue went quiet"
+                            "status compact action drain stopped before the queue went quiet"
                         );
                     }
                 }
                 Ok(())
             }
-            _ => Err(Error::invalid_params().data("Unsupported context control action")),
+            _ => Err(Error::invalid_params().data("Unsupported status action")),
         }
     }
 
@@ -215,6 +176,7 @@ impl Thread {
         match config_id.0.as_ref() {
             "mode" => self.set_mode(SessionModeId::new(value.0)).await,
             "permissions" => self.set_permission_mode(SessionModeId::new(value.0)).await,
+            "status" => self.set_status_control(value).await,
             "model" => {
                 if let Some(effort) = parse_model_reasoning_value(&value.0) {
                     self.set_reasoning_effort(effort).await?;
@@ -225,10 +187,9 @@ impl Thread {
                     self.notify_config_options_update().await;
                     Ok(())
                 } else {
-                    self.set_model(ModelId::new(value.0)).await
+                    self.set_model(value.0.to_string()).await
                 }
             }
-            "context_control" => self.set_context_control(value).await,
             _ => Err(Error::invalid_params().data("Unsupported config option")),
         }
     }

@@ -2,7 +2,7 @@
 
 use agent_client_protocol::{
     Error,
-    schema::{
+    schema::v1::{
         PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
         SelectedPermissionOutcome, ToolCallId, ToolCallStatus, ToolCallUpdate,
         ToolCallUpdateFields, ToolKind,
@@ -197,7 +197,7 @@ mod tests {
         PermissionsRequestApprovalParams, approval_response_from_outcome,
         granted_permissions_from_request, permission_request_content,
     };
-    use agent_client_protocol::schema::{
+    use agent_client_protocol::schema::v1::{
         PermissionOptionId, RequestPermissionOutcome, SelectedPermissionOutcome,
     };
     use codex_app_server_protocol::AdditionalPermissionProfile;

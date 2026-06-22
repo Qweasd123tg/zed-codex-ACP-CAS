@@ -1,18 +1,10 @@
 {
   // Old "text" style: show remaining account quota as plain percentages.
-  "context": {
-    "usage": "context_percent",
-  },
   "limits": {
     "primary": "five_hour_percent",
     "secondary": "weekly_percent",
   },
   "maps": {
-    "context_percent": {
-      "kind": "template",
-      "template": "{value}%",
-      "unavailable": "---",
-    },
     "percent": {
       "kind": "template",
       "template": "{value}%",

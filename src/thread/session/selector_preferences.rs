@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::thread::{AppModel, ContextControlDisplay, ReasoningEffort, ServiceTier, ThreadInner};
+use crate::thread::{AppModel, ReasoningEffort, ServiceTier, ThreadInner};
 
 #[path = "selector_preferences/jsonc.rs"]
 mod jsonc;
@@ -21,9 +21,6 @@ use self::materialize::{
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::thread) struct SelectorPreferences {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(in crate::thread) display: Option<SelectorDisplayPreferences>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::thread) defaults: Option<SelectorDefaultPreferences>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::thread) model_selector: Option<ModelSelectorPreferences>,
@@ -31,11 +28,6 @@ pub(in crate::thread) struct SelectorPreferences {
     pub(in crate::thread) layout: Option<SelectorLayoutPreferences>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::thread) slash_commands: Option<SlashCommandPreferences>,
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(in crate::thread) struct SelectorDisplayPreferences {
-    pub(in crate::thread) context_control: Option<ContextControlDisplay>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,7 +301,7 @@ pub(in crate::thread) struct SelectorLayoutPreferences {
     pub(in crate::thread) order: Option<Vec<String>>,
     pub(in crate::thread) permissions: Option<SelectorLayoutEntry>,
     pub(in crate::thread) model: Option<SelectorLayoutEntry>,
-    pub(in crate::thread) context_control: Option<SelectorLayoutEntry>,
+    pub(in crate::thread) status: Option<SelectorLayoutEntry>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,7 +316,7 @@ impl SelectorLayoutPreferences {
         match selector_id {
             "permissions" => self.permissions.as_ref(),
             "model" => self.model.as_ref(),
-            "context_control" => self.context_control.as_ref(),
+            "status" => self.status.as_ref(),
             _ => None,
         }
     }
@@ -397,11 +389,6 @@ pub(in crate::thread) fn apply_selector_preferences(
     inner: &mut ThreadInner,
     preferences: SelectorPreferences,
 ) {
-    if let Some(display) = preferences.display
-        && let Some(value) = display.context_control
-    {
-        inner.context_control_display = value;
-    }
     if let Some(value) = preferences.model_selector {
         let default_model = inner.model_selector.default_model.clone();
         let default_reasoning_effort = inner.model_selector.default_reasoning_effort;
@@ -457,9 +444,6 @@ pub(in crate::thread) fn persist_selector_preferences(inner: &ThreadInner) -> st
         &inner.models,
     );
     let preferences = SelectorPreferences {
-        display: Some(SelectorDisplayPreferences {
-            context_control: Some(inner.context_control_display),
-        }),
         defaults: Some(SelectorDefaultPreferences {
             model: Some(inner.model_selector.default_model.clone()),
             reasoning_effort: Some(inner.model_selector.default_reasoning_effort),
@@ -528,12 +512,11 @@ mod tests {
     use super::{
         ModelSelectorModelDetails, ModelSelectorModelEntry, ModelSelectorPreferences,
         ModelSelectorReasoningEffortDetails, ModelSelectorReasoningEffortEntry,
-        SelectorDefaultPreferences, SelectorDisplayPreferences, SelectorLayoutEntry,
-        SelectorLayoutPreferences, SlashCommandPreferences, materialized_model_selector,
-        materialized_selector_layout, restore_selector_preferences, selector_preferences_path,
-        write_selector_preferences,
+        SelectorDefaultPreferences, SelectorLayoutEntry, SelectorLayoutPreferences,
+        SlashCommandPreferences, materialized_model_selector, materialized_selector_layout,
+        restore_selector_preferences, selector_preferences_path, write_selector_preferences,
     };
-    use crate::thread::{AppModel, ContextControlDisplay, ReasoningEffort, ServiceTier};
+    use crate::thread::{AppModel, ReasoningEffort, ServiceTier};
     use std::path::Path;
 
     #[test]
@@ -553,9 +536,6 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let preferences = super::SelectorPreferences {
-            display: Some(SelectorDisplayPreferences {
-                context_control: Some(ContextControlDisplay::Limits),
-            }),
             defaults: Some(SelectorDefaultPreferences {
                 model: Some(Some("gpt-5.5".to_string())),
                 reasoning_effort: Some(Some(ReasoningEffort::High)),
@@ -579,22 +559,14 @@ mod tests {
                 ..Default::default()
             }),
             layout: Some(SelectorLayoutPreferences {
-                order: Some(vec![
-                    "context_control".to_string(),
-                    "model".to_string(),
-                    "permissions".to_string(),
-                ]),
+                order: Some(vec!["model".to_string(), "permissions".to_string()]),
                 permissions: Some(SelectorLayoutEntry {
                     visible: Some(true),
                     name: Some("Mode".to_string()),
                     groups: Some(vec!["workflow".to_string(), "guarded".to_string()]),
                 }),
                 model: None,
-                context_control: Some(SelectorLayoutEntry {
-                    visible: Some(false),
-                    name: None,
-                    groups: None,
-                }),
+                status: None,
             }),
             slash_commands: Some(SlashCommandPreferences::from_commands(vec![
                 "status".to_string(),
@@ -604,14 +576,9 @@ mod tests {
 
         write_selector_preferences(&path, &preferences).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("// Display mode"));
         assert!(written.contains("\"defaults\""));
         let restored = restore_selector_preferences(&path).unwrap();
 
-        let display = restored
-            .display
-            .expect("display preferences should restore");
-        assert_eq!(display.context_control, Some(ContextControlDisplay::Limits));
         let defaults = restored.defaults.expect("defaults should restore");
         assert_eq!(defaults.model, Some(Some("gpt-5.5".to_string())));
         assert_eq!(defaults.reasoning_effort, Some(Some(ReasoningEffort::High)));
@@ -638,19 +605,11 @@ mod tests {
         let layout = restored.layout.expect("layout should restore");
         assert_eq!(
             layout.order,
-            Some(vec![
-                "context_control".to_string(),
-                "model".to_string(),
-                "permissions".to_string()
-            ])
+            Some(vec!["model".to_string(), "permissions".to_string()])
         );
         assert_eq!(
             layout.permissions.and_then(|entry| entry.name),
             Some("Mode".to_string())
-        );
-        assert_eq!(
-            layout.context_control.and_then(|entry| entry.visible),
-            Some(false)
         );
         let slash_commands = restored
             .slash_commands
@@ -671,10 +630,10 @@ mod tests {
         std::fs::write(
             &path,
             r#"{
-              // grouped display settings
-	                "display": {
-	                  "context_control": "context_and_limits"
-	                },
+              // display settings from older configs are ignored
+              "display": {
+                "context_control": "context_and_limits"
+              },
               "defaults": {
                 "model": "gpt-5.5",
                 "reasoning_effort": "none",
@@ -703,11 +662,6 @@ mod tests {
         .unwrap();
 
         let restored = restore_selector_preferences(&path).unwrap();
-        let display = restored.display.expect("display should restore");
-        assert_eq!(
-            display.context_control,
-            Some(ContextControlDisplay::ContextAndLimits)
-        );
         let defaults = restored.defaults.expect("defaults should restore");
         assert_eq!(defaults.model, Some(Some("gpt-5.5".to_string())));
         assert_eq!(defaults.reasoning_effort, Some(Some(ReasoningEffort::None)));
@@ -811,11 +765,7 @@ mod tests {
                 groups: None,
             }),
             model: None,
-            context_control: Some(SelectorLayoutEntry {
-                visible: None,
-                name: None,
-                groups: Some(vec!["actions".to_string(), "display".to_string()]),
-            }),
+            status: None,
         });
 
         assert_eq!(
@@ -823,7 +773,7 @@ mod tests {
             Some(vec![
                 "permissions".to_string(),
                 "model".to_string(),
-                "context_control".to_string()
+                "status".to_string()
             ])
         );
         assert_eq!(
@@ -847,8 +797,12 @@ mod tests {
             ])
         );
         assert_eq!(
-            layout.context_control.and_then(|entry| entry.groups),
-            Some(vec!["actions".to_string(), "display".to_string()])
+            layout.status.and_then(|entry| entry.groups),
+            Some(vec![
+                "status".to_string(),
+                "integrations".to_string(),
+                "actions".to_string()
+            ])
         );
     }
 }

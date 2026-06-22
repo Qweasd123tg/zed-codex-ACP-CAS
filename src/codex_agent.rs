@@ -3,18 +3,19 @@
 
 use acp::{
     Agent, Client, ConnectTo, ConnectionTo, Dispatch, Error, Handled, UntypedMessage,
-    schema::{
+    schema::ProtocolVersion,
+    schema::v1::{
         AgentAuthCapabilities, AgentCapabilities, AuthMethod, AuthMethodAgent, AuthMethodId,
         AuthenticateRequest, AuthenticateResponse, CancelNotification, ClientCapabilities,
-        CloseSessionRequest, CloseSessionResponse, ExtRequest, ExtResponse, ForkSessionRequest,
-        ForkSessionResponse, Implementation, InitializeRequest, InitializeResponse,
-        ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-        LogoutCapabilities, LogoutRequest, LogoutResponse, McpCapabilities, NewSessionRequest,
-        NewSessionResponse, PromptCapabilities, PromptRequest, PromptResponse, ProtocolVersion,
-        ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
-        SessionForkCapabilities, SessionId, SessionListCapabilities, SessionResumeCapabilities,
-        SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-        SetSessionModeResponse, SetSessionModelRequest, SetSessionModelResponse,
+        CloseSessionRequest, CloseSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
+        ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, Implementation,
+        InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+        LoadSessionRequest, LoadSessionResponse, LogoutCapabilities, LogoutRequest, LogoutResponse,
+        McpCapabilities, NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest,
+        PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
+        SessionCloseCapabilities, SessionDeleteCapabilities, SessionForkCapabilities, SessionId,
+        SessionListCapabilities, SessionResumeCapabilities, SetSessionConfigOptionRequest,
+        SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
     },
 };
 use agent_client_protocol as acp;
@@ -341,6 +342,21 @@ impl CodexAgent {
             .on_receive_request(
                 {
                     let agent = agent.clone();
+                    async move |request: DeleteSessionRequest,
+                                responder,
+                                cx: ConnectionTo<Client>| {
+                        let agent = agent.clone();
+                        cx.spawn(async move {
+                            responder.respond_with_result(agent.delete_session(request).await)
+                        })?;
+                        Ok(())
+                    }
+                },
+                acp::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let agent = agent.clone();
                     async move |request: PromptRequest, responder, cx: ConnectionTo<Client>| {
                         let agent = agent.clone();
                         cx.spawn(async move {
@@ -376,21 +392,6 @@ impl CodexAgent {
                         let agent = agent.clone();
                         cx.spawn(async move {
                             responder.respond_with_result(agent.set_session_mode(request).await)
-                        })?;
-                        Ok(())
-                    }
-                },
-                acp::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let agent = agent.clone();
-                    async move |request: SetSessionModelRequest,
-                                responder,
-                                cx: ConnectionTo<Client>| {
-                        let agent = agent.clone();
-                        cx.spawn(async move {
-                            responder.respond_with_result(agent.set_session_model(request).await)
                         })?;
                         Ok(())
                     }
@@ -472,6 +473,7 @@ impl CodexAgent {
         capabilities.session_capabilities = SessionCapabilities::new()
             .list(SessionListCapabilities::new())
             .close(SessionCloseCapabilities::new())
+            .delete(SessionDeleteCapabilities::new())
             .fork(SessionForkCapabilities::new())
             .resume(SessionResumeCapabilities::new());
 
@@ -612,7 +614,6 @@ impl CodexAgent {
 
         Ok(NewSessionResponse::new(session_id)
             .modes(load.modes)
-            .models(load.models)
             .config_options(load.config_options))
     }
 
@@ -740,7 +741,6 @@ impl CodexAgent {
 
         Ok(ResumeSessionResponse::new()
             .modes(load.modes)
-            .models(load.models)
             .config_options(load.config_options))
     }
 
@@ -762,6 +762,32 @@ impl CodexAgent {
             .map_err(|_| Error::internal_error().data("session registry lock poisoned"))?
             .remove(&request.session_id);
         Ok(CloseSessionResponse::default())
+    }
+
+    async fn delete_session(
+        &self,
+        request: DeleteSessionRequest,
+    ) -> Result<DeleteSessionResponse, Error> {
+        self.check_auth().await?;
+
+        let loaded_thread = self
+            .sessions
+            .lock()
+            .map_err(|_| Error::internal_error().data("session registry lock poisoned"))?
+            .get(&request.session_id)
+            .cloned();
+
+        if let Some(thread) = loaded_thread {
+            thread.delete_backend_thread().await?;
+            self.sessions
+                .lock()
+                .map_err(|_| Error::internal_error().data("session registry lock poisoned"))?
+                .remove(&request.session_id);
+        } else {
+            Thread::delete_session(request.session_id).await?;
+        }
+
+        Ok(DeleteSessionResponse::new())
     }
 
     async fn fork_session(
@@ -806,7 +832,6 @@ impl CodexAgent {
 
         Ok(ForkSessionResponse::new(forked_session_id)
             .modes(load.modes)
-            .models(load.models)
             .config_options(load.config_options))
     }
 
@@ -835,16 +860,6 @@ impl CodexAgent {
         thread.notify_current_mode_update().await;
         thread.notify_config_options_update().await;
         Ok(SetSessionModeResponse::default())
-    }
-
-    async fn set_session_model(
-        &self,
-        args: SetSessionModelRequest,
-    ) -> Result<SetSessionModelResponse, Error> {
-        let thread = self.get_thread(&args.session_id)?;
-        thread.set_model(args.model_id).await?;
-        thread.notify_config_options_update().await;
-        Ok(SetSessionModelResponse::default())
     }
 
     async fn set_session_config_option(
@@ -1000,7 +1015,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn initialize_advertises_session_fork_capability() {
+    async fn initialize_advertises_session_lifecycle_capabilities() {
         let agent = CodexAgent::new(build_test_config());
         let response = agent
             .initialize(InitializeRequest::new(ProtocolVersion::V1))
@@ -1022,6 +1037,14 @@ mod tests {
                 .close
                 .is_some(),
             "session/close capability should be advertised",
+        );
+        assert!(
+            response
+                .agent_capabilities
+                .session_capabilities
+                .delete
+                .is_some(),
+            "session/delete capability should be advertised",
         );
         assert!(
             response.agent_capabilities.auth.logout.is_some(),

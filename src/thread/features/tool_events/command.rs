@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     Meta, Terminal, ToolCall, ToolCallContent, ToolCallId, ToolCallUpdate, ToolCallUpdateFields,
     ToolKind,
 };
@@ -305,7 +305,7 @@ mod tests {
         command_exit_code, command_started_content, command_tool_kind,
         command_uses_native_terminal, terminal_completion_meta, terminal_info_meta,
     };
-    use agent_client_protocol::schema::{ToolCallContent, ToolKind};
+    use agent_client_protocol::schema::v1::{ToolCallContent, ToolKind};
     use codex_app_server_protocol::CommandAction;
     use std::path::{Path, PathBuf};
 

@@ -1,9 +1,9 @@
 //! Mode/sandbox mapping helper-ы для session_config.
 
 use crate::thread::{
-    APPROVAL_PRESETS, AUTO_MODE_ID, AppAskForApproval, AppModel, AppSandboxMode, AppSandboxPolicy,
-    AskForApproval, DEFAULT_SESSION_MODE_ID, ModeKind, ModelId, ModelInfo, PLAN_SESSION_MODE_ID,
-    SandboxPolicy, SessionMode, SessionModeId, SessionModeState, SessionModelState,
+    APPROVAL_PRESETS, AUTO_MODE_ID, AppAskForApproval, AppSandboxMode, AppSandboxPolicy,
+    AskForApproval, DEFAULT_SESSION_MODE_ID, ModeKind, PLAN_SESSION_MODE_ID, SandboxPolicy,
+    SessionMode, SessionModeId, SessionModeState,
 };
 
 // Сатурируем signed-значения, чтобы избежать underflow при конвертации счётчиков протокола.
@@ -103,33 +103,4 @@ pub(in crate::thread) fn permission_modes() -> Vec<SessionMode> {
         );
     }
     available_modes
-}
-
-pub(in crate::thread) fn session_model_state(
-    models: &[AppModel],
-    current_model: &str,
-) -> SessionModelState {
-    let mut available_models = models
-        .iter()
-        .map(|model| {
-            ModelInfo::new(ModelId::new(model.id.clone()), model.display_name.clone())
-                .description(model.description.clone())
-        })
-        .collect::<Vec<_>>();
-
-    let current_model_id = super::reasoning::find_model_for_current(models, current_model)
-        .map(|model| model.id.clone())
-        .unwrap_or_else(|| current_model.to_string());
-
-    if !available_models
-        .iter()
-        .any(|model| model.model_id.0.as_ref() == current_model_id)
-    {
-        available_models.push(ModelInfo::new(
-            ModelId::new(current_model_id.clone()),
-            current_model_id.clone(),
-        ));
-    }
-
-    SessionModelState::new(ModelId::new(current_model_id), available_models)
 }

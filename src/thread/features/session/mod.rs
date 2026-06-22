@@ -1,6 +1,6 @@
 //! Группа session-related slash и item feature-срезов.
 
-use agent_client_protocol::schema::SessionInfoUpdate;
+use agent_client_protocol::schema::v1::SessionInfoUpdate;
 use chrono::Utc;
 
 use crate::thread::{SessionClient, ThreadInner, ThreadItem};

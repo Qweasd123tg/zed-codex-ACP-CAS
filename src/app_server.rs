@@ -21,8 +21,8 @@ use codex_app_server_protocol::{
     ThreadUnarchiveResponse, ToolRequestUserInputResponse, TurnInterruptParams,
     TurnInterruptResponse, TurnStartParams, TurnStartResponse,
 };
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tokio::process::{Child, Command};
@@ -53,6 +53,22 @@ fn format_timeout_duration(timeout: std::time::Duration) -> String {
     } else {
         format!("{millis}ms")
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadDeleteParams {
+    pub thread_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ThreadDeleteResponse {}
+
+#[derive(Debug, Serialize)]
+struct RawClientRequest<T> {
+    id: RequestId,
+    method: &'static str,
+    params: T,
 }
 
 pub struct AppServerProcess {
@@ -307,6 +323,19 @@ impl AppServerProcess {
         self.request(request, request_id, "thread/archive").await
     }
 
+    pub async fn thread_delete(
+        &mut self,
+        params: ThreadDeleteParams,
+    ) -> Result<ThreadDeleteResponse, Error> {
+        let request_id = self.next_request_id();
+        let request = RawClientRequest {
+            id: request_id.clone(),
+            method: "thread/delete",
+            params,
+        };
+        self.raw_request(request, request_id, "thread/delete").await
+    }
+
     pub async fn thread_unarchive(
         &mut self,
         params: ThreadUnarchiveParams,
@@ -462,6 +491,48 @@ impl AppServerProcess {
             request_id.clone(),
             method_name,
             reject_startup_requests,
+            response_tx,
+        )?;
+        self.write_json(&request).await?;
+        let message = response_rx.await.map_err(|_| {
+            io_error(format!(
+                "app-server dropped `{method_name}` response waiter"
+            ))
+        })??;
+        match message {
+            JSONRPCMessage::Response(JSONRPCResponse { id, result }) if id == request_id => {
+                let parsed = serde_json::from_value(result)
+                    .with_context(|| format!("failed to decode `{method_name}` response payload"));
+                parsed.map_err(|err| io_error(err.to_string()))
+            }
+            JSONRPCMessage::Error(JSONRPCError { id, error }) if id == request_id => {
+                Err(io_error(format!(
+                    "{method_name} failed: {} (code {})",
+                    error.message, error.code
+                )))
+            }
+            other => Err(io_error(format!(
+                "unexpected app-server message while awaiting `{method_name}` response: {other:?}"
+            ))),
+        }
+    }
+
+    async fn raw_request<T, P>(
+        &mut self,
+        request: RawClientRequest<P>,
+        request_id: RequestId,
+        method_name: &str,
+    ) -> Result<T, Error>
+    where
+        T: DeserializeOwned,
+        P: Serialize,
+    {
+        let (response_tx, response_rx) = oneshot::channel();
+        let _active_request = ActiveRequestGuard::install(
+            &self.active_request,
+            request_id.clone(),
+            method_name,
+            false,
             response_tx,
         )?;
         self.write_json(&request).await?;

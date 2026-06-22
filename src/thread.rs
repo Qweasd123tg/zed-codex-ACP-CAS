@@ -6,16 +6,16 @@ use std::sync::{Arc, LazyLock, RwLock};
 
 use agent_client_protocol::{
     Client, ConnectionTo, Error,
-    schema::{
+    schema::v1::{
         AvailableCommandsUpdate, ClientCapabilities, ConfigOptionUpdate, ContentChunk,
-        CurrentModeUpdate, Diff, ListSessionsResponse, LoadSessionResponse, ModelId, ModelInfo,
-        PermissionOption, PermissionOptionKind, ReadTextFileRequest, RequestPermissionOutcome,
+        CurrentModeUpdate, Diff, ListSessionsResponse, LoadSessionResponse, PermissionOption,
+        PermissionOptionKind, ReadTextFileRequest, RequestPermissionOutcome,
         RequestPermissionRequest, SelectedPermissionOutcome, SessionConfigId, SessionConfigOption,
         SessionConfigOptionCategory, SessionConfigSelectGroup, SessionConfigSelectOption,
-        SessionId, SessionMode, SessionModeId, SessionModeState, SessionModelState,
-        SessionNotification, SessionUpdate, StopReason, ToolCall, ToolCallContent, ToolCallId,
-        ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
-        UsageUpdate, WriteTextFileRequest,
+        SessionId, SessionMode, SessionModeId, SessionModeState, SessionNotification,
+        SessionUpdate, StopReason, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation,
+        ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
+        WriteTextFileRequest,
     },
 };
 use codex_app_server_protocol::{
@@ -31,7 +31,6 @@ use codex_protocol::config_types::{ModeKind, ServiceTier};
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::{AskForApproval, SandboxPolicy};
 use codex_utils_approval_presets::{ApprovalPreset, builtin_approval_presets};
-use serde::{Deserialize, Serialize};
 pub(super) use tracing::warn;
 
 use crate::app_server::AppServerProcess;
@@ -161,7 +160,6 @@ struct ThreadInner {
     model_selector: session_selector_preferences::ModelSelectorPreferences,
     agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
     compaction_in_progress: bool,
-    context_control_display: ContextControlDisplay,
     display_maps_path: PathBuf,
     display_maps: session_display_maps::DisplayMapsConfig,
     last_used_tokens: Option<u64>,
@@ -205,15 +203,6 @@ struct ThreadInner {
 enum ContextUsageSource {
     Live,
     Cached,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ContextControlDisplay {
-    #[default]
-    Context,
-    Limits,
-    ContextAndLimits,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

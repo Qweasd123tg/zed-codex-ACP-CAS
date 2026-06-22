@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use agent_client_protocol::{
     Error,
-    schema::{SessionUpdate, StopReason},
+    schema::v1::{SessionUpdate, StopReason},
 };
 use codex_app_server_protocol::{ThreadResumeParams, Turn as AppTurn};
 

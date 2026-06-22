@@ -5,10 +5,9 @@ use std::path::Path;
 use codex_app_server_protocol::{Account, RateLimitSnapshot, TokenUsageBreakdown};
 use codex_protocol::account::PlanType;
 
-use super::limits::{five_hour_status_label, limits_status_description};
+use super::limits::{combined_limits_status_label, limits_status_description};
 use crate::thread::{
-    ContextUsageSource, SessionConfigSelectGroup, SessionConfigSelectOption,
-    session_display_maps::DisplayMapsConfig,
+    SessionConfigSelectGroup, SessionConfigSelectOption, session_display_maps::DisplayMapsConfig,
 };
 
 #[path = "context/mcp.rs"]
@@ -22,14 +21,12 @@ pub(in crate::thread) use mcp::build_mcp_summary;
 pub(in crate::thread) use plugins::build_plugins_summary;
 pub(in crate::thread) use skills::build_skills_summary;
 
+pub(in crate::thread) const STATUS_LIMITS_VALUE: &str = "limits_status";
 pub(in crate::thread) const SESSION_STATUS_VALUE: &str = "session_status";
-pub(in crate::thread) const CONTEXT_STATUS_VALUE: &str = "context_status";
 pub(in crate::thread) const MCP_STATUS_VALUE: &str = "mcp_status";
 pub(in crate::thread) const SKILLS_STATUS_VALUE: &str = "skills_status";
 pub(in crate::thread) const PLUGINS_STATUS_VALUE: &str = "plugins_status";
-pub(in crate::thread) const CONTEXT_LIMITS_VALUE: &str = "limits_status";
-pub(in crate::thread) const CONTEXT_COMBINED_VALUE: &str = "context_limits_status";
-pub(in crate::thread) const CONTEXT_COMPACT_VALUE: &str = "compact_now";
+pub(in crate::thread) const STATUS_COMPACT_VALUE: &str = "compact_now";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ContextSelectorSummary {
@@ -54,160 +51,65 @@ pub(crate) struct AccountStatus {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(in crate::thread) fn context_control_options(
+pub(in crate::thread) fn status_control_option_groups(
     workspace_cwd: &Path,
     backend_cli_version: &str,
     account_status: &AccountStatus,
     total_token_usage: Option<&TokenUsageBreakdown>,
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_percent: Option<u64>,
-    usage_source: Option<ContextUsageSource>,
-    display_maps: &DisplayMapsConfig,
     rate_limits: Option<&RateLimitSnapshot>,
-    compaction_in_progress: bool,
-    mcp_summary: &ContextSelectorSummary,
-    skills_summary: &ContextSelectorSummary,
-    plugins_summary: &ContextSelectorSummary,
-) -> Vec<SessionConfigSelectOption> {
-    let status_summary = session_status_summary(
-        workspace_cwd,
-        backend_cli_version,
-        account_status,
-        total_token_usage,
-        rate_limits,
-    );
-
-    vec![
-        SessionConfigSelectOption::new(
-            CONTEXT_STATUS_VALUE,
-            context_display_label(
-                used,
-                size,
-                usage_percent,
-                compaction_in_progress,
-                display_maps,
-            ),
-        )
-        .description(context_status_description(
-            used,
-            size,
-            usage_percent,
-            usage_source,
-            compaction_in_progress,
-        )),
-        SessionConfigSelectOption::new(
-            CONTEXT_LIMITS_VALUE,
-            limits_display_label(rate_limits, display_maps),
-        )
-        .description(limits_status_description(rate_limits, display_maps)),
-        SessionConfigSelectOption::new(
-            CONTEXT_COMBINED_VALUE,
-            combined_context_limits_label(
-                used,
-                size,
-                usage_percent,
-                compaction_in_progress,
-                display_maps,
-                rate_limits,
-            ),
-        )
-        .description(combined_context_limits_description(
-            used,
-            size,
-            usage_percent,
-            usage_source,
-            compaction_in_progress,
-            display_maps,
-            rate_limits,
-        )),
-        SessionConfigSelectOption::new(SESSION_STATUS_VALUE, status_summary.label)
-            .description(status_summary.description),
-        SessionConfigSelectOption::new(MCP_STATUS_VALUE, &mcp_summary.label)
-            .description(mcp_summary.description.clone()),
-        SessionConfigSelectOption::new(SKILLS_STATUS_VALUE, &skills_summary.label)
-            .description(skills_summary.description.clone()),
-        SessionConfigSelectOption::new(PLUGINS_STATUS_VALUE, &plugins_summary.label)
-            .description(plugins_summary.description.clone()),
-        SessionConfigSelectOption::new(CONTEXT_COMPACT_VALUE, "Compact now")
-            .description("Summarize the conversation to free context window"),
-    ]
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(in crate::thread) fn context_control_option_groups(
-    workspace_cwd: &Path,
-    backend_cli_version: &str,
-    account_status: &AccountStatus,
-    total_token_usage: Option<&TokenUsageBreakdown>,
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_percent: Option<u64>,
-    usage_source: Option<ContextUsageSource>,
     display_maps: &DisplayMapsConfig,
-    rate_limits: Option<&RateLimitSnapshot>,
     compaction_in_progress: bool,
     mcp_summary: &ContextSelectorSummary,
     skills_summary: &ContextSelectorSummary,
     plugins_summary: &ContextSelectorSummary,
 ) -> Vec<SessionConfigSelectGroup> {
-    let mut options = context_control_options(
-        workspace_cwd,
-        backend_cli_version,
-        account_status,
-        total_token_usage,
-        used,
-        size,
-        usage_percent,
-        usage_source,
-        display_maps,
-        rate_limits,
-        compaction_in_progress,
-        mcp_summary,
-        skills_summary,
-        plugins_summary,
-    )
-    .into_iter();
-
-    let display_options = vec![
-        options.next().expect("context display option should exist"),
-        options.next().expect("limits display option should exist"),
-        options
-            .next()
-            .expect("combined display option should exist"),
-    ];
-    let integration_options = vec![
-        options.next().expect("session status option should exist"),
-        options.next().expect("MCP status option should exist"),
-        options.next().expect("skills status option should exist"),
-        options.next().expect("plugins status option should exist"),
-    ];
-    let action_options = vec![options.next().expect("compact option should exist")];
-
+    let compact_label = if compaction_in_progress {
+        "Compacting..."
+    } else {
+        "Compact now"
+    };
     vec![
-        SessionConfigSelectGroup::new("display", "Display", display_options),
-        SessionConfigSelectGroup::new("integrations", "Integrations", integration_options),
-        SessionConfigSelectGroup::new("actions", "Actions", action_options),
+        SessionConfigSelectGroup::new(
+            "status",
+            "Status",
+            vec![
+                SessionConfigSelectOption::new(
+                    STATUS_LIMITS_VALUE,
+                    combined_limits_status_label(rate_limits, display_maps),
+                )
+                .description(limits_status_description(rate_limits, display_maps)),
+                SessionConfigSelectOption::new(SESSION_STATUS_VALUE, "Session").description(
+                    session_status_detail(
+                        workspace_cwd,
+                        backend_cli_version,
+                        account_status,
+                        total_token_usage,
+                        rate_limits,
+                    ),
+                ),
+            ],
+        ),
+        SessionConfigSelectGroup::new(
+            "integrations",
+            "Integrations",
+            vec![
+                SessionConfigSelectOption::new(MCP_STATUS_VALUE, &mcp_summary.label)
+                    .description(mcp_summary.description.clone()),
+                SessionConfigSelectOption::new(SKILLS_STATUS_VALUE, &skills_summary.label)
+                    .description(skills_summary.description.clone()),
+                SessionConfigSelectOption::new(PLUGINS_STATUS_VALUE, &plugins_summary.label)
+                    .description(plugins_summary.description.clone()),
+            ],
+        ),
+        SessionConfigSelectGroup::new(
+            "actions",
+            "Actions",
+            vec![
+                SessionConfigSelectOption::new(STATUS_COMPACT_VALUE, compact_label)
+                    .description("Summarize the conversation to free context window"),
+            ],
+        ),
     ]
-}
-
-pub(in crate::thread) fn session_status_message(
-    workspace_cwd: &Path,
-    backend_cli_version: &str,
-    account_status: &AccountStatus,
-    total_token_usage: Option<&TokenUsageBreakdown>,
-    rate_limits: Option<&RateLimitSnapshot>,
-) -> String {
-    format!(
-        "Chat status\n\n{}",
-        session_status_detail(
-            workspace_cwd,
-            backend_cli_version,
-            account_status,
-            total_token_usage,
-            rate_limits
-        )
-    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -216,29 +118,13 @@ pub(in crate::thread) fn full_status_report(
     backend_cli_version: &str,
     account_status: &AccountStatus,
     total_token_usage: Option<&TokenUsageBreakdown>,
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_source: Option<ContextUsageSource>,
     rate_limits: Option<&RateLimitSnapshot>,
     display_maps: &DisplayMapsConfig,
-    compaction_in_progress: bool,
     mcp_summary: &ContextSelectorSummary,
     skills_summary: &ContextSelectorSummary,
     plugins_summary: &ContextSelectorSummary,
 ) -> String {
-    let mut context_section = context_status_description(
-        used,
-        size,
-        status_report_usage_percent(used, size),
-        usage_source,
-        compaction_in_progress,
-    );
-    if compaction_in_progress {
-        context_section.push_str("\nContext compaction is currently running.");
-    }
-
     let sections = [
-        format!("Context\n{context_section}"),
         format!(
             "Limits\n{}",
             limits_status_description(rate_limits, display_maps)
@@ -279,17 +165,6 @@ fn session_status_detail(
     )
 }
 
-fn status_report_usage_percent(used: Option<u64>, size: Option<u64>) -> Option<u64> {
-    let used = used?;
-    let size = size?;
-    if size == 0 {
-        return None;
-    }
-    let clamped = used.min(size);
-    let numerator = clamped.saturating_mul(100).saturating_add(size / 2);
-    Some(numerator / size)
-}
-
 pub(in crate::thread) fn build_account_status(account: Option<Account>) -> AccountStatus {
     match account {
         Some(Account::Chatgpt { email, plan_type }) => AccountStatus {
@@ -306,38 +181,6 @@ pub(in crate::thread) fn build_account_status(account: Option<Account>) -> Accou
     }
 }
 
-fn session_status_summary(
-    workspace_cwd: &Path,
-    backend_cli_version: &str,
-    account_status: &AccountStatus,
-    total_token_usage: Option<&TokenUsageBreakdown>,
-    rate_limits: Option<&RateLimitSnapshot>,
-) -> ContextSelectorSummary {
-    ContextSelectorSummary {
-        label: status_label(
-            workspace_cwd,
-            account_status,
-            total_token_usage,
-            rate_limits,
-        ),
-        description: format!(
-            "Adapter: codex-acp-cas {}\nBackend: {}\nWorkspace: {}\nAccount: {}\nTokens: {}",
-            env!("CARGO_PKG_VERSION"),
-            backend_version_detail(backend_cli_version),
-            workspace_cwd.display(),
-            account_detail(account_status, rate_limits),
-            token_usage_summary_line(total_token_usage),
-        ),
-        report: session_status_message(
-            workspace_cwd,
-            backend_cli_version,
-            account_status,
-            total_token_usage,
-            rate_limits,
-        ),
-    }
-}
-
 fn backend_version_detail(backend_cli_version: &str) -> String {
     let version = backend_cli_version.trim();
     if version.is_empty() {
@@ -345,158 +188,6 @@ fn backend_version_detail(backend_cli_version: &str) -> String {
     } else {
         format!("codex {version}")
     }
-}
-
-fn context_status_label(
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_percent: Option<u64>,
-    compaction_in_progress: bool,
-    display_maps: &DisplayMapsConfig,
-) -> String {
-    if compaction_in_progress {
-        "Compacting...".to_string()
-    } else {
-        match (used, size, usage_percent) {
-            (_, Some(_), Some(percent)) => display_maps.render_context_usage(Some(percent), None),
-            (Some(_), None, _) => display_maps.render_context_usage(None, None),
-            _ => display_maps.render_context_usage(None, None),
-        }
-    }
-}
-
-fn context_display_label(
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_percent: Option<u64>,
-    compaction_in_progress: bool,
-    display_maps: &DisplayMapsConfig,
-) -> String {
-    context_status_label(
-        used,
-        size,
-        usage_percent,
-        compaction_in_progress,
-        display_maps,
-    )
-}
-
-pub(in crate::thread) fn context_status_description(
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_percent: Option<u64>,
-    usage_source: Option<ContextUsageSource>,
-    compaction_in_progress: bool,
-) -> String {
-    let status = if compaction_in_progress {
-        "compacting"
-    } else {
-        context_status_source_label(usage_source)
-    };
-
-    match (used, size, usage_percent) {
-        (Some(used), Some(size), Some(percent)) if size > 0 => format!(
-            "Context: {} {percent}%\nTokens: {used}/{size}\nStatus: {status}",
-            context_usage_braille(Some(used), Some(size), Some(percent)),
-        ),
-        (Some(used), None, _) => {
-            format!("Context: ?\nTokens: {used} (window size unavailable)\nStatus: {status}",)
-        }
-        _ => format!("Context: ⠀ --\nTokens: waiting for usage update\nStatus: {status}"),
-    }
-}
-
-fn context_usage_braille(
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_percent: Option<u64>,
-) -> &'static str {
-    const INDICATORS: [&str; 9] = ["⠀", "⢀", "⣀", "⣄", "⣤", "⣦", "⣶", "⣷", "⣿"];
-
-    let bucket = match (used, size) {
-        (Some(used), Some(size)) if size > 0 => {
-            (((used as u128) * 8 + (size as u128 / 2)) / size as u128).min(8) as usize
-        }
-        _ => usage_percent
-            .map(|percent| ((percent.min(100) * 8 + 50) / 100).min(8) as usize)
-            .unwrap_or(0),
-    };
-    INDICATORS[bucket]
-}
-
-fn context_status_source_label(source: Option<ContextUsageSource>) -> &'static str {
-    match source {
-        Some(ContextUsageSource::Live) => "live",
-        Some(ContextUsageSource::Cached) => "cached",
-        None => "pending",
-    }
-}
-
-fn limits_display_label(
-    rate_limits: Option<&RateLimitSnapshot>,
-    display_maps: &DisplayMapsConfig,
-) -> String {
-    five_hour_status_label(rate_limits, display_maps)
-}
-
-fn combined_context_limits_label(
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_percent: Option<u64>,
-    compaction_in_progress: bool,
-    display_maps: &DisplayMapsConfig,
-    rate_limits: Option<&RateLimitSnapshot>,
-) -> String {
-    format!(
-        "{} {}",
-        context_display_label(
-            used,
-            size,
-            usage_percent,
-            compaction_in_progress,
-            display_maps
-        ),
-        limits_display_label(rate_limits, display_maps),
-    )
-}
-
-fn combined_context_limits_description(
-    used: Option<u64>,
-    size: Option<u64>,
-    usage_percent: Option<u64>,
-    usage_source: Option<ContextUsageSource>,
-    compaction_in_progress: bool,
-    display_maps: &DisplayMapsConfig,
-    rate_limits: Option<&RateLimitSnapshot>,
-) -> String {
-    format!(
-        "{}\n\n{}",
-        context_status_description(
-            used,
-            size,
-            usage_percent,
-            usage_source,
-            compaction_in_progress
-        ),
-        limits_status_description(rate_limits, display_maps)
-    )
-}
-
-fn status_label(
-    _workspace_cwd: &Path,
-    _account_status: &AccountStatus,
-    total_token_usage: Option<&TokenUsageBreakdown>,
-    _rate_limits: Option<&RateLimitSnapshot>,
-) -> String {
-    let total_label = total_token_usage
-        .map(|usage| {
-            format!(
-                "{} used",
-                format_compact_token_count(blended_total_tokens(usage))
-            )
-        })
-        .unwrap_or_else(|| "usage pending".to_string());
-    format!("Status · {total_label}")
 }
 
 fn account_detail(
@@ -603,20 +294,14 @@ fn format_compact_with_suffix(value: f64, suffix: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountStatus, CONTEXT_COMBINED_VALUE, CONTEXT_COMPACT_VALUE, CONTEXT_LIMITS_VALUE,
-        CONTEXT_STATUS_VALUE, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE,
-        SKILLS_STATUS_VALUE, build_mcp_summary, build_plugins_summary, build_skills_summary,
-        context_control_option_groups, context_control_options, context_usage_braille,
-        full_status_report, session_status_message,
+        AccountStatus, build_mcp_summary, build_plugins_summary, build_skills_summary,
+        full_status_report,
     };
-    use crate::thread::ContextUsageSource;
     use codex_app_server_protocol::{
         PluginInterface, PluginListResponse, PluginMarketplaceEntry, PluginSource, PluginSummary,
-        RateLimitSnapshot, RateLimitWindow, TokenUsageBreakdown,
     };
     use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
     use codex_core::skills::{SkillLoadOutcome, SkillMetadata};
-    use codex_protocol::account::PlanType;
     use codex_protocol::protocol::SkillScope;
     use std::collections::{HashMap, HashSet};
     use std::convert::TryInto;
@@ -628,251 +313,6 @@ mod tests {
             description: description.to_string(),
             report: report.to_string(),
         }
-    }
-
-    fn empty_summary(label: &str) -> super::ContextSelectorSummary {
-        summary(label, "none", "none")
-    }
-
-    #[test]
-    fn context_options_include_status_actions_and_compact() {
-        let empty_summary = empty_summary("none");
-        let options = context_control_options(
-            PathBuf::from("/tmp/workspace").as_path(),
-            "0.0.0",
-            &AccountStatus::default(),
-            None,
-            Some(157_835),
-            Some(258_400),
-            Some(61),
-            Some(ContextUsageSource::Live),
-            &Default::default(),
-            None,
-            false,
-            &empty_summary,
-            &empty_summary,
-            &empty_summary,
-        );
-        assert_eq!(options[0].value.0.as_ref(), CONTEXT_STATUS_VALUE);
-        assert_eq!(options[1].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
-        assert_eq!(options[2].value.0.as_ref(), CONTEXT_COMBINED_VALUE);
-        assert_eq!(options[3].value.0.as_ref(), SESSION_STATUS_VALUE);
-        assert_eq!(options[4].value.0.as_ref(), MCP_STATUS_VALUE);
-        assert_eq!(options[5].value.0.as_ref(), SKILLS_STATUS_VALUE);
-        assert_eq!(options[6].value.0.as_ref(), PLUGINS_STATUS_VALUE);
-        assert_eq!(options[7].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
-    }
-
-    #[test]
-    fn context_options_are_grouped_for_zed_picker() {
-        let empty_summary = empty_summary("none");
-        let groups = context_control_option_groups(
-            PathBuf::from("/tmp/workspace").as_path(),
-            "0.0.0",
-            &AccountStatus::default(),
-            None,
-            Some(157_835),
-            Some(258_400),
-            Some(61),
-            Some(ContextUsageSource::Live),
-            &Default::default(),
-            None,
-            false,
-            &empty_summary,
-            &empty_summary,
-            &empty_summary,
-        );
-
-        let names = groups
-            .iter()
-            .map(|group| group.name.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(names, vec!["Display", "Integrations", "Actions"]);
-        assert_eq!(groups[0].options.len(), 3);
-        assert_eq!(groups[0].options[0].value.0.as_ref(), CONTEXT_STATUS_VALUE);
-        assert_eq!(groups[0].options[1].value.0.as_ref(), CONTEXT_LIMITS_VALUE);
-        assert_eq!(
-            groups[0].options[2].value.0.as_ref(),
-            CONTEXT_COMBINED_VALUE
-        );
-        assert_eq!(groups[1].options.len(), 4);
-        assert_eq!(groups[2].options[0].value.0.as_ref(), CONTEXT_COMPACT_VALUE);
-    }
-
-    #[test]
-    fn context_options_use_dashes_when_usage_is_unknown() {
-        let empty_summary = empty_summary("MCP · none");
-        let options = context_control_options(
-            PathBuf::from("/tmp/workspace").as_path(),
-            "0.0.0",
-            &AccountStatus::default(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            &Default::default(),
-            None,
-            false,
-            &empty_summary,
-            &empty_summary,
-            &empty_summary,
-        );
-        assert_eq!(options[0].name, "---");
-        assert_eq!(options[1].name, "5h --");
-        assert_eq!(options[2].name, "--- 5h --");
-        assert_eq!(options[7].name, "Compact now");
-    }
-
-    #[test]
-    fn context_status_description_shows_braille_indicator_and_percentage() {
-        let empty_summary = empty_summary("none");
-        let options = context_control_options(
-            PathBuf::from("/tmp/workspace").as_path(),
-            "0.0.0",
-            &AccountStatus::default(),
-            None,
-            Some(195_499),
-            Some(258_400),
-            Some(76),
-            Some(ContextUsageSource::Cached),
-            &Default::default(),
-            None,
-            false,
-            &empty_summary,
-            &empty_summary,
-            &empty_summary,
-        );
-        assert_eq!(options[0].name, "76%");
-        assert_eq!(
-            options[0].description.as_deref(),
-            Some("Context: ⣶ 76%\nTokens: 195499/258400\nStatus: cached")
-        );
-    }
-
-    #[test]
-    fn context_braille_indicator_uses_eighth_steps() {
-        assert_eq!(context_usage_braille(None, None, Some(0)), "⠀");
-        assert_eq!(context_usage_braille(None, None, Some(12)), "⢀");
-        assert_eq!(context_usage_braille(None, None, Some(25)), "⣀");
-        assert_eq!(context_usage_braille(None, None, Some(38)), "⣄");
-        assert_eq!(context_usage_braille(None, None, Some(50)), "⣤");
-        assert_eq!(context_usage_braille(None, None, Some(63)), "⣦");
-        assert_eq!(context_usage_braille(None, None, Some(75)), "⣶");
-        assert_eq!(context_usage_braille(None, None, Some(88)), "⣷");
-        assert_eq!(context_usage_braille(None, None, Some(100)), "⣿");
-    }
-
-    #[test]
-    fn context_options_include_combined_limit_item() {
-        let snapshot = RateLimitSnapshot {
-            limit_id: Some("codex".to_string()),
-            limit_name: None,
-            primary: Some(RateLimitWindow {
-                used_percent: 20,
-                window_duration_mins: Some(300),
-                resets_at: Some(4_102_444_800),
-            }),
-            secondary: Some(RateLimitWindow {
-                used_percent: 6,
-                window_duration_mins: Some(10_080),
-                resets_at: Some(4_102_531_200),
-            }),
-            credits: None,
-            plan_type: Some(PlanType::Plus),
-        };
-
-        let empty_summary = empty_summary("none");
-        let options = context_control_options(
-            PathBuf::from("/tmp/workspace").as_path(),
-            "0.0.0",
-            &AccountStatus::default(),
-            None,
-            Some(195_499),
-            Some(258_400),
-            Some(76),
-            Some(ContextUsageSource::Live),
-            &Default::default(),
-            Some(&snapshot),
-            false,
-            &empty_summary,
-            &empty_summary,
-            &empty_summary,
-        );
-        assert_eq!(options[1].name, "5h 80%");
-        assert_eq!(options[2].name, "76% 5h 80%");
-        assert!(
-            options[1]
-                .description
-                .as_deref()
-                .is_some_and(|description| description.contains("5h 80% · wk 94%"))
-        );
-    }
-
-    #[test]
-    fn session_status_focuses_on_workspace_account_and_tokens() {
-        let options = context_control_options(
-            PathBuf::from("/tmp/workspace").as_path(),
-            "0.0.0",
-            &AccountStatus {
-                auth_kind: super::AccountAuthKind::Chatgpt,
-                email: Some("dev@example.com".to_string()),
-                plan_type: Some(PlanType::Plus),
-            },
-            Some(&TokenUsageBreakdown {
-                total_tokens: 9_010_000,
-                input_tokens: 8_970_000,
-                cached_input_tokens: 0,
-                output_tokens: 37_300,
-                reasoning_output_tokens: 0,
-            }),
-            Some(195_499),
-            Some(258_400),
-            Some(76),
-            Some(ContextUsageSource::Live),
-            &Default::default(),
-            None,
-            false,
-            &super::ContextSelectorSummary::default(),
-            &super::ContextSelectorSummary::default(),
-            &super::ContextSelectorSummary::default(),
-        );
-
-        assert_eq!(options[3].name, "Status · 9.01M used");
-        let expected = format!(
-            "Adapter: codex-acp-cas {}\nBackend: codex 0.0.0\nWorkspace: /tmp/workspace\nAccount: dev@example.com · ChatGPT Plus\nTokens: 9.01M used · 8.97M in · 37.3K out",
-            env!("CARGO_PKG_VERSION")
-        );
-        assert_eq!(options[3].description.as_deref(), Some(expected.as_str()));
-    }
-
-    #[test]
-    fn session_status_message_shows_api_key_and_cached_reasoning_tokens() {
-        let message = session_status_message(
-            PathBuf::from("/tmp/workspace").as_path(),
-            "0.0.0",
-            &AccountStatus {
-                auth_kind: super::AccountAuthKind::ApiKey,
-                email: None,
-                plan_type: None,
-            },
-            Some(&TokenUsageBreakdown {
-                total_tokens: 1_250_000,
-                input_tokens: 900_000,
-                cached_input_tokens: 300_000,
-                output_tokens: 50_000,
-                reasoning_output_tokens: 25_000,
-            }),
-            None,
-        );
-
-        assert_eq!(
-            message,
-            format!(
-                "Chat status\n\nAdapter: codex-acp-cas {}\nBackend: codex 0.0.0\nWorkspace: /tmp/workspace\nAccount: API key auth\nTokens: 650K used · 600K in · 50K out",
-                env!("CARGO_PKG_VERSION")
-            )
-        );
     }
 
     #[test]
@@ -1046,27 +486,20 @@ mod tests {
     }
 
     #[test]
-    fn full_status_report_includes_plugins_and_compaction() {
+    fn full_status_report_includes_limits_session_and_integrations() {
         let report = full_status_report(
             PathBuf::from("/tmp/workspace").as_path(),
             "0.0.0",
             &AccountStatus::default(),
             None,
-            Some(1_000),
-            Some(2_000),
-            Some(ContextUsageSource::Live),
             None,
             &Default::default(),
-            true,
             &summary("MCP · 1 srv", "one", "MCP report"),
             &summary("Skills · 1 on", "one", "Skills report"),
             &summary("Plugins · none", "none", "Plugins report"),
         );
 
-        assert!(report.starts_with("Context\n"));
-        assert!(report.contains("Context: ⣤ 50%"));
-        assert!(report.contains("Tokens: 1000/2000"));
-        assert!(report.contains("Status: compacting"));
+        assert!(report.starts_with("Limits\n"));
         assert!(report.contains("Limits\n5h -- · wk --"));
         assert!(report.contains("Session\nAdapter: codex-acp-cas "));
         assert!(report.contains("Backend: codex 0.0.0"));
@@ -1075,37 +508,28 @@ mod tests {
         assert!(report.contains("MCP report"));
         assert!(report.contains("Skills report"));
         assert!(report.contains("Plugins report"));
-        assert!(report.contains("Context compaction is currently running."));
 
-        let context_index = report.find("Context\n").unwrap();
-        let limits_index = report.find("\n\nLimits\n").unwrap();
+        let limits_index = report.find("Limits\n").unwrap();
         let session_index = report.find("\n\nSession\n").unwrap();
         let integrations_index = report.find("\n\nIntegrations\n").unwrap();
-        assert!(context_index < limits_index);
         assert!(limits_index < session_index);
         assert!(session_index < integrations_index);
     }
 
     #[test]
-    fn full_status_report_handles_pending_context_usage() {
+    fn full_status_report_omits_context_usage_display() {
         let report = full_status_report(
             PathBuf::from("/tmp/workspace").as_path(),
             "0.0.0",
             &AccountStatus::default(),
             None,
             None,
-            None,
-            None,
-            None,
             &Default::default(),
-            false,
             &summary("MCP · none", "none", "MCP report"),
             &summary("Skills · none", "none", "Skills report"),
             &summary("Plugins · none", "none", "Plugins report"),
         );
 
-        assert!(report.contains("Context\nContext: ⠀ --"));
-        assert!(report.contains("Tokens: waiting for usage update"));
-        assert!(report.contains("Status: pending"));
+        assert!(!report.contains("Context\n"));
     }
 }

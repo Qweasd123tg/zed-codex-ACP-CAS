@@ -4,7 +4,7 @@ use super::{
     Error, ModeKind, PLAN_IMPLEMENTATION_PROMPT, ReviewTarget, SessionCommand, StopReason, Thread,
     prompt_commands, turn_execution, turn_notify,
 };
-use agent_client_protocol::schema::{ContentBlock, PromptRequest};
+use agent_client_protocol::schema::v1::{ContentBlock, PromptRequest};
 
 const COMPACTION_PROMPT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 const RATE_LIMIT_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);

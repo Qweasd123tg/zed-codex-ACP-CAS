@@ -31,7 +31,7 @@ use super::{
     SessionCommand,
 };
 use crate::thread::session_selector_preferences::SlashCommandPreferences;
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     Content, ContentBlock, PermissionOptionKind, Plan, PlanEntry, PlanEntryPriority,
     PlanEntryStatus, ResourceLink, ToolCallContent, ToolCallStatus, ToolKind,
 };

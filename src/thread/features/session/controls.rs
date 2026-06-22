@@ -19,7 +19,7 @@ use crate::thread::{
 };
 use agent_client_protocol::{
     Error,
-    schema::{
+    schema::v1::{
         PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
         SelectedPermissionOutcome, SessionUpdate, StopReason, ToolCallId, ToolCallStatus,
         ToolCallUpdate, ToolCallUpdateFields, ToolKind,

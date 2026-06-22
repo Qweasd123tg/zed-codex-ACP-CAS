@@ -1,19 +1,11 @@
 {
   // Old "bars" style for the primary 5-hour limit:
   // 0% -> empty, 1..20% -> one filled cell, ..., 81..100% -> full.
-  "context": {
-    "usage": "context_percent",
-  },
   "limits": {
     "primary": "five_hour_bars",
     "secondary": "weekly_percent",
   },
   "maps": {
-    "context_percent": {
-      "kind": "template",
-      "template": "{value}%",
-      "unavailable": "---",
-    },
     "percent": {
       "kind": "template",
       "template": "{value}%",

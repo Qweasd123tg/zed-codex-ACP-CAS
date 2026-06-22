@@ -11,13 +11,6 @@ pub(super) fn parse_selector_preferences_jsonc(contents: &str) -> io::Result<Sel
 
 pub(super) fn selector_preferences_jsonc(preferences: &SelectorPreferences) -> io::Result<Vec<u8>> {
     let mut sections = Vec::new();
-    if let Some(display) = &preferences.display {
-        sections.push(jsonc_section(
-            "Display mode for the lower Context selector.",
-            "display",
-            display,
-        )?);
-    }
     if let Some(defaults) = &preferences.defaults {
         sections.push(jsonc_section(
             "Defaults applied when a new ACP session starts. null keeps the app-server default.",

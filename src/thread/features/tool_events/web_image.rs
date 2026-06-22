@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     Content, ContentBlock, ImageContent, ResourceLink, TextContent, ToolCall, ToolCallContent,
     ToolCallId, ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
@@ -360,7 +360,7 @@ fn percent_encode_path(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use agent_client_protocol::schema::{Content, ContentBlock, ImageContent, TextContent};
+    use agent_client_protocol::schema::v1::{Content, ContentBlock, ImageContent, TextContent};
 
     use super::{
         decode_image_base64, file_uri, generated_image_path, image_data_uri,

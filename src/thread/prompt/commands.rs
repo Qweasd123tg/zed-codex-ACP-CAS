@@ -5,7 +5,7 @@ use std::path::Path;
 use super::{DiffScope, Error, SessionCommand, StopReason, ThreadInner};
 use crate::thread::features::{plan::parse_collaboration_mode, resume, session};
 use crate::thread::session_selector_preferences::SlashCommandPreferences;
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     AvailableCommand, AvailableCommandInput, ContentBlock, EmbeddedResource,
     EmbeddedResourceResource, ResourceLink, TextResourceContents, UnstructuredCommandInput,
 };
@@ -271,12 +271,8 @@ pub(super) async fn dispatch_session_command(
                         &inner.backend_cli_version,
                         &inner.account_status,
                         inner.total_token_usage.as_ref(),
-                        inner.last_used_tokens,
-                        inner.context_window_size,
-                        inner.context_usage_source,
                         inner.account_rate_limits.as_ref(),
                         &inner.display_maps,
-                        inner.compaction_in_progress,
                         &inner.session_mcp_summary,
                         &inner.session_skills_summary,
                         &inner.session_plugins_summary,
