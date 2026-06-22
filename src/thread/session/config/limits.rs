@@ -24,10 +24,14 @@ pub(in crate::thread) fn combined_limits_status_label(
     snapshot: Option<&RateLimitSnapshot>,
     display_maps: &DisplayMapsConfig,
 ) -> String {
+    let primary = five_hour_status_label(snapshot, display_maps);
+    if !display_maps.includes_secondary_limit_in_summary() {
+        return primary;
+    }
+
     format!(
-        "{} · {}",
-        five_hour_status_label(snapshot, display_maps),
-        weekly_status_label(snapshot, display_maps),
+        "{primary} · {}",
+        weekly_status_label(snapshot, display_maps)
     )
 }
 
@@ -319,7 +323,9 @@ mod tests {
         format_reset_delta, limits_status_description, observe_rate_limit_snapshot,
         take_rate_limit_warnings, weekly_reset_message, weekly_status_label,
     };
-    use crate::thread::session_display_maps::DisplayMapsConfig;
+    use crate::thread::session_display_maps::{
+        DisplayMapsConfig, LimitsDisplayMapSelection, LimitsSummaryDisplay,
+    };
     use codex_app_server_protocol::{CreditsSnapshot, RateLimitSnapshot, RateLimitWindow};
     use codex_protocol::account::PlanType;
 
@@ -380,6 +386,36 @@ mod tests {
         assert_eq!(
             combined_limits_status_label(Some(&snapshot), &display_maps),
             "5h 58% · wk 95%"
+        );
+    }
+
+    #[test]
+    fn rate_limit_summary_can_show_only_five_hour_window() {
+        let snapshot = RateLimitSnapshot {
+            limit_id: Some("codex".to_string()),
+            limit_name: None,
+            primary: Some(RateLimitWindow {
+                used_percent: 42,
+                window_duration_mins: Some(300),
+                resets_at: Some(4_102_444_800),
+            }),
+            secondary: Some(RateLimitWindow {
+                used_percent: 5,
+                window_duration_mins: Some(10_080),
+                resets_at: Some(4_102_531_200),
+            }),
+            credits: None,
+            plan_type: Some(PlanType::Pro),
+        };
+        let mut display_maps = DisplayMapsConfig::default();
+        display_maps.limits = LimitsDisplayMapSelection {
+            summary: LimitsSummaryDisplay::FiveHour,
+            ..LimitsDisplayMapSelection::default()
+        };
+
+        assert_eq!(
+            combined_limits_status_label(Some(&snapshot), &display_maps),
+            "5h 58%"
         );
     }
 

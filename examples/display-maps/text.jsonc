@@ -1,6 +1,8 @@
 {
   // Old "text" style: show remaining account quota as plain percentages.
   "limits": {
+    // Compact Limits label: "five_hour" or "five_hour_and_weekly".
+    "summary": "five_hour_and_weekly",
     "primary": "five_hour_percent",
     "secondary": "weekly_percent",
   },

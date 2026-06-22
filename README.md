@@ -94,9 +94,9 @@ Sub-agent and collaboration tool-call rendering:
 - Approval previews for those recognized shell-backed file/fetch commands use the same specific tool kinds, so Zed no longer labels them as generic `Run Command` cards
 - Generated images are also surfaced as inline markdown images and saved under `~/.codex-cas/generated-images/`.
   This is a pragmatic adapter-side rendering path for current Zed/ACP behavior, not the ideal final contract; a future protocol/Zed path should surface generated images and saved-file links natively.
-- Clearer status surfacing through `/status` and the compact context `%` selector, including adapter/backend version and richer account-limit details when available
-- Compact context selector summaries for session status, context usage, MCP, skills, plugins, limits, and compaction
-- More reliable context compaction in Zed: `/compact` and the compact context selector now keep draining background app-server notifications until completion/failure, so the selector should not stay stuck on `Compacting...`
+- Clearer status surfacing through `/status`, the `Status` selector, and native Zed context donut, including adapter/backend version and richer account-limit details when available
+- Compact `Status` selector summaries for account limits, session status, MCP, skills, plugins, and compaction
+- More reliable context compaction in Zed: `/compact` and the `Status` selector action now keep draining background app-server notifications until completion/failure, so the selector should not stay stuck on `Compacting...`
 - Compact chat warnings when account limits cross 75%, 90%, 95%, and exhausted thresholds
 - Command approval popups now follow Codex app-server `available_decisions`, including session/matching-command approvals when the backend offers them
 - Plain shell command approvals use the same Zed terminal-card path as running command tool calls when the client advertises terminal output support; network/additional-permission approvals stay in the detailed text card
@@ -467,32 +467,27 @@ Default config:
 }
 ```
 
-Compact context and account-limit labels use a separate JSONC file because they are pure
-`percent -> label` maps rather than selector state:
+Account-limit labels use a separate JSONC file because they are pure `percent -> label`
+maps rather than selector state:
 
 ```text
 ~/.codex-cas/display-maps.json
 ```
 
-The adapter creates a minimal default that renders context usage and app-server remaining quota as
-percent labels:
+The adapter creates a minimal default that renders app-server remaining quota as percent labels.
+`limits.summary` controls the compact `Limits` selector label: use `five_hour` for only the
+5-hour window or `five_hour_and_weekly` for the combined 5-hour + weekly label.
 
 ```jsonc
 {
-  // Context and account limit display maps. Values receive percentages in the 0..100 range.
-  "context": {
-    "usage": "context_percent"
-  },
+  // Account limit display maps. Values receive percentages in the 0..100 range.
+  // limits.summary: "five_hour" or "five_hour_and_weekly".
   "limits": {
+    "summary": "five_hour_and_weekly",
     "primary": "five_hour_percent",
     "secondary": "weekly_percent"
   },
   "maps": {
-    "context_percent": {
-      "kind": "template",
-      "template": "{value}%",
-      "unavailable": "---"
-    },
     "five_hour_percent": {
       "kind": "template",
       "template": "5h {value}%",
@@ -510,16 +505,13 @@ percent labels:
 Maps can be `template`, `exact`, or `thresholds`. `exact` maps individual integer percentages;
 `thresholds` uses the highest row where `min <= value`. `exact` maps must either cover every value
 from `0` through `100` or define an explicit `fallback`; `thresholds` maps must either include a
-`min: 0` row or define an explicit `fallback`. The context percent is used context, while limit
-percentages are remaining quota. The `5h` / `wk` prefixes are not special runtime labels; they are
-just part of the default templates above. Selected map ids in `context.usage`, `limits.primary`,
-and `limits.secondary` must exist in `maps`; a partial or stale file fails startup instead of
-silently falling back to a hardcoded display.
+`min: 0` row or define an explicit `fallback`. Limit percentages are remaining quota. The `5h` /
+`wk` prefixes are not special runtime labels; they are just part of the default templates above.
+Selected map ids in `limits.primary` and `limits.secondary` must exist in `maps`; a partial or stale
+file fails startup instead of silently falling back to a hardcoded display.
 
 Ready-to-use display-map examples are kept in:
 
-- `examples/display-maps/context-percent.jsonc`
-- `examples/display-maps/context-braille.jsonc`
 - `examples/display-maps/text.jsonc`
 - `examples/display-maps/bars.jsonc`
 - `examples/display-maps/block.jsonc`

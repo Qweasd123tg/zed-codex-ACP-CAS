@@ -23,10 +23,20 @@ pub(in crate::thread) struct DisplayMapsConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::thread) struct LimitsDisplayMapSelection {
+    #[serde(default)]
+    pub(in crate::thread) summary: LimitsSummaryDisplay,
     #[serde(default = "default_primary_limits_map_id")]
-    primary: String,
+    pub(in crate::thread) primary: String,
     #[serde(default = "default_secondary_limits_map_id")]
-    secondary: String,
+    pub(in crate::thread) secondary: String,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(in crate::thread) enum LimitsSummaryDisplay {
+    FiveHour,
+    #[default]
+    FiveHourAndWeekly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +81,7 @@ impl Default for DisplayMapsConfig {
 impl Default for LimitsDisplayMapSelection {
     fn default() -> Self {
         Self {
+            summary: LimitsSummaryDisplay::default(),
             primary: default_primary_limits_map_id(),
             secondary: default_secondary_limits_map_id(),
         }
@@ -90,6 +101,10 @@ impl DisplayMapsConfig {
         remaining_percent: Option<i32>,
     ) -> String {
         self.render_limit_remaining(remaining_percent, self.limits.secondary.as_str())
+    }
+
+    pub(in crate::thread) fn includes_secondary_limit_in_summary(&self) -> bool {
+        self.limits.summary == LimitsSummaryDisplay::FiveHourAndWeekly
     }
 
     fn render_limit_remaining(&self, remaining_percent: Option<i32>, map_id: &str) -> String {
@@ -301,8 +316,8 @@ fn validate_percent_display_map(map_id: &str, map: &PercentDisplayMap) -> std::i
 #[cfg(test)]
 mod tests {
     use super::{
-        DisplayMapsConfig, LimitsDisplayMapSelection, PercentDisplayMap, PercentThresholdLabel,
-        display_maps_path, persist_display_maps, restore_display_maps,
+        DisplayMapsConfig, LimitsDisplayMapSelection, LimitsSummaryDisplay, PercentDisplayMap,
+        PercentThresholdLabel, display_maps_path, persist_display_maps, restore_display_maps,
     };
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -323,6 +338,7 @@ mod tests {
     fn threshold_maps_render_highest_matching_label() {
         let maps = DisplayMapsConfig {
             limits: LimitsDisplayMapSelection {
+                summary: LimitsSummaryDisplay::default(),
                 primary: "braille".to_string(),
                 secondary: "braille".to_string(),
             },
@@ -365,6 +381,7 @@ mod tests {
         {
           // Active account limit maps.
           "limits": {
+            "summary": "five_hour",
             "primary": "dots",
             "secondary": "percent",
           },
@@ -384,6 +401,7 @@ mod tests {
         std::fs::write(&path, contents).expect("display maps fixture should write");
 
         let restored = restore_display_maps(&path).expect("display maps should restore");
+        assert!(!restored.includes_secondary_limit_in_summary());
         assert_eq!(restored.render_primary_limit_remaining(Some(1)), ".");
         assert_eq!(restored.render_primary_limit_remaining(Some(2)), "2%");
         assert_eq!(restored.render_secondary_limit_remaining(Some(2)), "2%");
