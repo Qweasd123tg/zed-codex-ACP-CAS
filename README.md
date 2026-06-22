@@ -475,15 +475,16 @@ maps rather than selector state:
 ```
 
 The adapter creates a minimal default that renders app-server remaining quota as percent labels.
-`limits.summary` controls the compact `Limits` selector label: use `five_hour` for only the
-5-hour window or `five_hour_and_weekly` for the combined 5-hour + weekly label.
+`limits.summary` controls the compact `Limits` selector label as an ordered window list:
+use `["primary"]` for only the primary window or `["primary", "secondary"]` for the combined
+primary + secondary label.
 
 ```jsonc
 {
   // Account limit display maps. Values receive percentages in the 0..100 range.
-  // limits.summary: "five_hour" or "five_hour_and_weekly".
+  // limits.summary: ["primary"] or ["primary", "secondary"].
   "limits": {
-    "summary": "five_hour_and_weekly",
+    "summary": ["primary", "secondary"],
     "primary": "five_hour_percent",
     "secondary": "weekly_percent"
   },

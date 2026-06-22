@@ -23,20 +23,19 @@ pub(in crate::thread) struct DisplayMapsConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::thread) struct LimitsDisplayMapSelection {
-    #[serde(default)]
-    pub(in crate::thread) summary: LimitsSummaryDisplay,
+    #[serde(default = "default_limits_summary")]
+    pub(in crate::thread) summary: Vec<LimitSummaryWindow>,
     #[serde(default = "default_primary_limits_map_id")]
     pub(in crate::thread) primary: String,
     #[serde(default = "default_secondary_limits_map_id")]
     pub(in crate::thread) secondary: String,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(in crate::thread) enum LimitsSummaryDisplay {
-    FiveHour,
-    #[default]
-    FiveHourAndWeekly,
+pub(in crate::thread) enum LimitSummaryWindow {
+    Primary,
+    Secondary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,7 +80,7 @@ impl Default for DisplayMapsConfig {
 impl Default for LimitsDisplayMapSelection {
     fn default() -> Self {
         Self {
-            summary: LimitsSummaryDisplay::default(),
+            summary: default_limits_summary(),
             primary: default_primary_limits_map_id(),
             secondary: default_secondary_limits_map_id(),
         }
@@ -103,8 +102,24 @@ impl DisplayMapsConfig {
         self.render_limit_remaining(remaining_percent, self.limits.secondary.as_str())
     }
 
-    pub(in crate::thread) fn includes_secondary_limit_in_summary(&self) -> bool {
-        self.limits.summary == LimitsSummaryDisplay::FiveHourAndWeekly
+    pub(in crate::thread) fn render_limits_summary(
+        &self,
+        primary_remaining_percent: Option<i32>,
+        secondary_remaining_percent: Option<i32>,
+    ) -> String {
+        self.limits
+            .summary
+            .iter()
+            .map(|window| match window {
+                LimitSummaryWindow::Primary => {
+                    self.render_primary_limit_remaining(primary_remaining_percent)
+                }
+                LimitSummaryWindow::Secondary => {
+                    self.render_secondary_limit_remaining(secondary_remaining_percent)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
     }
 
     fn render_limit_remaining(&self, remaining_percent: Option<i32>, map_id: &str) -> String {
@@ -231,6 +246,10 @@ fn default_secondary_limits_map_id() -> String {
     DEFAULT_SECONDARY_LIMITS_MAP_ID.to_string()
 }
 
+fn default_limits_summary() -> Vec<LimitSummaryWindow> {
+    vec![LimitSummaryWindow::Primary, LimitSummaryWindow::Secondary]
+}
+
 fn render_template(template: &str, value: u8) -> String {
     template
         .replace("{value}", &value.to_string())
@@ -242,6 +261,12 @@ fn clamp_percent(value: i32) -> u8 {
 }
 
 fn validate_display_maps_config(config: &DisplayMapsConfig) -> std::io::Result<()> {
+    if config.limits.summary.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "display maps `limits.summary` must include at least one of `primary` or `secondary`",
+        ));
+    }
     validate_map_ref(
         &config.maps,
         "limits.primary",
@@ -316,7 +341,7 @@ fn validate_percent_display_map(map_id: &str, map: &PercentDisplayMap) -> std::i
 #[cfg(test)]
 mod tests {
     use super::{
-        DisplayMapsConfig, LimitsDisplayMapSelection, LimitsSummaryDisplay, PercentDisplayMap,
+        DisplayMapsConfig, LimitSummaryWindow, LimitsDisplayMapSelection, PercentDisplayMap,
         PercentThresholdLabel, display_maps_path, persist_display_maps, restore_display_maps,
     };
     use std::collections::BTreeMap;
@@ -338,7 +363,7 @@ mod tests {
     fn threshold_maps_render_highest_matching_label() {
         let maps = DisplayMapsConfig {
             limits: LimitsDisplayMapSelection {
-                summary: LimitsSummaryDisplay::default(),
+                summary: vec![LimitSummaryWindow::Primary, LimitSummaryWindow::Secondary],
                 primary: "braille".to_string(),
                 secondary: "braille".to_string(),
             },
@@ -381,7 +406,7 @@ mod tests {
         {
           // Active account limit maps.
           "limits": {
-            "summary": "five_hour",
+            "summary": ["primary"],
             "primary": "dots",
             "secondary": "percent",
           },
@@ -401,7 +426,7 @@ mod tests {
         std::fs::write(&path, contents).expect("display maps fixture should write");
 
         let restored = restore_display_maps(&path).expect("display maps should restore");
-        assert!(!restored.includes_secondary_limit_in_summary());
+        assert_eq!(restored.limits.summary, vec![LimitSummaryWindow::Primary]);
         assert_eq!(restored.render_primary_limit_remaining(Some(1)), ".");
         assert_eq!(restored.render_primary_limit_remaining(Some(2)), "2%");
         assert_eq!(restored.render_secondary_limit_remaining(Some(2)), "2%");

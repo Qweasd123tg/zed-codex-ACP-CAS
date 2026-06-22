@@ -2,8 +2,8 @@
   // Old "bars" style for the primary 5-hour limit:
   // 0% -> empty, 1..20% -> one filled cell, ..., 81..100% -> full.
   "limits": {
-    // Compact Limits label: "five_hour" or "five_hour_and_weekly".
-    "summary": "five_hour_and_weekly",
+    // Compact Limits label windows. Use ["primary"] to hide weekly from the short label.
+    "summary": ["primary", "secondary"],
     "primary": "five_hour_bars",
     "secondary": "weekly_percent",
   },

@@ -24,14 +24,13 @@ pub(in crate::thread) fn combined_limits_status_label(
     snapshot: Option<&RateLimitSnapshot>,
     display_maps: &DisplayMapsConfig,
 ) -> String {
-    let primary = five_hour_status_label(snapshot, display_maps);
-    if !display_maps.includes_secondary_limit_in_summary() {
-        return primary;
-    }
-
-    format!(
-        "{primary} · {}",
-        weekly_status_label(snapshot, display_maps)
+    display_maps.render_limits_summary(
+        snapshot
+            .and_then(|snapshot| snapshot.primary.as_ref())
+            .map(|window| remaining_percent(window.used_percent)),
+        snapshot
+            .and_then(|snapshot| snapshot.secondary.as_ref())
+            .map(|window| remaining_percent(window.used_percent)),
     )
 }
 
@@ -61,26 +60,6 @@ pub(in crate::thread) fn limits_status_description(
     }
     lines.push(combined_limits_reset_message(snapshot));
     lines.join("\n")
-}
-
-pub(in crate::thread) fn five_hour_status_label(
-    snapshot: Option<&RateLimitSnapshot>,
-    display_maps: &DisplayMapsConfig,
-) -> String {
-    short_primary_window_remaining(
-        snapshot.and_then(|snapshot| snapshot.primary.as_ref()),
-        display_maps,
-    )
-}
-
-pub(in crate::thread) fn weekly_status_label(
-    snapshot: Option<&RateLimitSnapshot>,
-    display_maps: &DisplayMapsConfig,
-) -> String {
-    short_secondary_window_remaining(
-        snapshot.and_then(|snapshot| snapshot.secondary.as_ref()),
-        display_maps,
-    )
 }
 
 pub(in crate::thread) fn five_hour_reset_message(snapshot: Option<&RateLimitSnapshot>) -> String {
@@ -125,23 +104,6 @@ pub(in crate::thread) fn observe_rate_limit_snapshot(
 ) {
     observe_window_warning_index(&mut state.secondary_index, snapshot.secondary.as_ref());
     observe_window_warning_index(&mut state.primary_index, snapshot.primary.as_ref());
-}
-
-fn short_primary_window_remaining(
-    window: Option<&RateLimitWindow>,
-    display_maps: &DisplayMapsConfig,
-) -> String {
-    display_maps
-        .render_primary_limit_remaining(window.map(|window| remaining_percent(window.used_percent)))
-}
-
-fn short_secondary_window_remaining(
-    window: Option<&RateLimitWindow>,
-    display_maps: &DisplayMapsConfig,
-) -> String {
-    display_maps.render_secondary_limit_remaining(
-        window.map(|window| remaining_percent(window.used_percent)),
-    )
 }
 
 fn take_window_warning(
@@ -319,43 +281,22 @@ fn clamp_percent(value: i32) -> i32 {
 mod tests {
     use super::{
         RateLimitWarning, RateLimitWarningState, combined_limits_reset_message,
-        combined_limits_status_label, five_hour_reset_message, five_hour_status_label,
-        format_reset_delta, limits_status_description, observe_rate_limit_snapshot,
-        take_rate_limit_warnings, weekly_reset_message, weekly_status_label,
+        combined_limits_status_label, five_hour_reset_message, format_reset_delta,
+        limits_status_description, observe_rate_limit_snapshot, take_rate_limit_warnings,
+        weekly_reset_message,
     };
     use crate::thread::session_display_maps::{
-        DisplayMapsConfig, LimitsDisplayMapSelection, LimitsSummaryDisplay,
+        DisplayMapsConfig, LimitSummaryWindow, LimitsDisplayMapSelection,
     };
     use codex_app_server_protocol::{CreditsSnapshot, RateLimitSnapshot, RateLimitWindow};
     use codex_protocol::account::PlanType;
 
     #[test]
     fn rate_limit_status_labels_show_remaining_buckets() {
-        let snapshot = RateLimitSnapshot {
-            limit_id: Some("codex".to_string()),
-            limit_name: None,
-            primary: Some(RateLimitWindow {
-                used_percent: 20,
-                window_duration_mins: Some(300),
-                resets_at: Some(4_102_444_800),
-            }),
-            secondary: Some(RateLimitWindow {
-                used_percent: 6,
-                window_duration_mins: Some(10_080),
-                resets_at: Some(4_102_531_200),
-            }),
-            credits: None,
-            plan_type: Some(PlanType::Plus),
-        };
-
         let display_maps = DisplayMapsConfig::default();
         assert_eq!(
-            five_hour_status_label(Some(&snapshot), &display_maps),
-            "5h 80%"
-        );
-        assert_eq!(
-            weekly_status_label(Some(&snapshot), &display_maps),
-            "wk 94%"
+            display_maps.render_limits_summary(Some(80), Some(94)),
+            "5h 80% · wk 94%"
         );
     }
 
@@ -409,7 +350,7 @@ mod tests {
         };
         let mut display_maps = DisplayMapsConfig::default();
         display_maps.limits = LimitsDisplayMapSelection {
-            summary: LimitsSummaryDisplay::FiveHour,
+            summary: vec![LimitSummaryWindow::Primary],
             ..LimitsDisplayMapSelection::default()
         };
 
