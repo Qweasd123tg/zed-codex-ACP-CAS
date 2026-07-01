@@ -728,6 +728,8 @@ Timeout override values must be positive integer milliseconds. Invalid values no
 
 Do not keep `ACP_DISABLE_AUTO_RESTORE=1` in your normal Zed configuration. It suppresses the earliest startup-driven backend restore right after the agent boots, which can make history entries appear in Zed while their chat content does not load. Use it only as a temporary diagnostic option if startup restore itself is hanging.
 
+If Zed asks the adapter to load an old local history row whose id is not a materialized Codex rollout, the adapter now falls back to a fresh backend thread under the same Zed session handle instead of failing startup with `Invalid params`. Normal Codex-backed sessions still restore and replay from the backend history first.
+
 ## Troubleshooting
 
 If Zed seems to hang or the adapter looks like it crashed, run Zed from a terminal:

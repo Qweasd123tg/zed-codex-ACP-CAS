@@ -47,6 +47,7 @@ const RESUME_STARTUP_RETRY_ATTEMPTS: usize = 6;
 const RESUME_STARTUP_RETRY_DELAY_MS: u64 = 300;
 const CODEX_APP_SERVER_BIN_ENV: &str = "CODEX_ACP_CODEX_BIN";
 
+#[derive(Clone)]
 pub(crate) struct SessionMcpSetup {
     pub(crate) config_overrides: Option<HashMap<String, JsonValue>>,
     pub(crate) summary: ContextSelectorSummary,
@@ -276,7 +277,7 @@ fn env_to_map(env: Vec<EnvVariable>) -> Option<HashMap<String, String>> {
     }
 }
 
-pub(in crate::thread) fn is_missing_rollout_thread_error(error: &Error) -> bool {
+pub(crate) fn is_missing_rollout_thread_error(error: &Error) -> bool {
     let message = error.to_string();
     message.contains("no rollout found for thread id")
 }
@@ -874,19 +875,7 @@ impl Thread {
             ..Default::default()
         };
 
-        let resume = match thread_resume_with_startup_retry(&mut app, resume_params.clone()).await {
-            Ok(resume) => resume,
-            Err(error) if is_missing_rollout_thread_error(&error) => {
-                warn!(
-                    requested_thread_id = resume_params.thread_id,
-                    "resume source is unavailable or not materialized"
-                );
-                return Err(Error::invalid_params().data(
-                    "Session history is not available yet. The Codex rollout may be archived, missing, or not materialized before the first user message.",
-                ));
-            }
-            Err(error) => return Err(error),
-        };
+        let resume = thread_resume_with_startup_retry(&mut app, resume_params.clone()).await?;
         Self::build_resumed_thread(
             session_id,
             config,

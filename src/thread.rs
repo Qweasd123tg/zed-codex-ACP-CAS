@@ -91,7 +91,9 @@ use self::features::plan::{
 };
 use self::features::tool_call_ui::kind::command_looks_like_verification;
 use self::item_handlers::{handle_item_completed, handle_item_started};
-pub(crate) use self::session_lifecycle::build_session_mcp_setup;
+pub(crate) use self::session_lifecycle::{
+    SessionMcpSetup, build_session_mcp_setup, is_missing_rollout_thread_error,
+};
 use self::terminal_updates::{handle_command_output_delta, handle_terminal_interaction};
 use self::turn_diff::{finalize_turn_diff, handle_turn_diff_updated};
 use self::unified_diff::{apply_unified_diff_to_text, first_hunk_line, unified_diff_to_old_new};

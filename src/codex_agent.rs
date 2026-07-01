@@ -29,15 +29,18 @@ use serde::Deserialize;
 use serde_json::value::to_raw_value;
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
-use crate::thread::{Thread, build_session_mcp_setup};
+use crate::thread::{
+    SessionMcpSetup, Thread, build_session_mcp_setup, is_missing_rollout_thread_error,
+};
 
 const EXT_THREAD_ROLLBACK_METHOD: &str = "zed.dev/codex/thread/rollback";
 
@@ -50,6 +53,25 @@ pub struct CodexAgent {
     startup_restore_bypassed: AtomicBool,
     // Реестр активных ACP-сессий в памяти на время жизни процесса.
     sessions: Arc<Mutex<HashMap<SessionId, Arc<Thread>>>>,
+}
+
+struct ExistingSessionBootstrap {
+    thread: Arc<Thread>,
+    restored_backend_history: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingSessionRestoreFailureAction {
+    StartFreshBackend,
+    ReturnError,
+}
+
+fn existing_session_restore_failure_action(error: &Error) -> ExistingSessionRestoreFailureAction {
+    if is_missing_rollout_thread_error(error) {
+        ExistingSessionRestoreFailureAction::StartFreshBackend
+    } else {
+        ExistingSessionRestoreFailureAction::ReturnError
+    }
 }
 
 const STARTUP_RESTORE_GUARD_WINDOW: Duration = Duration::from_secs(5);
@@ -153,6 +175,77 @@ impl CodexAgent {
             .map_err(|_| Error::internal_error().data("session registry lock poisoned"))?
             .insert(session_id, thread);
         Ok(load)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn bootstrap_existing_session(
+        &self,
+        session_id: SessionId,
+        cwd: PathBuf,
+        client: ConnectionTo<Client>,
+        session_mcp_setup: SessionMcpSetup,
+        bypass_startup_restore: bool,
+    ) -> Result<ExistingSessionBootstrap, Error> {
+        if bypass_startup_restore {
+            let thread = Thread::start_session_for_existing_session_id(
+                session_id,
+                &self.config,
+                cwd,
+                client,
+                self.client_capabilities.clone(),
+                session_mcp_setup.config_overrides,
+                session_mcp_setup.summary,
+            )
+            .await?;
+
+            return Ok(ExistingSessionBootstrap {
+                thread: Arc::new(thread),
+                restored_backend_history: false,
+            });
+        }
+
+        match Thread::resume_session(
+            session_id.clone(),
+            &self.config,
+            cwd.clone(),
+            client.clone(),
+            self.client_capabilities.clone(),
+            session_mcp_setup.config_overrides.clone(),
+            session_mcp_setup.summary.clone(),
+        )
+        .await
+        {
+            Ok(thread) => Ok(ExistingSessionBootstrap {
+                thread: Arc::new(thread),
+                restored_backend_history: true,
+            }),
+            Err(error) => match existing_session_restore_failure_action(&error) {
+                ExistingSessionRestoreFailureAction::StartFreshBackend => {
+                    warn!(
+                        session_id = %session_id,
+                        cwd = %cwd.display(),
+                        error = %error,
+                        "ACP session history is unavailable; starting fresh backend thread for existing Zed session"
+                    );
+                    let thread = Thread::start_session_for_existing_session_id(
+                        session_id,
+                        &self.config,
+                        cwd,
+                        client,
+                        self.client_capabilities.clone(),
+                        session_mcp_setup.config_overrides,
+                        session_mcp_setup.summary,
+                    )
+                    .await?;
+
+                    Ok(ExistingSessionBootstrap {
+                        thread: Arc::new(thread),
+                        restored_backend_history: false,
+                    })
+                }
+                ExistingSessionRestoreFailureAction::ReturnError => Err(error),
+            },
+        }
     }
 
     fn should_bypass_startup_restore(&self) -> bool {
@@ -637,42 +730,28 @@ impl CodexAgent {
 
         let bypass_startup_restore = self.should_bypass_startup_restore();
 
-        let thread = if bypass_startup_restore {
-            Arc::new(
-                Thread::start_session_for_existing_session_id(
-                    session_id.clone(),
-                    &self.config,
-                    cwd,
-                    client.clone(),
-                    self.client_capabilities.clone(),
-                    session_mcp_setup.config_overrides.clone(),
-                    session_mcp_setup.summary.clone(),
-                )
-                .await?,
+        let ExistingSessionBootstrap {
+            thread,
+            restored_backend_history,
+        } = self
+            .bootstrap_existing_session(
+                session_id.clone(),
+                cwd,
+                client.clone(),
+                session_mcp_setup,
+                bypass_startup_restore,
             )
-        } else {
-            Arc::new(
-                Thread::resume_session(
-                    session_id.clone(),
-                    &self.config,
-                    cwd,
-                    client.clone(),
-                    self.client_capabilities.clone(),
-                    session_mcp_setup.config_overrides.clone(),
-                    session_mcp_setup.summary.clone(),
-                )
-                .await?,
-            )
-        };
+            .await?;
 
         // При обычном load-сценарии реплеим историю; если сработал startup guard,
-        // открываем свежий backend-thread под тем же ACP session handle.
+        // или restore невозможен, открываем fresh backend-thread под тем же ACP session handle.
         let load = self
-            .load_and_register_session(session_id, thread, !bypass_startup_restore, started_at)
+            .load_and_register_session(session_id, thread, restored_backend_history, started_at)
             .await?;
 
         info!(
             bypass_startup_restore,
+            restored_backend_history,
             elapsed_ms = started_at.elapsed().as_millis() as u64,
             "Finished ACP load_session critical startup path"
         );
@@ -700,33 +779,18 @@ impl CodexAgent {
 
         let bypass_startup_restore = self.should_bypass_startup_restore();
 
-        let thread = if bypass_startup_restore {
-            Arc::new(
-                Thread::start_session_for_existing_session_id(
-                    session_id.clone(),
-                    &self.config,
-                    cwd,
-                    client.clone(),
-                    self.client_capabilities.clone(),
-                    session_mcp_setup.config_overrides.clone(),
-                    session_mcp_setup.summary.clone(),
-                )
-                .await?,
+        let ExistingSessionBootstrap {
+            thread,
+            restored_backend_history,
+        } = self
+            .bootstrap_existing_session(
+                session_id.clone(),
+                cwd,
+                client.clone(),
+                session_mcp_setup,
+                bypass_startup_restore,
             )
-        } else {
-            Arc::new(
-                Thread::resume_session(
-                    session_id.clone(),
-                    &self.config,
-                    cwd,
-                    client.clone(),
-                    self.client_capabilities.clone(),
-                    session_mcp_setup.config_overrides.clone(),
-                    session_mcp_setup.summary.clone(),
-                )
-                .await?,
-            )
-        };
+            .await?;
 
         // Для session/resume не реплеим историю, но обновляем динамические команды после старта.
         let load = self
@@ -735,6 +799,7 @@ impl CodexAgent {
 
         info!(
             bypass_startup_restore,
+            restored_backend_history,
             elapsed_ms = started_at.elapsed().as_millis() as u64,
             "Finished ACP resume_session critical startup path"
         );
@@ -1012,6 +1077,27 @@ mod tests {
 
         let error = parse_thread_rollback_ext_params(&request).expect_err("should fail");
         assert_eq!(error.code, agent_client_protocol::ErrorCode::InvalidParams);
+    }
+
+    #[test]
+    fn missing_rollout_restore_error_starts_fresh_backend() {
+        let error = Error::internal_error()
+            .data("thread/resume failed: no rollout found for thread id f5347cce");
+
+        assert_eq!(
+            existing_session_restore_failure_action(&error),
+            ExistingSessionRestoreFailureAction::StartFreshBackend
+        );
+    }
+
+    #[test]
+    fn non_history_restore_error_is_not_hidden_by_fallback() {
+        let error = Error::internal_error().data("thread/resume failed: auth required");
+
+        assert_eq!(
+            existing_session_restore_failure_action(&error),
+            ExistingSessionRestoreFailureAction::ReturnError
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
