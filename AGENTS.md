@@ -141,6 +141,7 @@ bash script/build_local_release.sh
 3. Не смешивать 100500 стилей и режимов в одном поле. Делить настройки на короткие секции с одной ответственностью (`display`, `defaults`, `model_selector`, `layout`, `slash_commands`).
 4. Для списков видимых пунктов prefer JSONC ordered lists: строка есть — пункт включен, строка закомментирована — пункт выключен, порядок строк задает порядок UI. Не возвращать boolean-map формат без сильной причины.
 5. Generated default config должен быть редактируемым примером: с комментариями, понятными секциями и без inert/example мусора, который не влияет на runtime.
+6. Нижние selectors, их видимые группы, короткие labels, hover descriptions и limit/status variants должны настраиваться через adapter-owned config (`selector-preferences.json`, `display-maps.json` и близкие schema), а не через одноразовый hardcode в runtime. Новый hardcode допустим только как минимальный fallback default для materialization config-а и обязан быть вынесен в редактируемую schema тем же change-set.
 
 ## Тестирование
 Предпочтительный формат: unit-тесты рядом с реализацией (`#[cfg(test)]`).

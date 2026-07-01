@@ -24,11 +24,11 @@ Resume picker with workspace-scoped thread selection:
 
 ![Resume picker](screenshot/resume.png)
 
-Context selector and session controls:
+Session selectors and controls:
 
 ![Selector context](screenshot/selector%20context.png)
 
-Context limits and usage view:
+Limit status and usage view:
 
 ![Selector limits](screenshot/selector%20limits.png)
 
@@ -377,7 +377,7 @@ split, the adapter creates current config files there if they do not already exi
 The adapter creates this file on session startup if it is missing. Existing files are never treated
 as disposable defaults: invalid JSON/JSONC now fails session startup with the file path instead of
 being silently replaced. The file is JSON with comments (`//` and `/* ... */` are accepted; trailing
-commas are accepted). This preserves choices such as the lower Context selector display mode,
+commas are accepted). This preserves choices such as lower selector layout/status variants,
 default model/reasoning/speed, per-model and per-effort
 labels/descriptions, and compact model/effort filters across restarts. It also keeps visual style
 controls out of the lower selector menus and allows a conservative layout override over known
@@ -389,11 +389,6 @@ Default config:
 
 ```jsonc
 {
-  // Display mode for the lower Context selector.
-  "display": {
-    "context_control": "context"
-  },
-
   // Defaults applied when a new ACP session starts. null keeps the app-server default.
   "defaults": {
     "model": null,
@@ -430,7 +425,7 @@ Default config:
 
   // Lower selector order, titles, visibility, and group order.
   "layout": {
-    "order": ["permissions", "model", "context_control"],
+    "order": ["permissions", "model", "status"],
     "permissions": {
       "visible": true,
       "name": "Permissions",
@@ -441,10 +436,10 @@ Default config:
       "name": "Model",
       "groups": ["models", "effort", "speed"]
     },
-    "context_control": {
+    "status": {
       "visible": true,
-      "name": "Context",
-      "groups": ["display", "integrations", "actions"]
+      "name": "Status",
+      "groups": ["status"]
     }
   },
 
@@ -475,16 +470,22 @@ maps rather than selector state:
 ```
 
 The adapter creates a minimal default that renders app-server remaining quota as percent labels.
-`limits.summary` controls the compact `Limits` selector label as an ordered window list:
-use `["primary"]` for only the primary window or `["primary", "secondary"]` for the combined
-primary + secondary label.
+`limits.summary` stores the currently selected summary windows. `limits.summary_options` controls
+which variants appear in the lower `Status` selector, their ids, optional names/descriptions, and
+the windows rendered by each variant. Use `["primary"]` for only the 5-hour window or
+`["primary", "secondary"]` for the combined 5-hour + weekly label.
 
 ```jsonc
 {
   // Account limit display maps. Values receive percentages in the 0..100 range.
-  // limits.summary: ["primary"] or ["primary", "secondary"].
+  // limits.summary stores the selected summary option windows.
+  // limits.summary_options controls visible Status selector variants.
   "limits": {
     "summary": ["primary", "secondary"],
+    "summary_options": [
+      { "id": "primary", "summary": ["primary"] },
+      { "id": "primary_secondary", "summary": ["primary", "secondary"] }
+    ],
     "primary": "five_hour_percent",
     "secondary": "weekly_percent"
   },
@@ -562,8 +563,6 @@ The example is intentionally partial: any missing fields keep their current/defa
 
 Fields:
 
-- `display.context_control`: what the lower `Context` selector button shows.
-  Values: `context`, `limits`, `context_and_limits`.
 - `defaults.model`: startup default model id, or `null` to keep the app-server/session default.
 - `defaults.reasoning_effort`: startup default for reasoning effort.
   Common values: `minimal`, `low`, `medium`, `high`, `xhigh`, or `null` to use the backend/model default.
@@ -590,7 +589,7 @@ Fields:
   not advertise them. The backend may still reject unsupported combinations; observed failure:
   `minimal` with `image_gen`/`web_search` returns an invalid-request error.
 - `layout.order`: order of lower selectors.
-  Known ids: `permissions`, `model`, `context_control`.
+  Known ids: `permissions`, `model`, `status`.
 - `layout.<selector>.visible`: show or hide a selector.
   Values: `true`, `false`.
 - `layout.<selector>.name`: selector title shown by Zed.
@@ -603,7 +602,7 @@ Known groups:
 
 - `permissions`: `workflow`, `guarded`, `bypass`.
 - `model`: `models`, `effort`, `speed`.
-- `context_control`: `display`, `integrations`, `actions`.
+- `status`: `status`, `integrations`, `actions`.
 
 Known slash commands:
 

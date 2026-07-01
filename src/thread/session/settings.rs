@@ -3,8 +3,8 @@
 use super::session_config::{
     MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
     STATUS_COMPACT_VALUE, STATUS_LIMITS_VALUE, find_model_for_current,
-    normalize_reasoning_effort_for_model, parse_model_reasoning_value, parse_model_speed_value,
-    reasoning_effort_value,
+    normalize_reasoning_effort_for_model, parse_limits_summary_value, parse_model_reasoning_value,
+    parse_model_speed_value, reasoning_effort_value,
 };
 use super::{
     APPROVAL_PRESETS, DEFAULT_SESSION_MODE_ID, Error, ModeKind, PLAN_SESSION_MODE_ID,
@@ -16,6 +16,7 @@ use crate::thread::features::{
         clear_visible_plan_state, has_visible_plan_state, should_clear_visible_plan_for_mode_change,
     },
 };
+use crate::thread::session_display_maps::persist_display_maps;
 use crate::thread::session_selector_preferences::persist_selector_preferences;
 use agent_client_protocol::schema::v1::SessionConfigValueId;
 use codex_app_server_protocol::ThreadRollbackParams;
@@ -30,6 +31,16 @@ fn persist_selector_preferences_or_warn(inner: &crate::thread::ThreadInner) {
             %error,
             path = %inner.selector_preferences_path.display(),
             "failed to persist selector preferences"
+        );
+    }
+}
+
+fn persist_display_maps_or_warn(inner: &crate::thread::ThreadInner) {
+    if let Err(error) = persist_display_maps(&inner.display_maps_path, &inner.display_maps) {
+        warn!(
+            %error,
+            path = %inner.display_maps_path.display(),
+            "failed to persist display maps"
         );
     }
 }
@@ -136,6 +147,23 @@ impl Thread {
     }
 
     pub async fn set_status_control(&self, value: SessionConfigValueId) -> Result<(), Error> {
+        if let Some(option_id) = parse_limits_summary_value(&value.0) {
+            {
+                let mut inner = self.inner.lock().await;
+                if !inner
+                    .display_maps
+                    .set_limits_summary_by_option_id(option_id)
+                {
+                    return Err(
+                        Error::invalid_params().data("Unsupported status limits summary option")
+                    );
+                }
+                persist_display_maps_or_warn(&inner);
+            }
+            self.notify_config_options_update().await;
+            return Ok(());
+        }
+
         match value.0.as_ref() {
             STATUS_LIMITS_VALUE | SESSION_STATUS_VALUE | MCP_STATUS_VALUE | SKILLS_STATUS_VALUE
             | PLUGINS_STATUS_VALUE => Ok(()),

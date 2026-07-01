@@ -5,9 +5,13 @@ use std::path::Path;
 use codex_app_server_protocol::{Account, RateLimitSnapshot, TokenUsageBreakdown};
 use codex_protocol::account::PlanType;
 
-use super::limits::{combined_limits_status_label, limits_status_description};
+use super::limits::{
+    combined_limits_reset_message, five_hour_reset_message, limits_status_description,
+    weekly_reset_message,
+};
 use crate::thread::{
-    SessionConfigSelectGroup, SessionConfigSelectOption, session_display_maps::DisplayMapsConfig,
+    SessionConfigSelectGroup, SessionConfigSelectOption,
+    session_display_maps::{DisplayMapsConfig, LimitSummaryOption, LimitSummaryWindow},
 };
 
 #[path = "context/mcp.rs"]
@@ -52,10 +56,6 @@ pub(crate) struct AccountStatus {
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::thread) fn status_control_option_groups(
-    workspace_cwd: &Path,
-    backend_cli_version: &str,
-    account_status: &AccountStatus,
-    total_token_usage: Option<&TokenUsageBreakdown>,
     rate_limits: Option<&RateLimitSnapshot>,
     display_maps: &DisplayMapsConfig,
     compaction_in_progress: bool,
@@ -68,26 +68,31 @@ pub(in crate::thread) fn status_control_option_groups(
     } else {
         "Compact now"
     };
+    let primary_remaining_percent = primary_remaining(rate_limits);
+    let secondary_remaining_percent = secondary_remaining(rate_limits);
     vec![
         SessionConfigSelectGroup::new(
             "status",
             "Status",
-            vec![
-                SessionConfigSelectOption::new(
-                    STATUS_LIMITS_VALUE,
-                    combined_limits_status_label(rate_limits, display_maps),
-                )
-                .description(limits_status_description(rate_limits, display_maps)),
-                SessionConfigSelectOption::new(SESSION_STATUS_VALUE, "Session").description(
-                    session_status_detail(
-                        workspace_cwd,
-                        backend_cli_version,
-                        account_status,
-                        total_token_usage,
+            display_maps
+                .limits_summary_options()
+                .iter()
+                .map(|option| {
+                    SessionConfigSelectOption::new(
+                        limits_summary_value(&option.id),
+                        display_maps.render_limits_summary_option(
+                            option,
+                            primary_remaining_percent,
+                            secondary_remaining_percent,
+                        ),
+                    )
+                    .description(limit_summary_option_description(
+                        option,
                         rate_limits,
-                    ),
-                ),
-            ],
+                        display_maps,
+                    ))
+                })
+                .collect(),
         ),
         SessionConfigSelectGroup::new(
             "integrations",
@@ -110,6 +115,84 @@ pub(in crate::thread) fn status_control_option_groups(
             ],
         ),
     ]
+}
+
+pub(in crate::thread) fn status_current_value(
+    display_maps: &DisplayMapsConfig,
+    compaction_in_progress: bool,
+) -> String {
+    if compaction_in_progress {
+        return STATUS_COMPACT_VALUE.to_string();
+    }
+
+    limits_summary_value(display_maps.selected_limits_summary_option_id())
+}
+
+pub(in crate::thread) fn status_selector_description(
+    rate_limits: Option<&RateLimitSnapshot>,
+    display_maps: &DisplayMapsConfig,
+) -> String {
+    let selected = display_maps
+        .limits_summary_options()
+        .iter()
+        .find(|option| option.id == display_maps.selected_limits_summary_option_id());
+
+    selected
+        .map(|option| limit_summary_option_description(option, rate_limits, display_maps))
+        .unwrap_or_else(|| combined_limits_reset_message(rate_limits))
+}
+
+pub(in crate::thread) fn limits_summary_value(option_id: &str) -> String {
+    format!("limits_summary:{option_id}")
+}
+
+pub(in crate::thread) fn parse_limits_summary_value(value: &str) -> Option<&str> {
+    value.strip_prefix("limits_summary:")
+}
+
+fn limit_summary_option_description(
+    option: &LimitSummaryOption,
+    rate_limits: Option<&RateLimitSnapshot>,
+    display_maps: &DisplayMapsConfig,
+) -> String {
+    if let Some(description) = option
+        .description
+        .as_deref()
+        .filter(|description| !description.trim().is_empty())
+    {
+        return description.to_string();
+    }
+
+    let reset_lines = option
+        .summary
+        .iter()
+        .map(|window| match window {
+            LimitSummaryWindow::Primary => five_hour_reset_message(rate_limits),
+            LimitSummaryWindow::Secondary => weekly_reset_message(rate_limits),
+        })
+        .collect::<Vec<_>>();
+
+    [
+        display_maps.render_limits_summary_for_windows(
+            &option.summary,
+            primary_remaining(rate_limits),
+            secondary_remaining(rate_limits),
+        ),
+        reset_lines.join("\n"),
+    ]
+    .join("\n")
+}
+
+fn primary_remaining(rate_limits: Option<&RateLimitSnapshot>) -> Option<i32> {
+    rate_limits
+        .and_then(|snapshot| snapshot.primary.as_ref())
+        .map(|window| 100 - window.used_percent.clamp(0, 100))
+}
+
+fn secondary_remaining(rate_limits: Option<&RateLimitSnapshot>) -> Option<i32> {
+    rate_limits
+        .and_then(|snapshot| snapshot.secondary.as_ref())
+        .map(|window| 100 - window.used_percent.clamp(0, 100))
 }
 
 #[allow(clippy::too_many_arguments)]

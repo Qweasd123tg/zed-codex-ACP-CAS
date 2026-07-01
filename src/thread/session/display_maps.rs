@@ -25,6 +25,8 @@ pub(in crate::thread) struct DisplayMapsConfig {
 pub(in crate::thread) struct LimitsDisplayMapSelection {
     #[serde(default = "default_limits_summary")]
     pub(in crate::thread) summary: Vec<LimitSummaryWindow>,
+    #[serde(default = "default_limit_summary_options")]
+    pub(in crate::thread) summary_options: Vec<LimitSummaryOption>,
     #[serde(default = "default_primary_limits_map_id")]
     pub(in crate::thread) primary: String,
     #[serde(default = "default_secondary_limits_map_id")]
@@ -36,6 +38,16 @@ pub(in crate::thread) struct LimitsDisplayMapSelection {
 pub(in crate::thread) enum LimitSummaryWindow {
     Primary,
     Secondary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::thread) struct LimitSummaryOption {
+    pub(in crate::thread) id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::thread) name: Option<String>,
+    pub(in crate::thread) summary: Vec<LimitSummaryWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::thread) description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +93,7 @@ impl Default for LimitsDisplayMapSelection {
     fn default() -> Self {
         Self {
             summary: default_limits_summary(),
+            summary_options: default_limit_summary_options(),
             primary: default_primary_limits_map_id(),
             secondary: default_secondary_limits_map_id(),
         }
@@ -107,8 +120,20 @@ impl DisplayMapsConfig {
         primary_remaining_percent: Option<i32>,
         secondary_remaining_percent: Option<i32>,
     ) -> String {
-        self.limits
-            .summary
+        self.render_limits_summary_for_windows(
+            &self.limits.summary,
+            primary_remaining_percent,
+            secondary_remaining_percent,
+        )
+    }
+
+    pub(in crate::thread) fn render_limits_summary_for_windows(
+        &self,
+        windows: &[LimitSummaryWindow],
+        primary_remaining_percent: Option<i32>,
+        secondary_remaining_percent: Option<i32>,
+    ) -> String {
+        windows
             .iter()
             .map(|window| match window {
                 LimitSummaryWindow::Primary => {
@@ -120,6 +145,48 @@ impl DisplayMapsConfig {
             })
             .collect::<Vec<_>>()
             .join(" · ")
+    }
+
+    pub(in crate::thread) fn limits_summary_options(&self) -> &[LimitSummaryOption] {
+        &self.limits.summary_options
+    }
+
+    pub(in crate::thread) fn selected_limits_summary_option_id(&self) -> &str {
+        self.limits
+            .summary_options
+            .iter()
+            .find(|option| option.summary == self.limits.summary)
+            .or_else(|| self.limits.summary_options.first())
+            .map(|option| option.id.as_str())
+            .unwrap_or("primary")
+    }
+
+    pub(in crate::thread) fn set_limits_summary_by_option_id(&mut self, option_id: &str) -> bool {
+        let Some(option) = self
+            .limits
+            .summary_options
+            .iter()
+            .find(|option| option.id == option_id)
+        else {
+            return false;
+        };
+        self.limits.summary = option.summary.clone();
+        true
+    }
+
+    pub(in crate::thread) fn render_limits_summary_option(
+        &self,
+        option: &LimitSummaryOption,
+        primary_remaining_percent: Option<i32>,
+        secondary_remaining_percent: Option<i32>,
+    ) -> String {
+        option.name.clone().unwrap_or_else(|| {
+            self.render_limits_summary_for_windows(
+                &option.summary,
+                primary_remaining_percent,
+                secondary_remaining_percent,
+            )
+        })
     }
 
     fn render_limit_remaining(&self, remaining_percent: Option<i32>, map_id: &str) -> String {
@@ -250,6 +317,23 @@ fn default_limits_summary() -> Vec<LimitSummaryWindow> {
     vec![LimitSummaryWindow::Primary, LimitSummaryWindow::Secondary]
 }
 
+fn default_limit_summary_options() -> Vec<LimitSummaryOption> {
+    vec![
+        LimitSummaryOption {
+            id: "primary".to_string(),
+            name: None,
+            summary: vec![LimitSummaryWindow::Primary],
+            description: None,
+        },
+        LimitSummaryOption {
+            id: "primary_secondary".to_string(),
+            name: None,
+            summary: vec![LimitSummaryWindow::Primary, LimitSummaryWindow::Secondary],
+            description: None,
+        },
+    ]
+}
+
 fn render_template(template: &str, value: u8) -> String {
     template
         .replace("{value}", &value.to_string())
@@ -267,6 +351,7 @@ fn validate_display_maps_config(config: &DisplayMapsConfig) -> std::io::Result<(
             "display maps `limits.summary` must include at least one of `primary` or `secondary`",
         ));
     }
+    validate_limit_summary_options(&config.limits)?;
     validate_map_ref(
         &config.maps,
         "limits.primary",
@@ -280,6 +365,54 @@ fn validate_display_maps_config(config: &DisplayMapsConfig) -> std::io::Result<(
     for (map_id, map) in &config.maps {
         validate_percent_display_map(map_id, map)?;
     }
+    Ok(())
+}
+
+fn validate_limit_summary_options(limits: &LimitsDisplayMapSelection) -> std::io::Result<()> {
+    if limits.summary_options.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "display maps `limits.summary_options` must include at least one option",
+        ));
+    }
+
+    let mut ids = std::collections::BTreeSet::new();
+    let mut selected_summary_is_available = false;
+    for option in &limits.summary_options {
+        if option.id.trim().is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "display maps `limits.summary_options[].id` must not be empty",
+            ));
+        }
+        if !ids.insert(option.id.as_str()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "display maps `limits.summary_options` contains duplicate id `{}`",
+                    option.id
+                ),
+            ));
+        }
+        if option.summary.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "display maps `limits.summary_options.{}` must include at least one window",
+                    option.id
+                ),
+            ));
+        }
+        selected_summary_is_available |= option.summary == limits.summary;
+    }
+
+    if !selected_summary_is_available {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "display maps `limits.summary` must match one configured `limits.summary_options[].summary`",
+        ));
+    }
+
     Ok(())
 }
 
@@ -364,6 +497,7 @@ mod tests {
         let maps = DisplayMapsConfig {
             limits: LimitsDisplayMapSelection {
                 summary: vec![LimitSummaryWindow::Primary, LimitSummaryWindow::Secondary],
+                summary_options: super::default_limit_summary_options(),
                 primary: "braille".to_string(),
                 secondary: "braille".to_string(),
             },
@@ -427,10 +561,32 @@ mod tests {
 
         let restored = restore_display_maps(&path).expect("display maps should restore");
         assert_eq!(restored.limits.summary, vec![LimitSummaryWindow::Primary]);
+        assert_eq!(restored.selected_limits_summary_option_id(), "primary");
         assert_eq!(restored.render_primary_limit_remaining(Some(1)), ".");
         assert_eq!(restored.render_primary_limit_remaining(Some(2)), "2%");
         assert_eq!(restored.render_secondary_limit_remaining(Some(2)), "2%");
         drop(std::fs::remove_file(path));
+    }
+
+    #[test]
+    fn configured_limit_summary_options_drive_selector_values() {
+        let mut maps = DisplayMapsConfig::default();
+
+        assert_eq!(
+            maps.selected_limits_summary_option_id(),
+            "primary_secondary"
+        );
+        assert_eq!(
+            maps.limits_summary_options()
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["primary", "primary_secondary"]
+        );
+        assert!(maps.set_limits_summary_by_option_id("primary"));
+        assert_eq!(maps.limits.summary, vec![LimitSummaryWindow::Primary]);
+        assert_eq!(maps.selected_limits_summary_option_id(), "primary");
+        assert!(!maps.set_limits_summary_by_option_id("missing"));
     }
 
     #[test]

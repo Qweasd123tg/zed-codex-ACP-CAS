@@ -81,7 +81,7 @@ pub(super) fn materialized_selector_layout(
         status: Some(materialized_selector_entry(
             layout.status.as_ref(),
             "Status",
-            &["status", "integrations", "actions"],
+            &["status"],
         )),
     }
 }

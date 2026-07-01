@@ -11,7 +11,7 @@ pub(super) fn display_maps_jsonc(config: &DisplayMapsConfig) -> io::Result<Vec<u
     let json = serde_json::to_string_pretty(config)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     let mut output = String::from(
-        "{\n  // Account limit display maps. Values receive percentages in the 0..100 range.\n  // limits.summary is an ordered list: [\"primary\"] or [\"primary\", \"secondary\"].\n",
+        "{\n  // Account limit display maps. Values receive percentages in the 0..100 range.\n  // limits.summary stores the selected summary option windows.\n  // limits.summary_options controls visible Status selector variants.\n",
     );
     let inner = json
         .trim_start_matches('{')

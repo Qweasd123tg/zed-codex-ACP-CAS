@@ -798,11 +798,7 @@ mod tests {
         );
         assert_eq!(
             layout.status.and_then(|entry| entry.groups),
-            Some(vec![
-                "status".to_string(),
-                "integrations".to_string(),
-                "actions".to_string()
-            ])
+            Some(vec!["status".to_string()])
         );
     }
 }

@@ -36,8 +36,6 @@ pub(super) use modes::{
 #[derive(Clone, Copy, Debug)]
 // Входные параметры для сборки списка session config options.
 pub(in crate::thread) struct ConfigOptionsInput<'a> {
-    pub(in crate::thread) workspace_cwd: &'a std::path::Path,
-    pub(in crate::thread) backend_cli_version: &'a str,
     pub(in crate::thread) models: &'a [AppModel],
     pub(in crate::thread) current_model: &'a str,
     pub(in crate::thread) current_service_tier: Option<ServiceTier>,
@@ -50,9 +48,6 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) approval: AppAskForApproval,
     pub(in crate::thread) sandbox: AppSandboxMode,
     pub(in crate::thread) collaboration_mode_kind: ModeKind,
-    pub(in crate::thread) account_status: &'a context::AccountStatus,
-    pub(in crate::thread) total_token_usage:
-        Option<&'a codex_app_server_protocol::TokenUsageBreakdown>,
     pub(in crate::thread) session_mcp_summary: &'a context::ContextSelectorSummary,
     pub(in crate::thread) session_skills_summary: &'a context::ContextSelectorSummary,
     pub(in crate::thread) session_plugins_summary: &'a context::ContextSelectorSummary,
@@ -61,8 +56,6 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
 
 pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOptionsInput<'_> {
     ConfigOptionsInput {
-        workspace_cwd: &inner.workspace_cwd,
-        backend_cli_version: &inner.backend_cli_version,
         models: &inner.models,
         current_model: &inner.current_model,
         current_service_tier: inner.service_tier,
@@ -74,8 +67,6 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         approval: inner.approval_policy,
         sandbox: inner.sandbox_mode,
         collaboration_mode_kind: inner.collaboration_mode_kind,
-        account_status: &inner.account_status,
-        total_token_usage: inner.total_token_usage.as_ref(),
         session_mcp_summary: &inner.session_mcp_summary,
         session_skills_summary: &inner.session_skills_summary,
         session_plugins_summary: &inner.session_plugins_summary,
@@ -85,8 +76,6 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
 
 pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfigOption> {
     let ConfigOptionsInput {
-        workspace_cwd,
-        backend_cli_version,
         models,
         current_model,
         current_service_tier,
@@ -98,8 +87,6 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         approval,
         sandbox,
         collaboration_mode_kind,
-        account_status,
-        total_token_usage,
         session_mcp_summary,
         session_skills_summary,
         session_plugins_summary,
@@ -202,19 +189,11 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         SessionConfigOption::select(
             "status",
             selector_name(selector_layout, "status", "Status"),
-            if compaction_in_progress {
-                context::STATUS_COMPACT_VALUE.to_string()
-            } else {
-                context::STATUS_LIMITS_VALUE.to_string()
-            },
+            context::status_current_value(display_maps, compaction_in_progress),
             apply_group_layout(
                 selector_layout,
                 "status",
                 context::status_control_option_groups(
-                    workspace_cwd,
-                    backend_cli_version,
-                    account_status,
-                    total_token_usage,
                     current_account_rate_limits,
                     display_maps,
                     compaction_in_progress,
@@ -224,16 +203,9 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 ),
             ),
         )
-        .description(context::full_status_report(
-            workspace_cwd,
-            backend_cli_version,
-            account_status,
-            total_token_usage,
+        .description(context::status_selector_description(
             current_account_rate_limits,
             display_maps,
-            session_mcp_summary,
-            session_skills_summary,
-            session_plugins_summary,
         )),
     ));
 
@@ -271,7 +243,7 @@ pub(super) use context::{
     AccountStatus, ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE,
     SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, STATUS_COMPACT_VALUE, STATUS_LIMITS_VALUE,
     build_account_status, build_mcp_summary, build_plugins_summary, build_skills_summary,
-    full_status_report,
+    full_status_report, parse_limits_summary_value,
 };
 pub(super) use fast_mode::{service_tier_override_from_config, service_tier_override_from_session};
 pub(super) use limits::{
@@ -332,13 +304,9 @@ mod tests {
             current_service_tier: Some(ServiceTier::Fast),
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
-            workspace_cwd: std::path::Path::new("/tmp/workspace"),
-            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            account_status: &Default::default(),
-            total_token_usage: None,
             session_mcp_summary: &Default::default(),
             session_skills_summary: &Default::default(),
             session_plugins_summary: &Default::default(),
@@ -400,7 +368,22 @@ mod tests {
         let SessionConfigKind::Select(select) = &status.kind else {
             panic!("status selector should be a select config option");
         };
-        assert_eq!(select.current_value.0.as_ref(), "limits_status");
+        assert_eq!(
+            select.current_value.0.as_ref(),
+            "limits_summary:primary_secondary"
+        );
+        let status_description = status
+            .description
+            .as_deref()
+            .expect("status selector has description");
+        assert_eq!(
+            status_description,
+            "5h -- · wk --\n5-hour: unavailable\nWeekly: unavailable"
+        );
+        assert!(!status_description.contains("MCP"));
+        assert!(!status_description.contains("Skills"));
+        assert!(!status_description.contains("Plugins"));
+        assert!(!status_description.contains("Session"));
         let SessionConfigSelectOptions::Grouped(groups) = &select.options else {
             panic!("status selector should use grouped options");
         };
@@ -411,8 +394,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Status", "Integrations", "Actions"]
         );
+        assert_eq!(groups[0].options.len(), 2);
         assert!(groups[0].options.iter().any(|option| {
-            option.value.0.as_ref() == "limits_status" && option.name == "5h -- · wk --"
+            option.value.0.as_ref() == "limits_summary:primary" && option.name == "5h --"
+        }));
+        assert!(groups[0].options.iter().any(|option| {
+            option.value.0.as_ref() == "limits_summary:primary_secondary"
+                && option.name == "5h -- · wk --"
         }));
         assert!(groups[2].options.iter().any(|option| {
             option.value.0.as_ref() == "compact_now" && option.name == "Compact now"
@@ -447,13 +435,9 @@ mod tests {
             current_service_tier: Some(ServiceTier::Fast),
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
-            workspace_cwd: std::path::Path::new("/tmp/workspace"),
-            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            account_status: &Default::default(),
-            total_token_usage: None,
             session_mcp_summary: &Default::default(),
             session_skills_summary: &Default::default(),
             session_plugins_summary: &Default::default(),
@@ -559,13 +543,9 @@ mod tests {
             current_service_tier: None,
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &model_selector,
-            workspace_cwd: std::path::Path::new("/tmp/workspace"),
-            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            account_status: &Default::default(),
-            total_token_usage: None,
             session_mcp_summary: &Default::default(),
             session_skills_summary: &Default::default(),
             session_plugins_summary: &Default::default(),
@@ -637,13 +617,9 @@ mod tests {
             current_service_tier: None,
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
-            workspace_cwd: std::path::Path::new("/tmp/workspace"),
-            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            account_status: &Default::default(),
-            total_token_usage: None,
             session_mcp_summary: &Default::default(),
             session_skills_summary: &Default::default(),
             session_plugins_summary: &Default::default(),
@@ -718,13 +694,9 @@ mod tests {
             current_service_tier: None,
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
-            workspace_cwd: std::path::Path::new("/tmp/workspace"),
-            backend_cli_version: "0.0.0",
             display_maps: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            account_status: &Default::default(),
-            total_token_usage: None,
             session_mcp_summary: &Default::default(),
             session_skills_summary: &Default::default(),
             session_plugins_summary: &Default::default(),

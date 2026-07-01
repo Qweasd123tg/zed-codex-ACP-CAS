@@ -4,6 +4,10 @@
   "limits": {
     // Compact Limits label windows. Use ["primary"] to hide weekly from the short label.
     "summary": ["primary", "secondary"],
+    "summary_options": [
+      { "id": "primary", "summary": ["primary"] },
+      { "id": "primary_secondary", "summary": ["primary", "secondary"] },
+    ],
     "primary": "five_hour_block",
     "secondary": "weekly_percent",
   },
