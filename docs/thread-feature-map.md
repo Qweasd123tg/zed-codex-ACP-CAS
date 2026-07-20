@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-05-18` (`session/fork` surfaced in `CodexAgent`, app-server transport split into reader/request-policy modules, `fast_mode` is surfaced as `Speed`, failed resume-by-id can recover through `thread/read` path discovery, and generated-image tool events are routed through `tool_events`).
+Обновлено: `2026-07-20` (`session/fork` surfaced in `CodexAgent`, app-server transport split into reader/request-policy modules, `fast_mode` is surfaced as `Speed`, failed resume-by-id can recover through `thread/read` path discovery, generated-image tool events are routed through `tool_events`, and the Codex config boundary accepts open reasoning-effort values).
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -17,6 +17,10 @@
 4. `src/thread/{prompt,notification,session,turn}/*` — вертикальные runtime-потоки.
 5. Текущий стиль зависимости: прямые импорты из конкретных подмодулей вместо зонтичных прокладок.
 
+Startup и config-load идут до ACP initialize: `src/lib.rs` загружает общий Codex
+`config.toml`, а `src/startup_diagnostics.rs` форматирует ошибку с версиями и путями.
+Проба backend `--version` best-effort, ограничена timeout и никогда не перезаписывает конфиг.
+
 ## 2) Главный runtime pipeline (live turn)
 
 ```mermaid
@@ -24,8 +28,6 @@ flowchart TD
     UserClient[User/Zed] --> PromptFlow[src/thread/prompt/flow.rs]
 
     PromptFlow --> PromptCommands[src/thread/prompt/commands.rs]
-    PromptFlow --> ResumeListing[src/thread/features/resume/listing.rs]
-    PromptFlow --> ResumeSelector[src/thread/features/resume/selector.rs]
     PromptFlow --> SessionControls[src/thread/features/session/controls.rs]
     PromptFlow --> SessionModes[src/thread/features/session/modes.rs]
     PromptFlow --> TurnExecution[src/thread/turn/execution.rs]
@@ -88,9 +90,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    PromptFlow[src/thread/prompt/flow.rs] --> ResumeSelector[src/thread/features/resume/selector.rs]
-    ResumeSelector --> ResumeApply[src/thread/features/resume/apply.rs]
-    ResumeApply --> Replay[src/thread/core/replay.rs]
+    SessionLoad[src/thread/session/view.rs] --> Replay[src/thread/core/replay.rs]
 
     Replay --> SessionReplay[src/thread/features/session/events.rs]
     Replay --> FileReplay[src/thread/features/file/events.rs]
@@ -100,17 +100,14 @@ flowchart LR
     Replay --> CollabReplay[src/thread/features/collab/render.rs]
 ```
 
-Смысл: после `/resume` UI по умолчанию восстанавливается теми же доменными ветками, что и в live-потоке.
-Для "тихого" переключения контекста без replay используется `/resume --no-history`.
-Для устойчивого повторного `/resume` в одной ACP-сессии transport-хвост app-server теперь санируется в `src/thread/features/resume/apply.rs`, а сам picker создается с уникальным `ToolCallId` в `src/thread/features/resume/selector.rs`.
-Смысл этой санитизации: stale notifications старого треда глушатся, stale server requests явно отклоняются ответом, а не теряются молча.
-Picker и `/threads` при этом предпочитают `thread.name`, если тред был явно переименован через `/rename`, и только потом показывают `preview`.
-После успешного `/resume` текущая ACP-сессия теперь сразу получает `SessionInfoUpdate` с `title` и `updated_at`, чтобы клиентский заголовок не застревал на последнем slash-prompt, а history/recent списки не деградировали в `Unknown`.
+Смысл: после native `load_session` / `resume_session` UI восстанавливается теми же доменными ветками, что и в live-потоке.
+Ручные slash-команды `/threads` и `/resume` удалены: thread history теперь должен идти через native Zed session lifecycle, а не через второй adapter-side picker поверх `thread/list` / `thread/resume`.
+Native Zed restore при этом предпочитает `thread.name`, если тред был явно переименован через `/rename`, и только потом показывает `preview`.
+После успешного restore текущая ACP-сессия получает `SessionInfoUpdate` с `title` и `updated_at`, чтобы history/recent списки не деградировали в `Unknown`.
 При этом live `ThreadNameUpdated` во время активного turn теперь не форсит ACP `title` мгновенно: автообновление имени буферизуется и публикуется уже после завершения turn, чтобы не сбивать client-side provisional-title / generating UX в `Zed`.
 При восстановлении history из Zed `load_session` / `resume_session` сначала идут через normal backend restore. `src/thread/session/lifecycle.rs` делает startup retry, затем пробует `thread/read(include_turns=false)` как path-discovery recovery и повторяет `thread/resume` по найденному rollout path. Если backend всё равно отвечает `no rollout found`, `src/codex_agent.rs` считает это невозможным restore для данной Zed history row и поднимает fresh backend-thread под тем же ACP session handle без history replay. Остальные ошибки restore не скрываются этим fallback.
 Для `load_session` и `/undo` history replay теперь дополнительно fenced через `history_replay_in_progress`: pending-состояние выставляется заранее в `src/codex_agent.rs` / `src/thread/session/view.rs`, а `src/thread/prompt/flow.rs` не пускает новый prompt или session command, пока `src/thread/core/replay.rs` ещё восстанавливает историю.
 Это же позволяет не держать `ThreadInner` mutex во время тяжёлого `/undo` replay: `thread_rollback`, label-cache warmup и snapshot нужных полей остаются под lock, а сам `replay::replay_turns(...)` идёт уже после выхода из критической секции.
-Тот же паттерн теперь применён и к `/resume --history`: selector остаётся тонким, а `src/thread/features/resume/apply.rs` под lock делает transport scrub, `thread_resume`, runtime state sync и snapshot replay-данных, после чего history replay идёт уже вне общего mutex под тем же `history_replay_in_progress` fence.
 При включённом `ACP_DISABLE_AUTO_RESTORE=1` `src/codex_agent.rs` подавляет только самый ранний startup-driven backend-restore в небольшом окне после старта агента: вместо него поднимается fresh backend-thread под тем же ACP session handle. Более поздние явные открытия из history снова идут через нормальный restore-path.
 Для `new_session` / `load_session` / `resume_session` skills summary, account status и rate limits теперь не держат критический startup path до первого ready-thread: `src/thread/session/lifecycle.rs` инициализирует сессию placeholder-значениями, а `src/thread/session/view.rs` сразу после первого session response догружает эти метаданные и шлет `ConfigOptionUpdate`.
 Важно: старые сообщения, уже показанные ACP-клиентом, при этом не очищаются — это ограничение UI/API клиента, а не replay-пайплайна адаптера.
@@ -138,7 +135,7 @@ flowchart LR
 Текущий протокольный контракт в коде:
 - `CollabAgentTool`: `SpawnAgent`, `SendInput`, `ResumeAgent`, `Wait`, `CloseAgent`.
 - `CollabAgentToolCallStatus`: `InProgress`, `Completed`, `Failed`.
-- `CollabAgentStatus`: `PendingInit`, `Running`, `Completed`, `Errored`, `Shutdown`, `NotFound`.
+- `CollabAgentStatus`: `PendingInit`, `Running`, `Interrupted`, `Completed`, `Errored`, `Shutdown`, `NotFound`.
 
 Если upstream расширяет этот контракт, менять вместе:
 - `src/thread/features/collab/render.rs` для title/kind/live/replay поведения;
@@ -215,17 +212,17 @@ flowchart LR
 - С `0.26.0` этот lifecycle-набор также обслуживает ACP `session/delete`: активная загруженная сессия удаляет текущий backend thread через `Thread::delete_backend_thread`,
   а unloaded history delete запускает короткий app-server и вызывает `thread/delete` по ACP `session_id` / backend `thread_id`.
 - UX `Speed` теперь surfaced внутри grouped `Model` selector, но относится к тому же lifecycle-набору: backend-поле `service_tier` хранится в `ThreadInner`, попадает в `thread/start` / `thread/resume` / `thread/fork`,
-  синхронизируется после in-place `/resume` и `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
+  синхронизируется после native resume и in-place `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
 - Нижние selectors `Model`, `Permissions` и `Status` используют тот же session/config lifecycle. В текущем `Zed` descriptions у config options
   рендерятся как обычный text label, не Markdown, поэтому adapter-side UX держится на коротких option names и ACP grouped select options:
   `Model` делит пункты на `Models`, `Effort`, `Speed`, `Permissions` — на workflow, guarded и bypass режимы, `Status` — на status, integrations и actions.
   У ACP select есть только один `current_value`, поэтому выбранные nested пункты `Reasoning`/`Speed` помечаются adapter-side через `★` в option label.
 - `~/.codex-cas/selector-preferences.json` теперь читается как JSONC: `//` и `/* ... */` комментарии допустимы, trailing commas тоже поддерживаются. Существующий битый файл считается ошибкой старта session, а не поводом откатиться к defaults или переписать ручной конфиг. Новый generated формат разложен на секции `defaults`, `model_selector`, `layout`, `slash_commands`. `CODEX_CAS_HOME` может переопределить adapter-owned directory; старые `$CODEX_HOME/codex-acp/` и `$CODEX_HOME/memories/codex-acp/` пути больше не сканируются на старте. `defaults` задает `model`, `reasoning_effort` и `service_tier`; выбор model/effort/speed через selector сохраняется как default. Account limit labels вынесены в отдельный `~/.codex-cas/display-maps.json`; `limits.summary` хранит выбранные окна, а `limits.summary_options` задает видимые варианты в нижнем `Status` selector (`5h` или `5h + wk` по умолчанию). Готовые примеры limit `text` / `bars` / `block` вариантов лежат в `examples/display-maps/` и проверяются тестом loader-а. Partial `exact`/`thresholds` карты должны явно задавать `fallback`, иначе config считается ошибочным.
-- `model_selector.models` и `model_selector.reasoning_efforts` теперь ordered lists: строка есть в списке — пункт visible, строка закомментирована — пункт hidden, порядок строк задает порядок меню. `models` поддерживает строковый id (`"gpt-5.4"`) и объект `{ "id": "gpt-5.5", "name": "...", "description": "..." }`; `reasoning_efforts` поддерживает effort id (`"high"`) и объект `{ "id": "high", "name": "...", "description": "..." }`. `name` переопределяет короткое имя пункта в selector, `description` — hover/description, поэтому локальный перевод можно держать в config без runtime-веток. Текущая model/effort все равно остается видимой, чтобы ACP `currentValue` не указывал на отсутствующий option. `none` / `minimal` могут быть явно включены как protocol/experimental effort-пункты даже если текущий backend model list их не рекламирует; backend все еще может отклонить неподдержанную комбинацию. По live-проверке `none` отвечает, а `minimal` падает при включенных `image_gen` / `web_search`, потому что backend возвращает invalid-request для tools + `reasoning.effort = "minimal"`.
+- `model_selector.models` и `model_selector.reasoning_efforts` — ordered lists: наличие и порядок строк управляют видимостью и порядком меню. `models` поддерживает строковый id и объект `{ "id", "name", "description" }`; `reasoning_efforts` — effort id или такой же объект с override-ами. Adapter запрашивает полный model catalog с `includeHidden`, но пустой/default `models` фильтрует backend-hidden модели; hidden model появляется только при явном id в списке. `ReasoningEffort` — открытая непустая строка: `max` и `ultra` известны текущему baseline, а будущее значение хранится как `Custom(String)` и уходит в wire/config без подмены. `Custom` — имя Rust-варианта, а не литерал конфига. Текущая model/effort всегда остается видимой, чтобы ACP `currentValue` имел matching option. Явно настроенное значение можно surfaced без backend advertisement; конкретная модель всё еще может его отклонить. Правки этого контракта должны совместно проверять `config/reasoning.rs`, `config/model_selector.rs`, `selector_preferences.rs`, `selector_preferences/materialize.rs` и `settings.rs`.
 - `Plan` intentionally живет внутри `Permissions` selector: при выборе `Plan` кнопка показывает `Plan`, но sandbox/approval профиль сохраняется; выбор `Read only` / `Workspace` / `Full access` возвращает session в default chat mode и обновляет permission profile.
 - `Permissions` selector intentionally mirrors real `codex app-server` presets only. Adapter-side `Ask edits` не surfaced: если backend прислал `FileChangeRequestApproval`, адаптер всегда показывает confirmation popup, а не auto-accept; если backend не просит approval для workspace-write edits, адаптер не обещает искусственный per-edit режим.
 - Planned `Auto-review` permission UX не должен смешиваться с bypass: это отдельный guarded/workspace-write режим рядом с `Workspace`, который меняет reviewer/routing approval-запросов на auto-reviewer subagent. Для реализации нужны protocol fields вроде `ApprovalsReviewer::AutoReview`, прокидывание policy через session/turn params и отдельный render lifecycle для `item/autoApprovalReview/*`.
-- Старые context usage display modes удалены после появления нативного Zed context donut для external ACP agents. Нижний `Status` selector по умолчанию показывает только limit-варианты, а группы `integrations` и `actions` можно вернуть через `selector-preferences.json`.
+- Старые context usage display modes удалены после появления нативного Zed context donut для external ACP agents. Нижний `Status` selector по умолчанию снова показывает limit-варианты, `Session`/`MCP`/`Skills`/`Plugins` и action `Compact now`; `selector-preferences.json` можно использовать только если нужно явно сузить или переупорядочить группы.
 - `/status` использует компактную структуру `Limits`, `Session`, `Integrations`; context usage не дублируется, потому что Zed показывает его через native donut из ACP `usage_update`.
 - Hover/description у самих selectors собирается из текущего runtime state: `Permissions` показывает active workflow и сохраненный sandbox/approval профиль, `Model` — текущие model/reasoning/speed, `Status` — только выбранную limit-сводку и reset-время. Полный status report с `Session` и `Integrations` остается в `/status`, чтобы hover нижнего selector-а не превращался в длинный MCP/Skills/Plugins dump.
 - Account limit labels идут через `~/.codex-cas/display-maps.json` как `percent -> label` maps; `limits.summary_options` управляет visible вариантами `Status`, а `limits.summary` хранит текущий выбранный ordered-list (`["primary"]` или `["primary", "secondary"]`). Model labels берутся из `model_selector.models[*].name`, effort labels/descriptions — из `model_selector.reasoning_efforts[*].name` / `description`; если override не задан, используются backend/code defaults. Отдельных model-prefix, effort-icon, speed-glyph и context-display style layers больше нет.
@@ -299,18 +296,18 @@ Startup/resume/thread-switch snapshots account rate limits должны толь
 - `src/thread/prompt/flow.rs`
 - `src/codex_agent.rs`
 
-Риск: после `/resume` не сброшено turn-transient состояние.
-Отдельный риск: transport-хвост старого треда может мешать следующему `/resume`, если не синхронизировать `apply.rs`, `app_server.rs` и pre-command routing в `prompt/flow.rs`. Опасный вариант здесь — blind drop request-ов; текущая версия этого уже не делает.
+Риск: после native resume/thread switch не сброшено turn-transient состояние.
+Отдельный риск: transport-хвост старого треда может мешать следующему restore/switch, если не синхронизировать `app_server.rs`, `session/lifecycle.rs` и `prompt/flow.rs`. Опасный вариант здесь — blind drop request-ов; текущая версия этого уже не делает.
 Ещё один риск: вынести `replay::replay_turns(...)` из-под общего mutex без replay fence. Если менять `session/settings.rs`, `session/view.rs`, `codex_agent.rs` или pre-command gating в `prompt/flow.rs` несогласованно, легко снова получить overlapping replay и новый prompt в одной ACP-сессии.
-Для `/resume --history` к этому добавляется порядок pre-command routing: gate по `history_replay_in_progress` должен стоять раньше background drain, иначе новый prompt может проскочить в окно между unlock и началом replay.
+Для history replay к этому добавляется порядок pre-command routing: gate по `history_replay_in_progress` должен стоять раньше background drain, иначе новый prompt может проскочить в окно между unlock и началом replay.
 Фоновый drain перед новым prompt тоже должен считаться transport-scrub, а не обычной live dispatch-веткой: если cleanup упёрся в timeout/message cap, это лучше явно логировать, иначе хвост выглядит как случайный UI-глюк. Текущая безопасная политика здесь — `drain until quiet` с short quiet streak, общим deadline и большим safety ceiling, а не blind stop после `64` сообщений или первого микротаймаута.
 
-### Turn diff writeback
+### Turn diff reporting and watcher sync
 - `src/thread/turn/diff.rs`
 - `src/thread/turn/execution.rs`
 
-Риск: финальный `turn diff` historically держал `ThreadInner` mutex через `send_tool_call_update(...)`, `read_file_text(...)` и `write_text_file(...)`, а это уже на завершении turn ощущалось как лишний хвостовой фриз. Текущая безопасная граница здесь такая: `latest_turn_diff`, `started_tool_calls` и dedupe по `file_change_paths_this_turn` / `synced_paths_this_turn` снимаются в snapshot под lock, а сам ACP update идет уже после unlock через fast-path `TurnCompleted` в `src/thread/turn/execution.rs`. ACP buffer writeback тоже идет после unlock и может быть отключен через `CODEX_ACP_DISABLE_SYNC_EDIT_BUFFERS=1`, если локально начинает гоняться с Zed file watcher на уже измененных файлах. Отдельная инварианта: turn-diff writeback не должен повторно синкать пути, уже зарезервированные file-change lifecycle в том же turn.
-`Turn diff` locations для Zed Follow должны включать не только path, но и первый hunk line, когда unified diff дает такую строку. Это держится в `src/thread/turn/diff.rs` рядом с `parse_turn_unified_diff_files(...)`, чтобы preview/writeback и Follow не расходились по тому, какой файл считается затронутым.
+Риск: финальный `turn diff` historically держал `ThreadInner` mutex через `send_tool_call_update(...)`, disk read и client-side full-buffer writeback, а это давало лишний хвостовой фриз и неустранимое TOCTOU-окно. Stable ACP `fs/write_text_file` не принимает expected revision/CAS, а Zed применяет best-effort anchored diff и затем сохраняет buffer без atomic mismatch. Поэтому текущая безопасная граница строже: `latest_turn_diff`, `started_tool_calls` и dedupe по `file_change_paths_this_turn` снимаются в snapshot под lock, сам ACP update идет после unlock через fast-path `TurnCompleted`, а никакого adapter-side `fs/read_text_file` / `fs/write_text_file` после backend edit больше нет. Codex меняет диск, адаптер публикует transcript diff, native Zed watcher reload-ит clean buffer и сохраняет unsaved dirty buffer как conflict. Второй read не считается защитой от гонки.
+`Turn diff` locations для Zed Follow должны включать не только path, но и первый hunk line, когда unified diff дает такую строку. Это держится в `src/thread/turn/diff.rs` рядом с `parse_turn_unified_diff_files(...)`, чтобы transcript preview и Follow не расходились по тому, какой файл считается затронутым.
 
 ### File-change lifecycle
 - `src/thread/features/file/events.rs`
@@ -318,9 +315,9 @@ Startup/resume/thread-switch snapshots account rate limits должны толь
 - `src/thread/features/approvals/file_change.rs`
 - `src/thread/turn/diff.rs`
 
-Риск: repeated disk I/O и ACP snapshot/writeback churn на одном и том же path. Даже до большого refactor здесь важно не читать, prime-ить и writeback-ить один и тот же файл по нескольку раз в рамках одного `FileChange` item, иначе multi-hunk edits начинают выглядеть как локальный фриз.
-Текущая безопасная граница для `started`-фазы такая: `started_changes`, `locations`, `file_change_paths_this_turn` и `before_contents` публикуются атомарно под lock, а `send_tool_call(...)` и `prime_file_snapshot(...)` идут уже после unlock по immutable snapshot.
-Для `completed`-фазы теперь используется тот же split: `before_contents` и per-item cleanup снимаются под lock, а финальный diff/update идет уже после unlock через fast-path в `src/thread/turn/execution.rs`. Дополнительный `write_text_file(...)` тоже идет после unlock, если клиент поддерживает этот ACP capability и writeback не отключен через `CODEX_ACP_DISABLE_SYNC_EDIT_BUFFERS=1`. Отдельная инварианта здесь: `file_change_paths_this_turn` остаётся turn-reservation до `reset_turn_transient_state()`, а поздний writeback не должен помечать `synced_paths_this_turn` уже в следующем turn, поэтому post-writeback relock обязан перепроверять `active_turn_id`.
+Риск: repeated disk I/O и дублирование transcript diff на одном и том же path. В одном `FileChange` item одинаковый файл нужно читать и показывать один раз, иначе multi-hunk edits выглядят как локальный фриз и несколько независимых правок.
+Текущая безопасная граница для `started`-фазы такая: `started_changes`, `locations`, `file_change_paths_this_turn` и `before_contents` публикуются атомарно под lock, а `send_tool_call(...)` идет уже после unlock по immutable snapshot. Client filesystem snapshot здесь больше не праймится.
+Для `completed`-фазы используется тот же split: `before_contents` и per-item cleanup снимаются под lock, а финальный diff/update идет уже после unlock через fast-path в `src/thread/turn/execution.rs`. Completed `FileChange` не делает дополнительный `write_text_file(...)`: внешняя правка уже применена на диске, а повторная full-buffer запись в открытый Zed buffer может затереть dirty text, снова запустить formatter или воскресить renamed/deleted path. `file_change_paths_this_turn` остаётся до `reset_turn_transient_state()` только для transcript dedupe между `FileChange` и aggregated `TurnDiff`.
 
 ### Approval wait paths
 - `src/thread/features/approvals/file_change.rs`
@@ -350,7 +347,7 @@ Command approval title не должен оставаться generic `Details` 
 | `src/thread/features/notification/*` | Доменные обработчики notification-событий, включая usage/reconnect/warning forwarding |
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
 | `src/thread/prompt/*` | Парсинг slash-команд, fixed prompt-turn override-ы (`/init`, `/plan <prompt>`), routing в review/session-turn flow |
-| `src/thread/features/resume/*` | `/threads`, `/resume` (`--no-history`), выбор и применение thread, transport scrub при переключении |
+| `src/thread/features/resume/*` | Общие helper-ы thread-list based workflows: форматирование названий/времени и paginated list для archive/unarchive |
 | `src/thread/session/config/*` | Runtime построение lower selectors, permission/model/context групп, layout ordering и formatter-ы статусов |
 | `src/thread/session/selector_preferences*` | Schema, materialization, persistence и JSONC parser/writer для `~/.codex-cas/selector-preferences.json` |
 | `src/thread/session/display_maps*` | Schema, materialization, persistence и JSONC parser/writer для `~/.codex-cas/display-maps.json` |

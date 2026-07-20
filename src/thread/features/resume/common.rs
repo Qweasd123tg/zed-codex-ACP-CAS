@@ -1,20 +1,11 @@
-//! Общие helper-ы для `/threads` и `/resume`: чтение paginated thread list и общие formatters.
+//! Общие helper-ы для thread-list based workflows: paginated list и formatters.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_client_protocol::Error;
-use codex_app_server_protocol::{Thread, ThreadListParams, ThreadSortKey};
+use codex_app_server_protocol::{Thread, ThreadListCwdFilter, ThreadListParams, ThreadSortKey};
 
 use crate::thread::ThreadInner;
-
-pub(in crate::thread) async fn list_all_threads(
-    inner: &mut ThreadInner,
-    sort_key: ThreadSortKey,
-    cwd: Option<String>,
-    search_term: Option<String>,
-) -> Result<Vec<Thread>, Error> {
-    list_all_threads_with_archived(inner, sort_key, cwd, search_term, false).await
-}
 
 pub(in crate::thread) async fn list_all_threads_with_archived(
     inner: &mut ThreadInner,
@@ -35,11 +26,15 @@ pub(in crate::thread) async fn list_all_threads_with_archived(
                 cursor: cursor.take(),
                 limit: Some(100),
                 sort_key: Some(sort_key),
+                sort_direction: None,
                 model_providers: None,
                 source_kinds: None,
                 archived: Some(archived),
-                cwd: cwd.clone(),
+                cwd: cwd.clone().map(ThreadListCwdFilter::One),
+                use_state_db_only: false,
                 search_term: search_term.clone(),
+                parent_thread_id: None,
+                ancestor_thread_id: None,
             })
             .await?;
 

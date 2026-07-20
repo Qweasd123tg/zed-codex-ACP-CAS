@@ -1,11 +1,13 @@
 //! Маппинг конфигурации сессии между ACP-опциями и runtime-настройками Codex app-server.
 
+use std::path::Path;
+
 use crate::thread::session_selector_preferences::{
     ModelSelectorPreferences, SelectorLayoutPreferences,
 };
 use crate::thread::{
     AppAskForApproval, AppModel, AppSandboxMode, ModeKind, PLAN_SESSION_MODE_ID, ReasoningEffort,
-    ServiceTier, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectGroup,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectGroup,
     SessionConfigSelectOption, ThreadInner,
 };
 
@@ -33,15 +35,18 @@ pub(super) use modes::{
     policy_to_mode, to_app_approval, to_app_sandbox_mode,
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 // Входные параметры для сборки списка session config options.
 pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) models: &'a [AppModel],
     pub(in crate::thread) current_model: &'a str,
-    pub(in crate::thread) current_service_tier: Option<ServiceTier>,
+    pub(in crate::thread) current_service_tier: Option<String>,
     pub(in crate::thread) current_reasoning_effort: ReasoningEffort,
     pub(in crate::thread) model_selector: &'a ModelSelectorPreferences,
     pub(in crate::thread) display_maps: &'a crate::thread::session_display_maps::DisplayMapsConfig,
+    pub(in crate::thread) workspace_cwd: &'a Path,
+    pub(in crate::thread) backend_cli_version: &'a str,
+    pub(in crate::thread) account_status: &'a context::AccountStatus,
     pub(in crate::thread) current_account_rate_limits:
         Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
     pub(in crate::thread) compaction_in_progress: bool,
@@ -58,10 +63,13 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
     ConfigOptionsInput {
         models: &inner.models,
         current_model: &inner.current_model,
-        current_service_tier: inner.service_tier,
-        current_reasoning_effort: inner.reasoning_effort,
+        current_service_tier: inner.service_tier.clone(),
+        current_reasoning_effort: inner.reasoning_effort.clone(),
         model_selector: &inner.model_selector,
         display_maps: &inner.display_maps,
+        workspace_cwd: &inner.workspace_cwd,
+        backend_cli_version: &inner.backend_cli_version,
+        account_status: &inner.account_status,
         current_account_rate_limits: inner.account_rate_limits.as_ref(),
         compaction_in_progress: inner.compaction_in_progress,
         approval: inner.approval_policy,
@@ -82,6 +90,9 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         current_reasoning_effort,
         model_selector,
         display_maps,
+        workspace_cwd,
+        backend_cli_version,
+        account_status,
         current_account_rate_limits,
         compaction_in_progress,
         approval,
@@ -93,7 +104,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         selector_layout,
     } = input;
 
-    let current_permissions_id = current_permission_mode_id(approval, sandbox);
+    let current_permissions_id = current_permission_mode_id(approval, sandbox, workspace_cwd);
     let current_permissions_value = if collaboration_mode_kind == ModeKind::Plan {
         PLAN_SESSION_MODE_ID.to_string()
     } else {
@@ -152,6 +163,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
             approval,
             sandbox,
             collaboration_mode_kind,
+            workspace_cwd,
         )),
     ));
 
@@ -168,9 +180,9 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                     models,
                     current_model_entry,
                     current_model_id: &current_model_id,
-                    current_reasoning_effort,
+                    current_reasoning_effort: current_reasoning_effort.clone(),
                     model_selector,
-                    current_service_tier,
+                    current_service_tier: current_service_tier.clone(),
                 }),
             ),
         )
@@ -178,8 +190,8 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         .description(model_selector_description(
             current_model_entry,
             &current_model_id,
-            current_reasoning_effort,
-            current_service_tier,
+            &current_reasoning_effort,
+            current_service_tier.as_deref(),
             model_selector,
         )),
     ));
@@ -196,6 +208,9 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 context::status_control_option_groups(
                     current_account_rate_limits,
                     display_maps,
+                    workspace_cwd,
+                    backend_cli_version,
+                    account_status,
                     compaction_in_progress,
                     session_mcp_summary,
                     session_skills_summary,
@@ -216,9 +231,11 @@ fn current_permission_description(
     approval: AppAskForApproval,
     sandbox: AppSandboxMode,
     collaboration_mode_kind: ModeKind,
+    workspace_cwd: &Path,
 ) -> String {
-    let permission_description = current_permission_mode_description(approval, sandbox)
-        .unwrap_or_else(|| "Choose file edit and sandbox permission behavior".to_string());
+    let permission_description =
+        current_permission_mode_description(approval, sandbox, workspace_cwd)
+            .unwrap_or_else(|| "Choose file edit and sandbox permission behavior".to_string());
     if collaboration_mode_kind == ModeKind::Plan {
         return format!(
             "Plan-first mode with visible step tracking.\nPermissions: {permission_description}"
@@ -231,8 +248,9 @@ fn current_permission_description(
 fn current_permission_mode_description(
     approval: AppAskForApproval,
     sandbox: AppSandboxMode,
+    workspace_cwd: &Path,
 ) -> Option<String> {
-    let current_permissions_id = current_permission_mode_id(approval, sandbox);
+    let current_permissions_id = current_permission_mode_id(approval, sandbox, workspace_cwd);
     permission_modes()
         .into_iter()
         .find(|mode| mode.id == current_permissions_id)
@@ -268,13 +286,13 @@ mod tests {
         ModelSelectorReasoningEffortDetails, ModelSelectorReasoningEffortEntry,
         SelectorLayoutEntry, SelectorLayoutPreferences,
     };
-    use crate::thread::{
-        AppAskForApproval, AppModel, AppSandboxMode, ModeKind, ReasoningEffort, ServiceTier,
-    };
+    use crate::thread::{AppAskForApproval, AppModel, AppSandboxMode, ModeKind, ReasoningEffort};
     use agent_client_protocol::schema::v1::{
         SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
     };
-    use codex_app_server_protocol::ReasoningEffortOption;
+    use codex_app_server_protocol::{Account, ReasoningEffortOption};
+    use codex_protocol::account::PlanType;
+    use std::path::Path;
 
     #[test]
     fn model_selector_uses_backend_model_names_by_default() {
@@ -288,23 +306,47 @@ mod tests {
             display_name: "GPT-5.5".to_string(),
             description: "Frontier model".to_string(),
             hidden: false,
-            supported_reasoning_efforts: vec![ReasoningEffortOption {
-                reasoning_effort: ReasoningEffort::High,
-                description: "Deeper reasoning".to_string(),
-            }],
+            supported_reasoning_efforts: vec![
+                ReasoningEffortOption {
+                    reasoning_effort: ReasoningEffort::High,
+                    description: "Deeper reasoning".to_string(),
+                },
+                ReasoningEffortOption {
+                    reasoning_effort: ReasoningEffort::Max,
+                    description: "Maximum reasoning".to_string(),
+                },
+                ReasoningEffortOption {
+                    reasoning_effort: ReasoningEffort::Ultra,
+                    description: "Proactive delegation".to_string(),
+                },
+                ReasoningEffortOption {
+                    reasoning_effort: ReasoningEffort::Custom("future-effort".to_string()),
+                    description: "Future backend effort".to_string(),
+                },
+            ],
             default_reasoning_effort: ReasoningEffort::High,
             input_modalities: Vec::new(),
             supports_personality: false,
+            additional_speed_tiers: Vec::new(),
+            service_tiers: Vec::new(),
+            default_service_tier: None,
             is_default: true,
         }];
+        let account_status = super::build_account_status(Some(Account::Chatgpt {
+            email: Some("tester@example.com".to_string()),
+            plan_type: PlanType::Team,
+        }));
 
         let options = config_options(ConfigOptionsInput {
             models: &models,
             current_model: "gpt-5.5",
-            current_service_tier: Some(ServiceTier::Fast),
+            current_service_tier: Some("fast".to_string()),
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
             display_maps: &Default::default(),
+            workspace_cwd: Path::new("/workspace/project"),
+            backend_cli_version: "0.142.5",
+            account_status: &account_status,
             current_account_rate_limits: None,
             compaction_in_progress: false,
             session_mcp_summary: &Default::default(),
@@ -357,6 +399,19 @@ mod tests {
         assert!(groups[1].options.iter().any(|option| {
             option.value.0.as_ref() == "reasoning:high" && option.name == "★ High"
         }));
+        assert_eq!(
+            groups[1]
+                .options
+                .iter()
+                .map(|option| option.value.0.as_ref())
+                .collect::<Vec<_>>(),
+            vec![
+                "reasoning:high",
+                "reasoning:max",
+                "reasoning:ultra",
+                "reasoning:future-effort",
+            ]
+        );
         assert!(groups[2].options.iter().any(|option| {
             option.value.0.as_ref() == "speed:fast" && option.name == "★ Fast"
         }));
@@ -394,7 +449,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Status", "Integrations", "Actions"]
         );
-        assert_eq!(groups[0].options.len(), 2);
+        assert_eq!(groups[0].options.len(), 3);
         assert!(groups[0].options.iter().any(|option| {
             option.value.0.as_ref() == "limits_summary:primary" && option.name == "5h --"
         }));
@@ -402,6 +457,24 @@ mod tests {
             option.value.0.as_ref() == "limits_summary:primary_secondary"
                 && option.name == "5h -- · wk --"
         }));
+        assert!(groups[0].options.iter().any(|option| {
+            option.value.0.as_ref() == "session_status" && option.name == "Session"
+        }));
+        let session_option = groups[0]
+            .options
+            .iter()
+            .find(|option| option.value.0.as_ref() == "session_status")
+            .expect("session option exists");
+        assert_eq!(
+            session_option.description.as_deref(),
+            Some(concat!(
+                "Adapter: codex-acp-cas ",
+                env!("CARGO_PKG_VERSION"),
+                "\nBackend: codex 0.142.5",
+                "\nWorkspace: /workspace/project",
+                "\nAccount: tester@example.com · ChatGPT Team"
+            ))
+        );
         assert!(groups[2].options.iter().any(|option| {
             option.value.0.as_ref() == "compact_now" && option.name == "Compact now"
         }));
@@ -426,16 +499,22 @@ mod tests {
             default_reasoning_effort: ReasoningEffort::High,
             input_modalities: Vec::new(),
             supports_personality: false,
+            additional_speed_tiers: Vec::new(),
+            service_tiers: Vec::new(),
+            default_service_tier: None,
             is_default: true,
         }];
 
         let options = config_options(ConfigOptionsInput {
             models: &models,
             current_model: "gpt-5.5",
-            current_service_tier: Some(ServiceTier::Fast),
+            current_service_tier: Some("fast".to_string()),
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
             display_maps: &Default::default(),
+            workspace_cwd: Path::new("/tmp/workspace"),
+            backend_cli_version: "0.0.0",
+            account_status: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
             session_mcp_summary: &Default::default(),
@@ -518,6 +597,9 @@ mod tests {
                 default_reasoning_effort: ReasoningEffort::High,
                 input_modalities: Vec::new(),
                 supports_personality: false,
+                additional_speed_tiers: Vec::new(),
+                service_tiers: Vec::new(),
+                default_service_tier: None,
                 is_default: true,
             },
             AppModel {
@@ -533,6 +615,9 @@ mod tests {
                 default_reasoning_effort: ReasoningEffort::Medium,
                 input_modalities: Vec::new(),
                 supports_personality: false,
+                additional_speed_tiers: Vec::new(),
+                service_tiers: Vec::new(),
+                default_service_tier: None,
                 is_default: false,
             },
         ];
@@ -544,6 +629,9 @@ mod tests {
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &model_selector,
             display_maps: &Default::default(),
+            workspace_cwd: Path::new("/tmp/workspace"),
+            backend_cli_version: "0.0.0",
+            account_status: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
             session_mcp_summary: &Default::default(),
@@ -596,12 +684,17 @@ mod tests {
     #[test]
     fn model_selector_composite_values_parse_back_to_settings() {
         assert_eq!(
-            parse_model_reasoning_value(&model_reasoning_value(ReasoningEffort::XHigh)),
+            parse_model_reasoning_value(&model_reasoning_value(&ReasoningEffort::XHigh)),
             Some(ReasoningEffort::XHigh)
         );
         assert_eq!(
             parse_model_speed_value(&model_speed_value("flex")),
-            Some(Some(ServiceTier::Flex))
+            Some(Some("flex".to_string()))
+        );
+        let custom = ReasoningEffort::Custom("future-effort".to_string());
+        assert_eq!(
+            parse_model_reasoning_value(&model_reasoning_value(&custom)),
+            Some(custom)
         );
         assert_eq!(parse_model_reasoning_value("gpt-5.5"), None);
         assert_eq!(parse_model_speed_value("gpt-5.5"), None);
@@ -618,6 +711,9 @@ mod tests {
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
             display_maps: &Default::default(),
+            workspace_cwd: Path::new("/tmp/workspace"),
+            backend_cli_version: "0.0.0",
+            account_status: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
             session_mcp_summary: &Default::default(),
@@ -695,6 +791,9 @@ mod tests {
             current_reasoning_effort: ReasoningEffort::High,
             model_selector: &Default::default(),
             display_maps: &Default::default(),
+            workspace_cwd: Path::new("/tmp/workspace"),
+            backend_cli_version: "0.0.0",
+            account_status: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
             session_mcp_summary: &Default::default(),

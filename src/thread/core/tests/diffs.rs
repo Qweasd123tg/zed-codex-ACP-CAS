@@ -116,6 +116,48 @@ diff --git \"a/src/space file.txt\" \"b/src/space file.txt\"
 }
 
 #[test]
+fn parse_turn_unified_diff_files_preserves_missing_final_newline() {
+    let diff = "\
+diff --git a/src/no-newline.txt b/src/no-newline.txt
+--- a/src/no-newline.txt
++++ b/src/no-newline.txt
+@@ -1 +1 @@
+-before
+\\ No newline at end of file
++after
+\\ No newline at end of file
+";
+
+    let files = parse_turn_unified_diff_files(diff);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, PathBuf::from("src/no-newline.txt"));
+    assert_eq!(files[0].old_text, "before");
+    assert_eq!(files[0].new_text, "after");
+}
+
+#[test]
+fn parse_turn_unified_diff_files_uses_rename_target_path() {
+    let diff = "\
+diff --git a/src/old_name.txt b/src/new_name.txt
+similarity index 50%
+rename from src/old_name.txt
+rename to src/new_name.txt
+--- a/src/old_name.txt
++++ b/src/new_name.txt
+@@ -1 +1 @@
+-before
++after
+";
+
+    let files = parse_turn_unified_diff_files(diff);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, PathBuf::from("src/new_name.txt"));
+    assert_eq!(files[0].old_text, "before\n");
+    assert_eq!(files[0].new_text, "after\n");
+    assert!(!files[0].is_delete);
+}
+
+#[test]
 fn parse_turn_unified_diff_files_ignores_sections_without_hunks() {
     let diff = "\
 diff --git a/src/example.txt b/src/example.txt

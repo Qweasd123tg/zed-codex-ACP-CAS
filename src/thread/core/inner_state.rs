@@ -24,7 +24,6 @@ impl ThreadInner {
         self.file_change_before_contents.clear();
         self.latest_turn_diff = None;
         self.file_change_paths_this_turn.clear();
-        self.synced_paths_this_turn.clear();
         self.last_plan_steps.clear();
         self.pending_thread_title_update = None;
         self.turn_last_progress_at = std::time::Instant::now();
@@ -108,9 +107,13 @@ impl ThreadInner {
         preset: &ApprovalPreset,
         collaboration_mode_kind: ModeKind,
     ) {
+        let sandbox = preset
+            .permission_profile
+            .to_legacy_sandbox_policy(&self.workspace_cwd)
+            .expect("built-in permission profile must convert to legacy sandbox policy");
         self.approval_policy = to_app_approval(preset.approval);
-        self.sandbox_policy = AppSandboxPolicy::from(preset.sandbox.clone());
-        self.sandbox_mode = to_app_sandbox_mode(&preset.sandbox);
+        self.sandbox_policy = AppSandboxPolicy::from(sandbox.clone());
+        self.sandbox_mode = to_app_sandbox_mode(&sandbox);
         self.collaboration_mode_kind = collaboration_mode_kind;
         self.sync_sandbox_mode_from_policy("apply_mode_preset");
     }

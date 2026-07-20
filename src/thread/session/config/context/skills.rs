@@ -1,14 +1,15 @@
-use codex_core::skills::{SkillLoadOutcome, SkillMetadata};
-use codex_protocol::protocol::SkillScope;
+use codex_app_server_protocol::{SkillMetadata, SkillScope, SkillsListResponse};
 
 use super::ContextSelectorSummary;
 
 pub(in crate::thread) fn build_skills_summary(
-    outcome: &SkillLoadOutcome,
+    response: &SkillsListResponse,
 ) -> ContextSelectorSummary {
-    let mut entries = outcome
-        .skills_with_enabled()
-        .map(|(skill, enabled)| {
+    let mut entries = response
+        .data
+        .iter()
+        .flat_map(|entry| entry.skills.iter())
+        .map(|skill| {
             let display_name = skill
                 .interface
                 .as_ref()
@@ -24,18 +25,22 @@ pub(in crate::thread) fn build_skills_summary(
             (
                 display_name,
                 summary,
-                format_skill_report_entry(skill, enabled),
-                enabled,
+                format_skill_report_entry(skill),
+                skill.enabled,
                 skill.scope,
             )
         })
         .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+    entries.sort_by_key(|entry| entry.0.to_lowercase());
 
     let total = entries.len();
     let enabled_count = entries.iter().filter(|entry| entry.3).count();
     let disabled_count = total.saturating_sub(enabled_count);
-    let error_count = outcome.errors.len();
+    let error_count = response
+        .data
+        .iter()
+        .map(|entry| entry.errors.len())
+        .sum::<usize>();
 
     if total == 0 && error_count == 0 {
         return ContextSelectorSummary {
@@ -76,7 +81,7 @@ pub(in crate::thread) fn build_skills_summary(
     }
     if error_count > 0 {
         report_lines.push(format!("Load errors: {error_count}."));
-        for error in &outcome.errors {
+        for error in response.data.iter().flat_map(|entry| entry.errors.iter()) {
             report_lines.push(format!("- {}: {}", error.path.display(), error.message));
         }
     }
@@ -97,7 +102,7 @@ pub(in crate::thread) fn build_skills_summary(
     }
 }
 
-fn format_skill_report_entry(skill: &SkillMetadata, enabled: bool) -> String {
+fn format_skill_report_entry(skill: &SkillMetadata) -> String {
     let display_name = skill
         .interface
         .as_ref()
@@ -114,13 +119,13 @@ fn format_skill_report_entry(skill: &SkillMetadata, enabled: bool) -> String {
         "- {} [{}{}]",
         display_name,
         skill_scope_label(skill.scope),
-        if enabled { "" } else { ", disabled" }
+        if skill.enabled { "" } else { ", disabled" }
     )];
     if display_name != skill.name {
         lines.push(format!("  name: {}", skill.name));
     }
     lines.push(format!("  summary: {summary}"));
-    lines.push(format!("  path: {}", skill.path_to_skills_md.display()));
+    lines.push(format!("  path: {}", skill.path.display()));
     if let Some(dependencies) = &skill.dependencies
         && !dependencies.tools.is_empty()
     {

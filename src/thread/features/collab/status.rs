@@ -27,6 +27,7 @@ pub(in crate::thread) fn collab_status_summary_line(
 ) -> String {
     let mut pending_init = 0usize;
     let mut running = 0usize;
+    let mut interrupted = 0usize;
     let mut completed = 0usize;
     let mut errored = 0usize;
     let mut shutdown = 0usize;
@@ -36,6 +37,7 @@ pub(in crate::thread) fn collab_status_summary_line(
         match state.status {
             CollabAgentStatus::PendingInit => pending_init += 1,
             CollabAgentStatus::Running => running += 1,
+            CollabAgentStatus::Interrupted => interrupted += 1,
             CollabAgentStatus::Completed => completed += 1,
             CollabAgentStatus::Errored => errored += 1,
             CollabAgentStatus::Shutdown => shutdown += 1,
@@ -49,6 +51,9 @@ pub(in crate::thread) fn collab_status_summary_line(
     }
     if completed > 0 {
         parts.push(format!("{completed} completed"));
+    }
+    if interrupted > 0 {
+        parts.push(format!("{interrupted} interrupted"));
     }
     if pending_init > 0 {
         parts.push(format!("{pending_init} pending init"));
@@ -74,6 +79,7 @@ pub(in crate::thread) fn collab_agent_state_summary(state: &CollabAgentState) ->
     match state.status {
         CollabAgentStatus::PendingInit => "Pending init".to_string(),
         CollabAgentStatus::Running => "Running".to_string(),
+        CollabAgentStatus::Interrupted => "Interrupted".to_string(),
         CollabAgentStatus::Completed => format_state_with_message(
             "Completed",
             state.message.as_deref(),

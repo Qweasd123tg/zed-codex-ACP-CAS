@@ -141,7 +141,7 @@ fn render_user_inputs(inputs: Vec<UserInput>) -> String {
         match input {
             UserInput::Text { text, .. } => rendered.push_str(&text),
             UserInput::Image { .. } => rendered.push_str("[image]"),
-            UserInput::LocalImage { path } => {
+            UserInput::LocalImage { path, .. } => {
                 let _ = write!(rendered, "[image: {}]", path.display());
             }
             UserInput::Skill { name, .. } => {

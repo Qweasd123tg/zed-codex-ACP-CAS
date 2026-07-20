@@ -26,7 +26,9 @@ fn command_title_reads_single_file_name_from_action() {
     let actions = vec![CommandAction::Read {
         command: "cat src/thread.rs".to_string(),
         name: "cat".to_string(),
-        path: PathBuf::from("src/thread.rs"),
+        path: "/repo/src/thread.rs"
+            .try_into()
+            .expect("absolute test path"),
     }];
     assert_eq!(
         command_tool_title("cat src/thread.rs", &actions),
@@ -85,10 +87,10 @@ fn command_title_maps_common_network_commands() {
 fn command_title_maps_common_file_operation_commands() {
     assert_eq!(
         command_tool_title(
-            "/bin/bash -lc 'touch /home/qweasd123tg/codex-acp-outside-workspace-test.txt'",
+            "/bin/bash -lc 'touch /home/tester/codex-acp-outside-workspace-test.txt'",
             &[]
         ),
-        "Create file `/home/qweasd123tg/codex-acp-outside-workspace-test.txt`"
+        "Create file `/home/tester/codex-acp-outside-workspace-test.txt`"
     );
     assert_eq!(
         command_tool_title("/bin/bash -lc 'mkdir -p /tmp/codex-acp-test-dir'", &[]),
@@ -140,7 +142,9 @@ fn command_tool_kind_uses_read_for_file_reads() {
     let actions = vec![CommandAction::Read {
         command: "cat src/thread.rs".to_string(),
         name: "cat".to_string(),
-        path: PathBuf::from("src/thread.rs"),
+        path: "/repo/src/thread.rs"
+            .try_into()
+            .expect("absolute test path"),
     }];
     assert_eq!(
         command_tool_kind("cat src/thread.rs", &actions),

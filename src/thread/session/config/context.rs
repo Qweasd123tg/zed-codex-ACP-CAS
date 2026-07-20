@@ -43,6 +43,7 @@ pub(crate) struct ContextSelectorSummary {
 pub(crate) enum AccountAuthKind {
     Chatgpt,
     ApiKey,
+    AmazonBedrock,
     #[default]
     Unknown,
 }
@@ -58,6 +59,9 @@ pub(crate) struct AccountStatus {
 pub(in crate::thread) fn status_control_option_groups(
     rate_limits: Option<&RateLimitSnapshot>,
     display_maps: &DisplayMapsConfig,
+    workspace_cwd: &Path,
+    backend_cli_version: &str,
+    account_status: &AccountStatus,
     compaction_in_progress: bool,
     mcp_summary: &ContextSelectorSummary,
     skills_summary: &ContextSelectorSummary,
@@ -70,30 +74,37 @@ pub(in crate::thread) fn status_control_option_groups(
     };
     let primary_remaining_percent = primary_remaining(rate_limits);
     let secondary_remaining_percent = secondary_remaining(rate_limits);
-    vec![
-        SessionConfigSelectGroup::new(
-            "status",
-            "Status",
-            display_maps
-                .limits_summary_options()
-                .iter()
-                .map(|option| {
-                    SessionConfigSelectOption::new(
-                        limits_summary_value(&option.id),
-                        display_maps.render_limits_summary_option(
-                            option,
-                            primary_remaining_percent,
-                            secondary_remaining_percent,
-                        ),
-                    )
-                    .description(limit_summary_option_description(
-                        option,
-                        rate_limits,
-                        display_maps,
-                    ))
-                })
-                .collect(),
+    let mut status_options = display_maps
+        .limits_summary_options()
+        .iter()
+        .map(|option| {
+            SessionConfigSelectOption::new(
+                limits_summary_value(&option.id),
+                display_maps.render_limits_summary_option(
+                    option,
+                    primary_remaining_percent,
+                    secondary_remaining_percent,
+                ),
+            )
+            .description(limit_summary_option_description(
+                option,
+                rate_limits,
+                display_maps,
+            ))
+        })
+        .collect::<Vec<_>>();
+    status_options.push(
+        SessionConfigSelectOption::new(SESSION_STATUS_VALUE, "Session").description(
+            session_status_description(
+                workspace_cwd,
+                backend_cli_version,
+                account_status,
+                rate_limits,
+            ),
         ),
+    );
+    vec![
+        SessionConfigSelectGroup::new("status", "Status", status_options),
         SessionConfigSelectGroup::new(
             "integrations",
             "Integrations",
@@ -239,12 +250,29 @@ fn session_status_detail(
     rate_limits: Option<&RateLimitSnapshot>,
 ) -> String {
     format!(
-        "Adapter: codex-acp-cas {}\nBackend: {}\nWorkspace: {}\nAccount: {}\nTokens: {}",
+        "{}\nTokens: {}",
+        session_status_description(
+            workspace_cwd,
+            backend_cli_version,
+            account_status,
+            rate_limits,
+        ),
+        token_usage_summary_line(total_token_usage)
+    )
+}
+
+pub(in crate::thread) fn session_status_description(
+    workspace_cwd: &Path,
+    backend_cli_version: &str,
+    account_status: &AccountStatus,
+    rate_limits: Option<&RateLimitSnapshot>,
+) -> String {
+    format!(
+        "Adapter: codex-acp-cas {}\nBackend: {}\nWorkspace: {}\nAccount: {}",
         env!("CARGO_PKG_VERSION"),
         backend_version_detail(backend_cli_version),
         workspace_cwd.display(),
         account_detail(account_status, rate_limits),
-        token_usage_summary_line(total_token_usage)
     )
 }
 
@@ -252,11 +280,16 @@ pub(in crate::thread) fn build_account_status(account: Option<Account>) -> Accou
     match account {
         Some(Account::Chatgpt { email, plan_type }) => AccountStatus {
             auth_kind: AccountAuthKind::Chatgpt,
-            email: Some(email),
+            email,
             plan_type: Some(plan_type),
         },
         Some(Account::ApiKey {}) => AccountStatus {
             auth_kind: AccountAuthKind::ApiKey,
+            email: None,
+            plan_type: None,
+        },
+        Some(Account::AmazonBedrock { .. }) => AccountStatus {
+            auth_kind: AccountAuthKind::AmazonBedrock,
             email: None,
             plan_type: None,
         },
@@ -288,6 +321,7 @@ fn account_detail(
         AccountAuthKind::ApiKey => plan
             .map(|plan| format!("API key auth · {plan}"))
             .unwrap_or_else(|| "API key auth".to_string()),
+        AccountAuthKind::AmazonBedrock => "Amazon Bedrock auth".to_string(),
         AccountAuthKind::Unknown => plan
             .map(|plan| format!("Account details unavailable · {plan}"))
             .unwrap_or_else(|| "Account details unavailable".to_string()),
@@ -309,8 +343,11 @@ fn plan_type_label(plan_type: PlanType) -> &'static str {
         PlanType::Go => "Go",
         PlanType::Plus => "Plus",
         PlanType::Pro => "Pro",
+        PlanType::ProLite => "Pro Lite",
         PlanType::Team => "Team",
+        PlanType::SelfServeBusinessUsageBased => "Business",
         PlanType::Business => "Business",
+        PlanType::EnterpriseCbpUsageBased => "Enterprise",
         PlanType::Enterprise => "Enterprise",
         PlanType::Edu => "Edu",
         PlanType::Unknown => "Unknown",
@@ -380,15 +417,13 @@ mod tests {
         AccountStatus, build_mcp_summary, build_plugins_summary, build_skills_summary,
         full_status_report,
     };
-    use codex_app_server_protocol::{
-        PluginInterface, PluginListResponse, PluginMarketplaceEntry, PluginSource, PluginSummary,
+    use codex_app_server_protocol::{PluginListResponse, SkillsListResponse};
+    use codex_config::{
+        DEFAULT_MCP_SERVER_ENVIRONMENT_ID, McpServerConfig, McpServerTransportConfig,
     };
-    use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
-    use codex_core::skills::{SkillLoadOutcome, SkillMetadata};
-    use codex_protocol::protocol::SkillScope;
-    use std::collections::{HashMap, HashSet};
-    use std::convert::TryInto;
-    use std::path::PathBuf;
+    use codex_utils_path_uri::LegacyAppPathString;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
 
     fn summary(label: &str, description: &str, report: &str) -> super::ContextSelectorSummary {
         super::ContextSelectorSummary {
@@ -409,17 +444,23 @@ mod tests {
                     args: vec!["--root".to_string(), "/tmp".to_string()],
                     env: None,
                     env_vars: vec![],
-                    cwd: Some(PathBuf::from("/tmp/workspace")),
+                    cwd: Some(LegacyAppPathString::from_path(Path::new("/tmp/workspace"))),
                 },
+                auth: Default::default(),
+                environment_id: DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
                 enabled: true,
                 required: false,
+                supports_parallel_tool_calls: false,
                 disabled_reason: None,
                 startup_timeout_sec: None,
                 tool_timeout_sec: None,
+                default_tools_approval_mode: None,
                 enabled_tools: None,
                 disabled_tools: None,
                 scopes: None,
+                oauth: None,
                 oauth_resource: None,
+                tools: HashMap::new(),
             },
         );
 
@@ -431,25 +472,26 @@ mod tests {
 
     #[test]
     fn skills_summary_counts_enabled_and_errors() {
-        let mut outcome = SkillLoadOutcome::default();
-        outcome.skills = vec![SkillMetadata {
-            name: "frontend-skill".to_string(),
-            description: "Design a strong landing page".to_string(),
-            short_description: Some("Bold UI work".to_string()),
-            interface: None,
-            dependencies: None,
-            policy: None,
-            permission_profile: None,
-            path_to_skills_md: PathBuf::from("/tmp/skills/frontend/SKILL.md"),
-            scope: SkillScope::User,
-        }];
-        outcome.errors = vec![codex_core::skills::SkillError {
-            path: PathBuf::from("/tmp/skills/broken/SKILL.md"),
-            message: "invalid frontmatter".to_string(),
-        }];
-        outcome.disabled_paths = HashSet::new();
+        let response: SkillsListResponse = serde_json::from_value(serde_json::json!({
+            "data": [{
+                "cwd": "/tmp/workspace",
+                "skills": [{
+                    "name": "frontend-skill",
+                    "description": "Design a strong landing page",
+                    "shortDescription": "Bold UI work",
+                    "path": "/tmp/skills/frontend/SKILL.md",
+                    "scope": "user",
+                    "enabled": true
+                }],
+                "errors": [{
+                    "path": "/tmp/skills/broken/SKILL.md",
+                    "message": "invalid frontmatter"
+                }]
+            }]
+        }))
+        .expect("valid skills list response");
 
-        let summary = build_skills_summary(&outcome);
+        let summary = build_skills_summary(&response);
         assert_eq!(summary.label, "Skills · 1 on · 1 err");
         assert!(summary.description.contains("1/1 skill(s) enabled"));
         assert!(summary.report.contains("frontend-skill"));
@@ -458,114 +500,88 @@ mod tests {
 
     #[test]
     fn plugins_summary_counts_enabled_and_available_plugins() {
-        let response = PluginListResponse {
-            marketplaces: vec![PluginMarketplaceEntry {
-                name: "openai-curated".to_string(),
-                path: PathBuf::from("/tmp/plugins/marketplace.json")
-                    .try_into()
-                    .expect("absolute marketplace path"),
-                plugins: vec![
-                    PluginSummary {
-                        id: "github".to_string(),
-                        name: "github".to_string(),
-                        source: PluginSource::Local {
-                            path: PathBuf::from("/tmp/plugins/github")
-                                .try_into()
-                                .expect("absolute plugin path"),
-                        },
-                        installed: true,
-                        enabled: true,
-                        interface: Some(PluginInterface {
-                            display_name: Some("GitHub".to_string()),
-                            short_description: Some("Issues and pull requests".to_string()),
-                            long_description: None,
-                            developer_name: Some("OpenAI".to_string()),
-                            category: Some("Engineering".to_string()),
-                            capabilities: vec!["skills".to_string(), "github-mcp".to_string()],
-                            website_url: None,
-                            privacy_policy_url: None,
-                            terms_of_service_url: None,
-                            default_prompt: None,
-                            brand_color: None,
-                            composer_icon: None,
-                            logo: None,
-                            screenshots: vec![],
-                        }),
-                    },
-                    PluginSummary {
-                        id: "slack".to_string(),
-                        name: "slack".to_string(),
-                        source: PluginSource::Local {
-                            path: PathBuf::from("/tmp/plugins/slack")
-                                .try_into()
-                                .expect("absolute plugin path"),
-                        },
-                        installed: true,
-                        enabled: false,
-                        interface: Some(PluginInterface {
-                            display_name: Some("Slack".to_string()),
-                            short_description: Some("Workspace messaging".to_string()),
-                            long_description: None,
-                            developer_name: None,
-                            category: Some("Communication".to_string()),
-                            capabilities: vec!["connector".to_string()],
-                            website_url: None,
-                            privacy_policy_url: None,
-                            terms_of_service_url: None,
-                            default_prompt: None,
-                            brand_color: None,
-                            composer_icon: None,
-                            logo: None,
-                            screenshots: vec![],
-                        }),
-                    },
-                    PluginSummary {
-                        id: "figma".to_string(),
-                        name: "figma".to_string(),
-                        source: PluginSource::Local {
-                            path: PathBuf::from("/tmp/plugins/figma")
-                                .try_into()
-                                .expect("absolute plugin path"),
-                        },
-                        installed: false,
-                        enabled: false,
-                        interface: Some(PluginInterface {
-                            display_name: Some("Figma".to_string()),
-                            short_description: Some("Design workflows".to_string()),
-                            long_description: None,
-                            developer_name: None,
-                            category: Some("Design".to_string()),
-                            capabilities: vec!["skills".to_string()],
-                            website_url: None,
-                            privacy_policy_url: None,
-                            terms_of_service_url: None,
-                            default_prompt: None,
-                            brand_color: None,
-                            composer_icon: None,
-                            logo: None,
-                            screenshots: vec![],
-                        }),
-                    },
-                ],
-            }],
-            remote_sync_error: Some("network unavailable".to_string()),
+        let plugin = |id: &str,
+                      display_name: &str,
+                      description: &str,
+                      category: &str,
+                      capabilities: Vec<&str>,
+                      installed: bool,
+                      enabled: bool| {
+            serde_json::json!({
+                "id": id,
+                "name": id,
+                "source": {
+                    "type": "local",
+                    "path": format!("/tmp/plugins/{id}")
+                },
+                "installed": installed,
+                "enabled": enabled,
+                "installPolicy": "AVAILABLE",
+                "authPolicy": "ON_USE",
+                "interface": {
+                    "displayName": display_name,
+                    "shortDescription": description,
+                    "developerName": (id == "github").then_some("OpenAI"),
+                    "category": category,
+                    "capabilities": capabilities,
+                    "screenshots": [],
+                    "screenshotUrls": []
+                }
+            })
         };
+        let response: PluginListResponse = serde_json::from_value(serde_json::json!({
+            "marketplaces": [{
+                "name": "openai-curated",
+                "path": "/tmp/plugins/marketplace.json",
+                "plugins": [
+                    plugin(
+                        "github",
+                        "GitHub",
+                        "Issues and pull requests",
+                        "Engineering",
+                        vec!["skills", "github-mcp"],
+                        true,
+                        true,
+                    ),
+                    plugin(
+                        "slack",
+                        "Slack",
+                        "Workspace messaging",
+                        "Communication",
+                        vec!["connector"],
+                        true,
+                        false,
+                    ),
+                    plugin(
+                        "figma",
+                        "Figma",
+                        "Design workflows",
+                        "Design",
+                        vec!["skills"],
+                        false,
+                        false,
+                    )
+                ]
+            }],
+            "marketplaceLoadErrors": [{
+                "marketplacePath": "/tmp/plugins/broken-marketplace.json",
+                "message": "network unavailable"
+            }]
+        }))
+        .expect("valid plugin list response");
 
         let summary = build_plugins_summary(&response);
-        assert_eq!(summary.label, "Plugins · 1 on · 1 off · sync err");
+        assert_eq!(summary.label, "Plugins · 1 on · 1 off · 1 load err");
         assert!(
             summary
                 .description
                 .contains("1/2 installed plugin(s) enabled")
         );
-        assert!(summary.description.contains("remote sync unavailable"));
+        assert!(summary.description.contains("1 marketplace load error(s)"));
         assert!(summary.report.contains("GitHub"));
         assert!(summary.report.contains("Available but not installed"));
-        assert!(
-            summary
-                .report
-                .contains("Remote sync error: network unavailable")
-        );
+        assert!(summary.report.contains("Marketplace load errors:"));
+        assert!(summary.report.contains("network unavailable"));
     }
 
     #[test]

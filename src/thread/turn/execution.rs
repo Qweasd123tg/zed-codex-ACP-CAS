@@ -194,12 +194,12 @@ impl Thread {
             inner.sync_sandbox_mode_from_policy("run_single_turn");
             let thread_id = inner.thread_id.clone();
             let model = inner.current_model.clone();
-            let service_tier = inner.service_tier;
-            let effort = inner.reasoning_effort;
+            let service_tier = inner.service_tier.clone();
+            let effort = inner.reasoning_effort.clone();
             let approval_policy = inner.approval_policy;
             let sandbox_policy = inner.sandbox_policy.clone();
             let collaboration_mode =
-                plan::collaboration_mode_for_turn(collaboration_mode_kind, &model, effort);
+                plan::collaboration_mode_for_turn(collaboration_mode_kind, &model, effort.clone());
             let turn_response = inner
                 .app
                 .lock()
@@ -208,7 +208,9 @@ impl Thread {
                     thread_id,
                     input,
                     model: Some(model),
-                    service_tier: session_config::service_tier_override_from_session(service_tier),
+                    service_tier: session_config::service_tier_override_from_session(
+                        service_tier.as_deref(),
+                    ),
                     effort: Some(effort),
                     approval_policy: Some(approval_policy),
                     sandbox_policy: Some(sandbox_policy),
@@ -395,47 +397,11 @@ impl Thread {
                 crate::thread::features::file::events::build_file_change_completed_update(
                     &snapshot,
                 );
-            let writeback_targets =
-                crate::thread::features::file::events::collect_file_change_writeback_targets(
-                    &snapshot,
-                );
 
             snapshot
                 .client
                 .send_tool_call_update(tool_call_update)
                 .await;
-
-            for (path, content) in writeback_targets {
-                let still_same_turn = {
-                    let inner = self.inner.lock().await;
-                    inner.active_turn_id.as_deref() == Some(turn_id)
-                };
-                if !still_same_turn {
-                    break;
-                }
-
-                match snapshot
-                    .client
-                    .sync_text_file_if_changed(path.clone(), content)
-                    .await
-                {
-                    Ok(true) => {
-                        let mut inner = self.inner.lock().await;
-                        if inner.active_turn_id.as_deref() == Some(turn_id) {
-                            inner.synced_paths_this_turn.insert(path);
-                        } else {
-                            break;
-                        }
-                    }
-                    Ok(false) => {}
-                    Err(err) => {
-                        warn!(
-                            "Failed to sync file change into ACP buffer for {}: {err:?}",
-                            path.display()
-                        );
-                    }
-                }
-            }
 
             return Ok(ActiveTurnMessageOutcome::Continue);
         }
@@ -516,14 +482,7 @@ impl Thread {
             }
 
             if let Some(snapshot) = diff_snapshot {
-                let synced_paths =
-                    crate::thread::turn_diff::emit_finalized_turn_diff_snapshot(snapshot).await;
-                if !synced_paths.is_empty() {
-                    let mut inner = self.inner.lock().await;
-                    if inner.active_turn_id.as_deref() == Some(turn_id) {
-                        inner.synced_paths_this_turn.extend(synced_paths);
-                    }
-                }
+                crate::thread::turn_diff::emit_finalized_turn_diff_snapshot(snapshot).await;
             }
 
             if let Some(turn_error_message) = turn_error_message {

@@ -8,12 +8,10 @@ use agent_client_protocol::schema::v1::{
 };
 use codex_app_server_protocol::{CommandAction, CommandExecutionStatus};
 use serde_json::Value;
-use tracing::warn;
 
 use crate::thread::{
     SessionClient, ThreadInner,
     features::{
-        file::changes as file_changes,
         status_mapping,
         tool_call_ui::{content, kind, location, raw},
     },
@@ -43,7 +41,7 @@ pub(in crate::thread) struct CompletedCommandExecution {
     pub(in crate::thread) exit_code_raw_output: Option<Value>,
 }
 
-// Публикуем старт shell-команды и подготавливаем read-snapshot, если есть read actions.
+// Публикуем старт shell-команды.
 pub(in crate::thread) async fn emit_command_execution_started(
     inner: &mut ThreadInner,
     id: String,
@@ -53,20 +51,6 @@ pub(in crate::thread) async fn emit_command_execution_started(
     command_actions: Vec<CommandAction>,
 ) {
     inner.started_tool_calls.insert(id.clone());
-    if inner.client.supports_read_text_file() {
-        for action in &command_actions {
-            let CommandAction::Read { path, .. } = action else {
-                continue;
-            };
-            let read_path = file_changes::resolve_workspace_path(&inner.workspace_cwd, path);
-            if let Err(err) = inner.client.prime_file_snapshot(read_path.clone()).await {
-                warn!(
-                    "Failed to prime ACP snapshot for command read {}: {err:?}",
-                    read_path.display()
-                );
-            }
-        }
-    }
     let tool_status = status_mapping::map_command_status(status, true);
     let title = content::command_tool_label(&command, &cwd, &command_actions);
     let raw_input = raw::command_tool_raw_input(&command, &command_actions);
@@ -307,7 +291,7 @@ mod tests {
     };
     use agent_client_protocol::schema::v1::{ToolCallContent, ToolKind};
     use codex_app_server_protocol::CommandAction;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn native_terminal_is_reserved_for_shell_or_unknown_commands() {
@@ -330,7 +314,7 @@ mod tests {
             &[CommandAction::Read {
                 command: "cat src/lib.rs".to_string(),
                 name: "cat".to_string(),
-                path: PathBuf::from("src/lib.rs"),
+                path: "/repo/src/lib.rs".try_into().expect("absolute test path"),
             }]
         ));
         assert!(!command_uses_native_terminal(

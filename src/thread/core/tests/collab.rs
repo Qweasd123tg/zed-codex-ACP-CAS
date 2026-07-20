@@ -102,10 +102,17 @@ fn collab_status_summary_is_compact_and_includes_non_zero_buckets() {
             status: CollabAgentStatus::Errored,
         },
     );
+    states.insert(
+        "thread-4".to_string(),
+        CollabAgentState {
+            message: None,
+            status: CollabAgentStatus::Interrupted,
+        },
+    );
 
     assert_eq!(
         collab_status_summary_line(&states),
-        "Agents: 3 total · 1 running · 1 completed · 1 errored"
+        "Agents: 4 total · 1 running · 1 completed · 1 interrupted · 1 errored"
     );
 }
 
@@ -143,6 +150,13 @@ fn collab_agent_state_summary_includes_message_preview() {
     assert_eq!(
         collab_agent_state_summary(&errored),
         "Error - sandbox denied network access while fetching fixtures"
+    );
+    assert_eq!(
+        collab_agent_state_summary(&CollabAgentState {
+            message: None,
+            status: CollabAgentStatus::Interrupted,
+        }),
+        "Interrupted"
     );
 }
 

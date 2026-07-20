@@ -49,6 +49,12 @@ pub(super) async fn handle_server_request(
         ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } => {
             reject_unsupported(inner, request_id, "account/chatgptAuthTokens/refresh").await
         }
+        ServerRequest::AttestationGenerate { request_id, .. } => {
+            reject_unsupported(inner, request_id, "attestation/generate").await
+        }
+        ServerRequest::CurrentTimeRead { request_id, .. } => {
+            reject_unsupported(inner, request_id, "currentTime/read").await
+        }
         ServerRequest::ApplyPatchApproval { request_id, .. } => {
             reject_unsupported(inner, request_id, "applyPatchApproval").await
         }

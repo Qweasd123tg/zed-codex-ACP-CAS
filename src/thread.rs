@@ -9,13 +9,12 @@ use agent_client_protocol::{
     schema::v1::{
         AvailableCommandsUpdate, ClientCapabilities, ConfigOptionUpdate, ContentChunk,
         CurrentModeUpdate, Diff, ListSessionsResponse, LoadSessionResponse, PermissionOption,
-        PermissionOptionKind, ReadTextFileRequest, RequestPermissionOutcome,
-        RequestPermissionRequest, SelectedPermissionOutcome, SessionConfigId, SessionConfigOption,
+        PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
+        SelectedPermissionOutcome, SessionConfigId, SessionConfigOption,
         SessionConfigOptionCategory, SessionConfigSelectGroup, SessionConfigSelectOption,
         SessionId, SessionMode, SessionModeId, SessionModeState, SessionNotification,
         SessionUpdate, StopReason, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation,
         ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
-        WriteTextFileRequest,
     },
 };
 use codex_app_server_protocol::{
@@ -27,7 +26,7 @@ use codex_app_server_protocol::{
     TurnInterruptParams, TurnStartParams, UserInput,
 };
 use codex_core::config::Config;
-use codex_protocol::config_types::{ModeKind, ServiceTier};
+use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::{AskForApproval, SandboxPolicy};
 use codex_utils_approval_presets::{ApprovalPreset, builtin_approval_presets};
@@ -82,9 +81,7 @@ mod turn_state;
 #[path = "thread/core/unified_diff.rs"]
 mod unified_diff;
 
-use self::features::file::changes::{
-    file_change_to_preview_diff, file_change_tool_location, read_file_text,
-};
+use self::features::file::changes::{file_change_to_preview_diff, file_change_tool_location};
 use self::features::plan::{
     fallback_plan_can_enter_summarizing, fallback_plan_entries_for_steps, limit_plan_entries,
     maybe_advance_fallback_plan, plan_entries_all_pending, turn_plan_step_to_entry,
@@ -108,7 +105,6 @@ const ALLOW_ONCE: &str = "allow-once";
 const REJECT_ONCE: &str = "reject-once";
 const CANCEL_TURN: &str = "cancel-turn";
 const NONE_OF_THE_ABOVE: &str = "None of the above";
-const RESUME_CANCEL_OPTION_ID: &str = "resume-cancel";
 const MAX_VISIBLE_PLAN_ENTRIES: usize = 6;
 const PLAN_SESSION_MODE_ID: &str = "plan";
 const DEFAULT_SESSION_MODE_ID: &str = "default";
@@ -135,9 +131,7 @@ pub struct Thread {
 struct ThreadInner {
     session_id: SessionId,
     app: SharedAppServer,
-    codex_home: PathBuf,
     cas_home: PathBuf,
-    bundled_skills_enabled: bool,
     thread_id: String,
     backend_cli_version: String,
     context_usage_cache_path: PathBuf,
@@ -157,7 +151,7 @@ struct ThreadInner {
     collaboration_mode_kind: ModeKind,
     current_model: String,
     current_model_provider: String,
-    service_tier: Option<ServiceTier>,
+    service_tier: Option<String>,
     reasoning_effort: ReasoningEffort,
     model_selector: session_selector_preferences::ModelSelectorPreferences,
     agent_labels: HashMap<String, features::collab::CollabAgentLabel>,
@@ -188,7 +182,6 @@ struct ThreadInner {
     latest_turn_diff: Option<String>,
     turn_diff_history: Vec<TurnDiffRecord>,
     file_change_paths_this_turn: HashSet<PathBuf>,
-    synced_paths_this_turn: HashSet<PathBuf>,
     last_plan_steps: Vec<String>,
     carryover_plan_steps: Option<Vec<String>>,
     pending_thread_title_update: Option<String>,
@@ -242,11 +235,6 @@ enum SessionCommand {
     },
     Review {
         instructions: Option<String>,
-    },
-    Threads,
-    Resume {
-        thread_id: Option<String>,
-        include_history: bool,
     },
     Archive {
         thread_id: Option<String>,

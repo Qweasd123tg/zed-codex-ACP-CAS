@@ -12,8 +12,9 @@ pub(super) fn materialized_model_selector(
     models: &[AppModel],
 ) -> ModelSelectorPreferences {
     let mut materialized = preferences.clone();
+    let ordered_models = preferences.ordered_models(models);
     if materialized.models.is_empty() {
-        materialized.models = models
+        materialized.models = ordered_models
             .iter()
             .map(|model| ModelSelectorModelEntry::materialized(&model.id, None))
             .collect();
@@ -25,9 +26,9 @@ pub(super) fn materialized_model_selector(
             .collect();
     }
     if materialized.reasoning_efforts.is_empty() {
-        materialized.reasoning_efforts = all_reasoning_efforts()
+        materialized.reasoning_efforts = advertised_reasoning_efforts(&ordered_models)
             .into_iter()
-            .map(|effort| ModelSelectorReasoningEffortEntry::materialized(effort, None))
+            .map(|effort| ModelSelectorReasoningEffortEntry::materialized(&effort, None))
             .collect();
     } else {
         materialized.reasoning_efforts = materialized
@@ -45,22 +46,35 @@ pub(super) fn normalize_reasoning_effort_for_preferences(
     preferences: &ModelSelectorPreferences,
     effort: ReasoningEffort,
 ) -> ReasoningEffort {
-    if preferences.explicitly_enables_reasoning_effort(effort) {
+    if preferences.explicitly_enables_reasoning_effort(&effort) {
         effort
     } else {
         normalize_reasoning_effort_for_model(models, current_model, effort)
     }
 }
 
-fn all_reasoning_efforts() -> [ReasoningEffort; 6] {
-    [
-        ReasoningEffort::None,
-        ReasoningEffort::Minimal,
-        ReasoningEffort::Low,
-        ReasoningEffort::Medium,
-        ReasoningEffort::High,
-        ReasoningEffort::XHigh,
-    ]
+fn advertised_reasoning_efforts(models: &[&AppModel]) -> Vec<ReasoningEffort> {
+    let mut efforts = Vec::new();
+    for model in models {
+        for option in &model.supported_reasoning_efforts {
+            if !efforts.contains(&option.reasoning_effort) {
+                efforts.push(option.reasoning_effort.clone());
+            }
+        }
+    }
+    if efforts.is_empty() {
+        efforts.extend([
+            ReasoningEffort::None,
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
+            ReasoningEffort::Ultra,
+        ]);
+    }
+    efforts
 }
 
 pub(super) fn materialized_selector_layout(
@@ -81,7 +95,7 @@ pub(super) fn materialized_selector_layout(
         status: Some(materialized_selector_entry(
             layout.status.as_ref(),
             "Status",
-            &["status"],
+            &["status", "integrations", "actions"],
         )),
     }
 }

@@ -1,51 +1,64 @@
 //! Fast-mode/service-tier helpers for session_config.
 
-use crate::thread::{ServiceTier, SessionConfigSelectOption};
+use crate::thread::SessionConfigSelectOption;
 
 const FAST_MODE_OFF_VALUE: &str = "standard";
 const FAST_MODE_ON_VALUE: &str = "fast";
 const FAST_MODE_FLEX_VALUE: &str = "flex";
 
-pub(in crate::thread) fn fast_mode_value(service_tier: Option<ServiceTier>) -> &'static str {
+pub(in crate::thread) fn fast_mode_value(service_tier: Option<&str>) -> &str {
     match service_tier {
-        Some(ServiceTier::Fast) => FAST_MODE_ON_VALUE,
-        Some(ServiceTier::Flex) => FAST_MODE_FLEX_VALUE,
+        Some("fast" | "priority") => FAST_MODE_ON_VALUE,
+        Some("flex") => FAST_MODE_FLEX_VALUE,
+        Some(service_tier) => service_tier,
         None => FAST_MODE_OFF_VALUE,
     }
 }
 
-pub(in crate::thread) fn parse_fast_mode_value(value: &str) -> Option<Option<ServiceTier>> {
+pub(in crate::thread) fn parse_fast_mode_value(value: &str) -> Option<Option<String>> {
     match value {
         FAST_MODE_OFF_VALUE => Some(None),
-        FAST_MODE_ON_VALUE => Some(Some(ServiceTier::Fast)),
-        FAST_MODE_FLEX_VALUE => Some(Some(ServiceTier::Flex)),
+        FAST_MODE_ON_VALUE => Some(Some(FAST_MODE_ON_VALUE.to_string())),
+        FAST_MODE_FLEX_VALUE => Some(Some(FAST_MODE_FLEX_VALUE.to_string())),
+        value if !value.trim().is_empty() => Some(Some(value.to_string())),
         _ => None,
     }
 }
 
 pub(in crate::thread) fn service_tier_override_from_config(
-    service_tier: Option<ServiceTier>,
-) -> Option<Option<ServiceTier>> {
-    service_tier.map(Some)
+    service_tier: Option<&str>,
+) -> Option<Option<String>> {
+    service_tier.map(|service_tier| Some(service_tier.to_string()))
 }
 
 pub(in crate::thread) fn service_tier_override_from_session(
-    service_tier: Option<ServiceTier>,
-) -> Option<Option<ServiceTier>> {
-    Some(service_tier)
+    service_tier: Option<&str>,
+) -> Option<Option<String>> {
+    Some(service_tier.map(ToString::to_string))
 }
 
 pub(in crate::thread) fn fast_mode_options(
-    _current_service_tier: Option<ServiceTier>,
+    current_service_tier: Option<&str>,
 ) -> Vec<SessionConfigSelectOption> {
-    vec![
+    let mut options = vec![
         SessionConfigSelectOption::new(FAST_MODE_OFF_VALUE, "Standard")
             .description("Use the default service tier."),
         SessionConfigSelectOption::new(FAST_MODE_ON_VALUE, "Fast")
             .description("Request the Fast service tier for new turns when available."),
         SessionConfigSelectOption::new(FAST_MODE_FLEX_VALUE, "Flex")
             .description("Request the Flex service tier for new turns when available."),
-    ]
+    ];
+    let current_value = fast_mode_value(current_service_tier);
+    if !matches!(
+        current_value,
+        FAST_MODE_OFF_VALUE | FAST_MODE_ON_VALUE | FAST_MODE_FLEX_VALUE
+    ) {
+        options.push(
+            SessionConfigSelectOption::new(current_value.to_string(), current_value.to_string())
+                .description("Service tier reported by the current Codex backend."),
+        );
+    }
+    options
 }
 
 #[cfg(test)]
@@ -54,19 +67,20 @@ mod tests {
         fast_mode_options, fast_mode_value, parse_fast_mode_value,
         service_tier_override_from_config, service_tier_override_from_session,
     };
-    use crate::thread::ServiceTier;
-
     #[test]
     fn fast_mode_values_parse_standard_and_fast() {
         assert_eq!(fast_mode_value(None), "standard");
-        assert_eq!(fast_mode_value(Some(ServiceTier::Fast)), "fast");
+        assert_eq!(fast_mode_value(Some("fast")), "fast");
         assert_eq!(parse_fast_mode_value("standard"), Some(None));
-        assert_eq!(parse_fast_mode_value("fast"), Some(Some(ServiceTier::Fast)));
+        assert_eq!(
+            parse_fast_mode_value("fast"),
+            Some(Some("fast".to_string()))
+        );
     }
 
     #[test]
     fn fast_mode_options_keep_flex_reachable() {
-        for tier in [None, Some(ServiceTier::Fast), Some(ServiceTier::Flex)] {
+        for tier in [None, Some("fast"), Some("flex")] {
             let values: Vec<_> = fast_mode_options(tier)
                 .into_iter()
                 .map(|option| option.value.0.to_string())
@@ -88,12 +102,12 @@ mod tests {
     fn config_service_tier_override_preserves_app_server_default_when_unset() {
         assert_eq!(service_tier_override_from_config(None), None);
         assert_eq!(
-            service_tier_override_from_config(Some(ServiceTier::Fast)),
-            Some(Some(ServiceTier::Fast))
+            service_tier_override_from_config(Some("fast")),
+            Some(Some("fast".to_string()))
         );
         assert_eq!(
-            service_tier_override_from_config(Some(ServiceTier::Flex)),
-            Some(Some(ServiceTier::Flex))
+            service_tier_override_from_config(Some("flex")),
+            Some(Some("flex".to_string()))
         );
     }
 
@@ -101,12 +115,12 @@ mod tests {
     fn session_service_tier_override_sends_explicit_clear_when_unset() {
         assert_eq!(service_tier_override_from_session(None), Some(None));
         assert_eq!(
-            service_tier_override_from_session(Some(ServiceTier::Fast)),
-            Some(Some(ServiceTier::Fast))
+            service_tier_override_from_session(Some("fast")),
+            Some(Some("fast".to_string()))
         );
         assert_eq!(
-            service_tier_override_from_session(Some(ServiceTier::Flex)),
-            Some(Some(ServiceTier::Flex))
+            service_tier_override_from_session(Some("flex")),
+            Some(Some("flex".to_string()))
         );
     }
 }

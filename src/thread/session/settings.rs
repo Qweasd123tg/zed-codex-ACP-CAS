@@ -96,12 +96,12 @@ impl Thread {
         inner.current_model = model;
         if !inner
             .model_selector
-            .explicitly_enables_reasoning_effort(inner.reasoning_effort)
+            .explicitly_enables_reasoning_effort(&inner.reasoning_effort)
         {
             inner.reasoning_effort = normalize_reasoning_effort_for_model(
                 &inner.models,
                 &inner.current_model,
-                inner.reasoning_effort,
+                inner.reasoning_effort.clone(),
             );
         }
         inner.model_selector.default_model = Some(inner.current_model.clone());
@@ -121,27 +121,24 @@ impl Thread {
                 .any(|option| option.reasoning_effort == effort)
             && !inner
                 .model_selector
-                .explicitly_enables_reasoning_effort(effort)
+                .explicitly_enables_reasoning_effort(&effort)
         {
             return Err(Error::invalid_params().data(format!(
                 "Reasoning effort `{}` is not supported by model `{}`",
-                reasoning_effort_value(effort),
+                reasoning_effort_value(&effort),
                 model.display_name,
             )));
         }
+        inner.model_selector.default_reasoning_effort = Some(effort.clone());
         inner.reasoning_effort = effort;
-        inner.model_selector.default_reasoning_effort = Some(effort);
         persist_selector_preferences_or_warn(&inner);
         Ok(())
     }
 
-    pub async fn set_fast_mode(
-        &self,
-        service_tier: Option<codex_protocol::config_types::ServiceTier>,
-    ) -> Result<(), Error> {
+    pub async fn set_fast_mode(&self, service_tier: Option<String>) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
+        inner.model_selector.default_service_tier = service_tier.clone();
         inner.service_tier = service_tier;
-        inner.model_selector.default_service_tier = service_tier;
         persist_selector_preferences_or_warn(&inner);
         Ok(())
     }

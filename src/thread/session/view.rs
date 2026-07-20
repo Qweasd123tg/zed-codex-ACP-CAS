@@ -11,10 +11,9 @@ use super::{
 use crate::thread::{
     features::collab,
     prompt_commands, replay,
-    session_config::{build_account_status, build_plugins_summary},
-    session_lifecycle::load_session_skills_summary_for_cwd,
+    session_config::{build_account_status, build_plugins_summary, build_skills_summary},
 };
-use codex_app_server_protocol::PluginListParams;
+use codex_app_server_protocol::{PluginListParams, SkillsListParams};
 
 impl Thread {
     pub async fn mark_history_replay_pending(&self) {
@@ -155,27 +154,18 @@ impl Thread {
 
     pub async fn refresh_startup_metadata(&self) {
         let started_at = Instant::now();
-        let (thread_id, workspace_cwd, codex_home, bundled_skills_enabled, app) = {
+        let (thread_id, workspace_cwd, app) = {
             let inner = self.inner.lock().await;
             (
                 inner.thread_id.clone(),
                 inner.workspace_cwd.clone(),
-                inner.codex_home.clone(),
-                inner.bundled_skills_enabled,
                 inner.app.clone(),
             )
         };
 
-        let session_skills_summary = load_session_skills_summary_for_cwd(
-            &codex_home,
-            bundled_skills_enabled,
-            &workspace_cwd,
-        )
-        .await;
-
         let plugin_cwds = workspace_cwd.clone().try_into().ok().map(|cwd| vec![cwd]);
 
-        let (account_rate_limits, account_status, session_plugins_summary) = {
+        let (account_rate_limits, account_status, session_skills_summary, session_plugins_summary) = {
             let mut app = app.lock().await;
             let account_rate_limits = match app.get_account_rate_limits().await {
                 Ok(response) => Some(response.rate_limits),
@@ -199,10 +189,33 @@ impl Thread {
                     Default::default()
                 }
             };
+            let session_skills_summary = match app
+                .skills_list(SkillsListParams {
+                    cwds: vec![workspace_cwd.clone()],
+                    force_reload: false,
+                })
+                .await
+            {
+                Ok(response) => build_skills_summary(&response),
+                Err(error) => {
+                    warn!(
+                        error = %error,
+                        thread_id,
+                        "Failed to read skills during deferred startup metadata refresh"
+                    );
+                    session_config::ContextSelectorSummary {
+                        label: "Skills · unavailable".to_string(),
+                        description: "Failed to read skill status for this session.".to_string(),
+                        report: format!(
+                            "Failed to read skill status for this session.\n\nError: {error}"
+                        ),
+                    }
+                }
+            };
             let session_plugins_summary = match app
                 .plugin_list(PluginListParams {
                     cwds: plugin_cwds,
-                    force_remote_sync: false,
+                    marketplace_kinds: None,
                 })
                 .await
             {
@@ -222,7 +235,12 @@ impl Thread {
                     }
                 }
             };
-            (account_rate_limits, account_status, session_plugins_summary)
+            (
+                account_rate_limits,
+                account_status,
+                session_skills_summary,
+                session_plugins_summary,
+            )
         };
 
         let mut inner = self.inner.lock().await;

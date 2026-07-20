@@ -292,7 +292,7 @@ mod tests {
     use super::{command_tool_completed_content, command_tool_started_content};
     use crate::thread::ToolCallContent;
     use codex_app_server_protocol::{CommandAction, CommandExecutionStatus};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     fn first_text(content: Vec<ToolCallContent>) -> String {
         match content.into_iter().next().expect("content") {
@@ -311,7 +311,7 @@ mod tests {
         let actions = vec![CommandAction::Read {
             command: "cat src/lib.rs".to_string(),
             name: "cat".to_string(),
-            path: PathBuf::from("src/lib.rs"),
+            path: "/repo/src/lib.rs".try_into().expect("absolute test path"),
         }];
 
         let label = super::command_tool_label("cat src/lib.rs", Path::new("/repo"), &actions);
@@ -324,7 +324,7 @@ mod tests {
         let actions = vec![CommandAction::Read {
             command: "cat src/lib.rs".to_string(),
             name: "cat".to_string(),
-            path: PathBuf::from("src/lib.rs"),
+            path: "/repo/src/lib.rs".try_into().expect("absolute test path"),
         }];
 
         let text = first_text(command_tool_started_content(
@@ -368,13 +368,13 @@ mod tests {
 
         let text = first_text(command_tool_completed_content(
             "ls",
-            Path::new("/home/qweasd123tg/Code/1"),
+            Path::new("/workspace/project"),
             &actions,
             CommandExecutionStatus::Completed,
-            Some("/home/qweasd123tg/Code/1 is empty."),
+            Some("/workspace/project is empty."),
         ));
 
-        assert_eq!(text, "/home/qweasd123tg/Code/1 is empty.");
+        assert_eq!(text, "/workspace/project is empty.");
         assert!(!text.contains("Terminal:"));
     }
 

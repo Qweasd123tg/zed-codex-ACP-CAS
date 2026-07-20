@@ -11,7 +11,16 @@ fn parses_reasoning_effort_values() {
         parse_reasoning_effort("xhigh"),
         Some(ReasoningEffort::XHigh)
     );
-    assert_eq!(parse_reasoning_effort("invalid"), None);
+    assert_eq!(parse_reasoning_effort("max"), Some(ReasoningEffort::Max));
+    assert_eq!(
+        parse_reasoning_effort("ultra"),
+        Some(ReasoningEffort::Ultra)
+    );
+    assert_eq!(
+        parse_reasoning_effort("future-effort"),
+        Some(ReasoningEffort::Custom("future-effort".to_string()))
+    );
+    assert_eq!(parse_reasoning_effort(""), None);
 }
 
 #[test]
@@ -43,7 +52,13 @@ fn mode_state_uses_backend_auto_mode_id() {
         .expect("auto preset should exist");
     let current_mode_id = current_permission_mode_id(
         to_app_approval(auto_preset.approval),
-        to_app_sandbox_mode(&auto_preset.sandbox),
+        to_app_sandbox_mode(
+            &auto_preset
+                .permission_profile
+                .to_legacy_sandbox_policy(Path::new("/tmp/workspace"))
+                .expect("built-in permission profile"),
+        ),
+        Path::new("/tmp/workspace"),
     );
     assert_eq!(current_mode_id.0.as_ref(), AUTO_MODE_ID);
 }
@@ -63,7 +78,13 @@ fn mode_state_keeps_read_only_when_current() {
         .expect("read-only preset should exist");
     let current_mode_id = current_permission_mode_id(
         to_app_approval(read_only_preset.approval),
-        to_app_sandbox_mode(&read_only_preset.sandbox),
+        to_app_sandbox_mode(
+            &read_only_preset
+                .permission_profile
+                .to_legacy_sandbox_policy(Path::new("/tmp/workspace"))
+                .expect("built-in permission profile"),
+        ),
+        Path::new("/tmp/workspace"),
     );
     let modes = permission_modes();
 
@@ -132,7 +153,6 @@ fn staying_in_plan_mode_preserves_visible_plan_state() {
 fn app_sandbox_policy_from_preserves_workspace_write_settings() {
     let policy = SandboxPolicy::WorkspaceWrite {
         writable_roots: vec![],
-        read_only_access: ReadOnlyAccess::FullAccess,
         network_access: true,
         exclude_tmpdir_env_var: true,
         exclude_slash_tmp: true,
@@ -142,7 +162,6 @@ fn app_sandbox_policy_from_preserves_workspace_write_settings() {
         AppSandboxPolicy::from(policy),
         AppSandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
-            read_only_access: AppReadOnlyAccess::FullAccess,
             network_access: true,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: true,

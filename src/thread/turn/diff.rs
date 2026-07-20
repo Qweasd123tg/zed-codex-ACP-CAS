@@ -2,13 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
-use tracing::warn;
-
 use crate::thread::{
     DEV_NULL, Diff, SessionClient, TURN_DIFF_HISTORY_LIMIT, TURN_DIFF_TOOL_CALL_PREFIX,
     ThreadInner, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
     ToolCallUpdate, ToolCallUpdateFields, ToolKind, TurnDiffRecord, TurnDiffUpdatedNotification,
-    first_hunk_line, read_file_text, unified_diff_to_old_new,
+    first_hunk_line, unified_diff_to_old_new,
 };
 
 #[derive(Clone, Debug)]
@@ -38,7 +36,6 @@ pub(super) struct PreparedTurnDiffRender {
 pub(super) struct FinalizedTurnDiffSnapshot {
     pub(super) client: SessionClient,
     pub(super) render: Option<PreparedTurnDiffRender>,
-    pub(super) sync_paths: Vec<PathBuf>,
 }
 
 // Обрабатываем обновления turn-diff в одном месте, чтобы логика patch-preview была консистентной.
@@ -71,16 +68,8 @@ pub(super) fn prepare_finalized_turn_diff_snapshot(
     record_turn_diff(inner, turn_id, diff.clone());
     let repo_root = find_repo_root(&inner.workspace_cwd);
     let mut resolved_files = Vec::with_capacity(parsed_files.len());
-    let mut sync_paths = Vec::new();
     for file in parsed_files {
         let path = resolve_turn_diff_path(&inner.workspace_cwd, repo_root.as_deref(), &file.path);
-        if inner.client.supports_buffer_writeback()
-            && !file.is_delete
-            && !inner.file_change_paths_this_turn.contains(&path)
-            && !inner.synced_paths_this_turn.contains(path.as_path())
-        {
-            sync_paths.push(path.clone());
-        }
         resolved_files.push(ResolvedTurnDiffFile {
             path,
             old_text: file.old_text,
@@ -96,13 +85,12 @@ pub(super) fn prepare_finalized_turn_diff_snapshot(
     Some(FinalizedTurnDiffSnapshot {
         client: inner.client.clone(),
         render,
-        sync_paths,
     })
 }
 
-pub(super) async fn emit_finalized_turn_diff_snapshot(
-    snapshot: FinalizedTurnDiffSnapshot,
-) -> Vec<PathBuf> {
+// Turn diff остаётся transcript-only: disk changes подхватывает watcher клиента,
+// а адаптер не отправляет non-atomic full-buffer writeback.
+pub(super) async fn emit_finalized_turn_diff_snapshot(snapshot: FinalizedTurnDiffSnapshot) {
     if let Some(render) = snapshot.render {
         if render.send_as_new {
             snapshot
@@ -128,37 +116,13 @@ pub(super) async fn emit_finalized_turn_diff_snapshot(
                 .await;
         }
     }
-
-    let mut synced_paths = Vec::new();
-    for path in snapshot.sync_paths {
-        let Some(content) = read_file_text(&path) else {
-            continue;
-        };
-
-        match snapshot
-            .client
-            .sync_text_file_if_changed(path.clone(), content)
-            .await
-        {
-            Ok(true) => synced_paths.push(path),
-            Ok(false) => {}
-            Err(err) => {
-                warn!(
-                    "Failed to sync turn diff into ACP buffer for {}: {err:?}",
-                    path.display()
-                );
-            }
-        }
-    }
-    synced_paths
 }
 
 pub(super) async fn finalize_turn_diff(inner: &mut ThreadInner, turn_id: &str) {
     let Some(snapshot) = prepare_finalized_turn_diff_snapshot(inner, turn_id) else {
         return;
     };
-    let synced_paths = emit_finalized_turn_diff_snapshot(snapshot).await;
-    inner.synced_paths_this_turn.extend(synced_paths);
+    emit_finalized_turn_diff_snapshot(snapshot).await;
 }
 
 fn prepare_turn_diff_tool_call(

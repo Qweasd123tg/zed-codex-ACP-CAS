@@ -33,7 +33,7 @@ pub(in crate::thread) fn collab_tool_content(
 
     if !agents_states.is_empty() {
         let mut statuses = agents_states.iter().collect::<Vec<_>>();
-        statuses.sort_by(|(left, _), (right, _)| left.cmp(right));
+        statuses.sort_by_key(|(label, _)| *label);
 
         if statuses.len() == 1 {
             let (thread_id, state) = statuses[0];
@@ -113,7 +113,7 @@ pub(in crate::thread) fn collab_tool_raw_output(
 
     let mut lines = Vec::new();
     let mut statuses = agents_states.iter().collect::<Vec<_>>();
-    statuses.sort_by(|(left, _), (right, _)| left.cmp(right));
+    statuses.sort_by_key(|(label, _)| *label);
 
     if statuses.len() == 1 {
         let (thread_id, state) = statuses[0];

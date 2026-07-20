@@ -9,9 +9,8 @@ use agent_client_protocol::{
     },
 };
 use codex_app_server_protocol::{
-    AdditionalMacOsPermissions, AdditionalPermissionProfile, GrantedMacOsPermissions,
     GrantedPermissionProfile, PermissionGrantScope, PermissionsRequestApprovalParams,
-    PermissionsRequestApprovalResponse, RequestId,
+    PermissionsRequestApprovalResponse, RequestId, RequestPermissionProfile,
 };
 
 use crate::thread::ThreadInner;
@@ -75,7 +74,7 @@ pub(in crate::thread) async fn handle_permissions_request_approval(
 
 fn approval_response_from_outcome(
     outcome: RequestPermissionOutcome,
-    requested: &AdditionalPermissionProfile,
+    requested: &RequestPermissionProfile,
 ) -> PermissionsRequestApprovalResponse {
     match outcome {
         RequestPermissionOutcome::Selected(SelectedPermissionOutcome { option_id, .. }) => {
@@ -83,10 +82,12 @@ fn approval_response_from_outcome(
                 APPROVE_FOR_SESSION => PermissionsRequestApprovalResponse {
                     permissions: granted_permissions_from_request(requested),
                     scope: PermissionGrantScope::Session,
+                    strict_auto_review: None,
                 },
                 APPROVE_FOR_TURN => PermissionsRequestApprovalResponse {
                     permissions: granted_permissions_from_request(requested),
                     scope: PermissionGrantScope::Turn,
+                    strict_auto_review: None,
                 },
                 _ => rejected_permissions_response(),
             }
@@ -100,19 +101,16 @@ fn rejected_permissions_response() -> PermissionsRequestApprovalResponse {
     PermissionsRequestApprovalResponse {
         permissions: GrantedPermissionProfile::default(),
         scope: PermissionGrantScope::Turn,
+        strict_auto_review: None,
     }
 }
 
 fn granted_permissions_from_request(
-    requested: &AdditionalPermissionProfile,
+    requested: &RequestPermissionProfile,
 ) -> GrantedPermissionProfile {
     GrantedPermissionProfile {
         network: requested.network.clone(),
         file_system: requested.file_system.clone(),
-        macos: requested
-            .macos
-            .as_ref()
-            .map(granted_macos_permissions_from_request),
     }
 }
 
@@ -132,7 +130,7 @@ fn permission_request_content(params: &PermissionsRequestApprovalParams) -> Vec<
             lines.push(format!(
                 "File system read: {}",
                 read.iter()
-                    .map(|path| path.display().to_string())
+                    .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
@@ -144,7 +142,7 @@ fn permission_request_content(params: &PermissionsRequestApprovalParams) -> Vec<
                 "File system write: {}",
                 write
                     .iter()
-                    .map(|path| path.display().to_string())
+                    .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
@@ -157,37 +155,7 @@ fn permission_request_content(params: &PermissionsRequestApprovalParams) -> Vec<
         lines.push(format!("Network access: {enabled}"));
     }
 
-    if let Some(macos) = params.permissions.macos.as_ref() {
-        lines.extend(macos_permission_lines(macos));
-    }
-
     lines
-}
-
-fn granted_macos_permissions_from_request(
-    requested: &AdditionalMacOsPermissions,
-) -> GrantedMacOsPermissions {
-    GrantedMacOsPermissions {
-        preferences: Some(requested.preferences.clone()),
-        automations: Some(requested.automations.clone()),
-        launch_services: Some(requested.launch_services),
-        accessibility: Some(requested.accessibility),
-        calendar: Some(requested.calendar),
-        reminders: Some(requested.reminders),
-        contacts: Some(requested.contacts.clone()),
-    }
-}
-
-fn macos_permission_lines(macos: &AdditionalMacOsPermissions) -> Vec<String> {
-    vec![
-        format!("macOS preferences: {:?}", macos.preferences),
-        format!("macOS automations: {:?}", macos.automations),
-        format!("macOS launch services: {}", macos.launch_services),
-        format!("macOS accessibility: {}", macos.accessibility),
-        format!("macOS calendar: {}", macos.calendar),
-        format!("macOS reminders: {}", macos.reminders),
-        format!("macOS contacts: {:?}", macos.contacts),
-    ]
 }
 
 #[cfg(test)]
@@ -200,25 +168,14 @@ mod tests {
     use agent_client_protocol::schema::v1::{
         PermissionOptionId, RequestPermissionOutcome, SelectedPermissionOutcome,
     };
-    use codex_app_server_protocol::AdditionalPermissionProfile;
-    use codex_protocol::models::{
-        MacOsAutomationPermission, MacOsContactsPermission, MacOsPreferencesPermission,
-    };
-    fn requested_profile() -> AdditionalPermissionProfile {
+    use codex_app_server_protocol::RequestPermissionProfile;
+
+    fn requested_profile() -> RequestPermissionProfile {
         serde_json::from_value(serde_json::json!({
             "network": { "enabled": true },
             "fileSystem": {
                 "read": ["/tmp/read"],
                 "write": ["/tmp/write"]
-            },
-            "macos": {
-                "preferences": MacOsPreferencesPermission::ReadWrite,
-                "automations": MacOsAutomationPermission::All,
-                "launchServices": true,
-                "accessibility": true,
-                "calendar": false,
-                "reminders": true,
-                "contacts": MacOsContactsPermission::ReadOnly,
             }
         }))
         .expect("valid requested permissions profile")
@@ -231,23 +188,16 @@ mod tests {
                     "threadId": "thread-1",
                     "turnId": "turn-1",
                     "itemId": "item-1",
+                    "startedAtMs": 0,
+                    "cwd": "/tmp/workspace",
                     "reason": "Need broader access",
                     "permissions": {
                         "network": { "enabled": true },
                         "fileSystem": {
                             "read": ["/tmp/read"],
                             "write": ["/tmp/write"]
-                        },
-                    "macos": {
-                        "preferences": "read_write",
-                        "automations": "all",
-                        "launchServices": true,
-                        "accessibility": true,
-                        "calendar": false,
-                        "reminders": true,
-                        "contacts": "read_only"
+                        }
                     }
-                }
             }))
             .expect("must decode params");
 
@@ -301,7 +251,6 @@ mod tests {
         assert_eq!(response.scope, PermissionGrantScope::Turn);
         assert!(response.permissions.network.is_none());
         assert!(response.permissions.file_system.is_none());
-        assert!(response.permissions.macos.is_none());
     }
 
     #[test]
@@ -310,6 +259,11 @@ mod tests {
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "item-1".to_string(),
+            environment_id: None,
+            started_at_ms: 0,
+            cwd: "/tmp/workspace"
+                .try_into()
+                .expect("absolute test workspace path"),
             reason: Some("Need broader access".to_string()),
             permissions: requested_profile(),
         };
@@ -326,11 +280,6 @@ mod tests {
             lines
                 .iter()
                 .any(|line| line.contains("Network access: true"))
-        );
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains("macOS accessibility: true"))
         );
     }
 }

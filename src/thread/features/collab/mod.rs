@@ -118,6 +118,7 @@ pub(in crate::thread) async fn handle_item_started(
             receiver_thread_ids,
             prompt,
             agents_states,
+            ..
         } => {
             ensure_agent_labels_for_item(inner, &sender_thread_id, &receiver_thread_ids).await;
             render::emit_collab_tool_call_started(
@@ -153,6 +154,7 @@ pub(in crate::thread) async fn handle_item_completed(
             receiver_thread_ids,
             prompt,
             agents_states,
+            ..
         } => {
             ensure_agent_labels_for_item(inner, &sender_thread_id, &receiver_thread_ids).await;
             render::emit_collab_tool_call_completed(
@@ -189,6 +191,7 @@ pub(in crate::thread) async fn replay_item(
             receiver_thread_ids,
             prompt,
             agents_states,
+            ..
         } => {
             render::replay_collab_tool_call(
                 client,

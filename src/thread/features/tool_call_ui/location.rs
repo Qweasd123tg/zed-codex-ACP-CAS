@@ -183,7 +183,7 @@ mod tests {
         let actions = vec![CommandAction::Read {
             command: "cat src/lib.rs".to_string(),
             name: "cat".to_string(),
-            path: PathBuf::from("src/lib.rs"),
+            path: "/repo/src/lib.rs".try_into().expect("absolute test path"),
         }];
 
         let locations = command_tool_locations(Path::new("/repo"), "echo ignored", &actions);

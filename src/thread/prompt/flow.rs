@@ -13,13 +13,6 @@ impl Thread {
     // Сначала обрабатываем slash-команды, чтобы не отправлять управляющие команды как пользовательский промпт.
     pub async fn prompt(&self, request: PromptRequest) -> Result<StopReason, Error> {
         let command = prompt_commands::parse_session_command(&request.prompt);
-        let resume_request = match &command {
-            Some(SessionCommand::Resume {
-                thread_id,
-                include_history,
-            }) => Some((thread_id.clone(), *include_history)),
-            _ => None,
-        };
         let undo_turns = match &command {
             Some(SessionCommand::Undo { num_turns }) => Some(*num_turns),
             _ => None,
@@ -86,12 +79,6 @@ impl Thread {
                 )
                 .await;
             return Ok(StopReason::EndTurn);
-        }
-        if let Some((thread_id, include_history)) = resume_request {
-            drop(inner);
-            return self
-                .handle_resume_selector_command_ext(thread_id.as_deref(), include_history)
-                .await;
         }
         if let Some(num_turns) = undo_turns {
             drop(inner);
@@ -289,8 +276,5 @@ fn should_offer_plan_implementation(
 }
 
 fn should_drain_background_notifications(command: Option<&SessionCommand>) -> bool {
-    !matches!(
-        command,
-        Some(SessionCommand::Resume { .. } | SessionCommand::Fork { .. })
-    )
+    !matches!(command, Some(SessionCommand::Fork { .. }))
 }

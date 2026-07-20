@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::thread::{AppModel, ReasoningEffort, ServiceTier, ThreadInner};
+use crate::thread::{AppModel, ReasoningEffort, ThreadInner};
 
 #[path = "selector_preferences/jsonc.rs"]
 mod jsonc;
@@ -52,7 +52,7 @@ pub(in crate::thread) struct SelectorDefaultPreferences {
         serialize_with = "serialize_double_option",
         skip_serializing_if = "Option::is_none"
     )]
-    pub(in crate::thread) service_tier: Option<Option<ServiceTier>>,
+    pub(in crate::thread) service_tier: Option<Option<String>>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,7 +62,7 @@ pub(in crate::thread) struct ModelSelectorPreferences {
     #[serde(skip)]
     pub(in crate::thread) default_reasoning_effort: Option<ReasoningEffort>,
     #[serde(skip)]
-    pub(in crate::thread) default_service_tier: Option<ServiceTier>,
+    pub(in crate::thread) default_service_tier: Option<String>,
     #[serde(default)]
     pub(in crate::thread) models: Vec<ModelSelectorModelEntry>,
     #[serde(default)]
@@ -149,10 +149,10 @@ pub(in crate::thread) struct ModelSelectorReasoningEffortDetails {
 }
 
 impl ModelSelectorReasoningEffortEntry {
-    fn id(&self) -> ReasoningEffort {
+    fn id(&self) -> &ReasoningEffort {
         match self {
-            Self::Id(effort) => *effort,
-            Self::Details(details) => details.id,
+            Self::Id(effort) => effort,
+            Self::Details(details) => &details.id,
         }
     }
 
@@ -170,7 +170,7 @@ impl ModelSelectorReasoningEffortEntry {
         }
     }
 
-    fn materialized(effort: ReasoningEffort, existing: Option<&Self>) -> Self {
+    fn materialized(effort: &ReasoningEffort, existing: Option<&Self>) -> Self {
         let name = existing
             .and_then(Self::name_override)
             .map(ToString::to_string);
@@ -178,10 +178,10 @@ impl ModelSelectorReasoningEffortEntry {
             .and_then(Self::description_override)
             .map(ToString::to_string);
         if name.is_none() && description.is_none() {
-            Self::Id(effort)
+            Self::Id(effort.clone())
         } else {
             Self::Details(ModelSelectorReasoningEffortDetails {
-                id: effort,
+                id: effort.clone(),
                 name,
                 description,
             })
@@ -199,7 +199,7 @@ impl ModelSelectorPreferences {
         models: &'a [AppModel],
     ) -> Vec<&'a AppModel> {
         if self.models.is_empty() {
-            return models.iter().collect();
+            return models.iter().filter(|model| !model.hidden).collect();
         }
 
         let mut ordered = Vec::new();
@@ -227,8 +227,8 @@ impl ModelSelectorPreferences {
 
     pub(in crate::thread) fn hides_reasoning_effort(
         &self,
-        effort: ReasoningEffort,
-        current_effort: ReasoningEffort,
+        effort: &ReasoningEffort,
+        current_effort: &ReasoningEffort,
     ) -> bool {
         if effort == current_effort {
             return false;
@@ -238,7 +238,7 @@ impl ModelSelectorPreferences {
 
     pub(in crate::thread) fn explicitly_enables_reasoning_effort(
         &self,
-        effort: ReasoningEffort,
+        effort: &ReasoningEffort,
     ) -> bool {
         self.reasoning_effort_entry(effort).is_some()
     }
@@ -246,13 +246,13 @@ impl ModelSelectorPreferences {
     pub(in crate::thread) fn configured_visible_reasoning_efforts(&self) -> Vec<ReasoningEffort> {
         self.reasoning_efforts
             .iter()
-            .map(ModelSelectorReasoningEffortEntry::id)
+            .map(|entry| entry.id().clone())
             .collect()
     }
 
     pub(in crate::thread) fn reasoning_effort_name_override(
         &self,
-        effort: ReasoningEffort,
+        effort: &ReasoningEffort,
     ) -> Option<&str> {
         self.reasoning_effort_entry(effort)
             .and_then(ModelSelectorReasoningEffortEntry::name_override)
@@ -260,7 +260,7 @@ impl ModelSelectorPreferences {
 
     pub(in crate::thread) fn reasoning_effort_description_override(
         &self,
-        effort: ReasoningEffort,
+        effort: &ReasoningEffort,
     ) -> Option<&str> {
         self.reasoning_effort_entry(effort)
             .and_then(ModelSelectorReasoningEffortEntry::description_override)
@@ -284,7 +284,7 @@ impl ModelSelectorPreferences {
 
     fn reasoning_effort_entry(
         &self,
-        effort: ReasoningEffort,
+        effort: &ReasoningEffort,
     ) -> Option<&ModelSelectorReasoningEffortEntry> {
         self.reasoning_efforts
             .iter()
@@ -357,13 +357,11 @@ impl SlashCommandPreferences {
     }
 }
 
-fn default_slash_commands() -> [&'static str; 13] {
+fn default_slash_commands() -> [&'static str; 11] {
     [
         "init",
         "status",
         "review",
-        "threads",
-        "resume",
         "fork",
         "archive",
         "unarchive",
@@ -391,8 +389,8 @@ pub(in crate::thread) fn apply_selector_preferences(
 ) {
     if let Some(value) = preferences.model_selector {
         let default_model = inner.model_selector.default_model.clone();
-        let default_reasoning_effort = inner.model_selector.default_reasoning_effort;
-        let default_service_tier = inner.model_selector.default_service_tier;
+        let default_reasoning_effort = inner.model_selector.default_reasoning_effort.clone();
+        let default_service_tier = inner.model_selector.default_service_tier.clone();
         inner.model_selector = value;
         inner.model_selector.default_model = default_model;
         inner.model_selector.default_reasoning_effort = default_reasoning_effort;
@@ -411,7 +409,7 @@ pub(in crate::thread) fn apply_selector_preferences(
             }
         }
         if let Some(effort) = defaults.reasoning_effort {
-            inner.model_selector.default_reasoning_effort = effort;
+            inner.model_selector.default_reasoning_effort = effort.clone();
             if let Some(effort) = effort {
                 inner.reasoning_effort = normalize_reasoning_effort_for_preferences(
                     &inner.models,
@@ -422,7 +420,7 @@ pub(in crate::thread) fn apply_selector_preferences(
             }
         }
         if let Some(service_tier) = defaults.service_tier {
-            inner.model_selector.default_service_tier = service_tier;
+            inner.model_selector.default_service_tier = service_tier.clone();
             inner.service_tier = service_tier;
         }
     }
@@ -446,8 +444,8 @@ pub(in crate::thread) fn persist_selector_preferences(inner: &ThreadInner) -> st
     let preferences = SelectorPreferences {
         defaults: Some(SelectorDefaultPreferences {
             model: Some(inner.model_selector.default_model.clone()),
-            reasoning_effort: Some(inner.model_selector.default_reasoning_effort),
-            service_tier: Some(inner.model_selector.default_service_tier),
+            reasoning_effort: Some(inner.model_selector.default_reasoning_effort.clone()),
+            service_tier: Some(inner.model_selector.default_service_tier.clone()),
         }),
         model_selector: Some(model_selector),
         layout: Some(materialized_selector_layout(
@@ -516,8 +514,36 @@ mod tests {
         SlashCommandPreferences, materialized_model_selector, materialized_selector_layout,
         restore_selector_preferences, selector_preferences_path, write_selector_preferences,
     };
-    use crate::thread::{AppModel, ReasoningEffort, ServiceTier};
+    use crate::thread::{AppModel, ReasoningEffort};
+    use codex_app_server_protocol::ReasoningEffortOption;
     use std::path::Path;
+
+    fn test_model(id: &str, hidden: bool, efforts: Vec<ReasoningEffort>) -> AppModel {
+        AppModel {
+            id: id.to_string(),
+            model: id.to_string(),
+            upgrade: None,
+            upgrade_info: None,
+            availability_nux: None,
+            display_name: id.to_string(),
+            description: format!("{id} description"),
+            hidden,
+            supported_reasoning_efforts: efforts
+                .into_iter()
+                .map(|reasoning_effort| ReasoningEffortOption {
+                    reasoning_effort,
+                    description: "test effort".to_string(),
+                })
+                .collect(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            input_modalities: Vec::new(),
+            supports_personality: false,
+            additional_speed_tiers: Vec::new(),
+            service_tiers: Vec::new(),
+            default_service_tier: None,
+            is_default: !hidden,
+        }
+    }
 
     #[test]
     fn preferences_path_uses_cas_home() {
@@ -539,7 +565,7 @@ mod tests {
             defaults: Some(SelectorDefaultPreferences {
                 model: Some(Some("gpt-5.5".to_string())),
                 reasoning_effort: Some(Some(ReasoningEffort::High)),
-                service_tier: Some(Some(ServiceTier::Fast)),
+                service_tier: Some(Some("fast".to_string())),
             }),
             model_selector: Some(ModelSelectorPreferences {
                 models: vec![ModelSelectorModelEntry::Details(
@@ -582,7 +608,7 @@ mod tests {
         let defaults = restored.defaults.expect("defaults should restore");
         assert_eq!(defaults.model, Some(Some("gpt-5.5".to_string())));
         assert_eq!(defaults.reasoning_effort, Some(Some(ReasoningEffort::High)));
-        assert_eq!(defaults.service_tier, Some(Some(ServiceTier::Fast)));
+        assert_eq!(defaults.service_tier, Some(Some("fast".to_string())));
         let model_selector = restored
             .model_selector
             .expect("model selector preferences should restore");
@@ -595,11 +621,11 @@ mod tests {
             Some("manual description")
         );
         assert_eq!(
-            model_selector.reasoning_effort_name_override(ReasoningEffort::XHigh),
+            model_selector.reasoning_effort_name_override(&ReasoningEffort::XHigh),
             Some("максимум")
         );
         assert_eq!(
-            model_selector.reasoning_effort_description_override(ReasoningEffort::XHigh),
+            model_selector.reasoning_effort_description_override(&ReasoningEffort::XHigh),
             Some("manual effort description")
         );
         let layout = restored.layout.expect("layout should restore");
@@ -617,6 +643,56 @@ mod tests {
         assert!(slash_commands.is_enabled("status"));
         assert!(!slash_commands.is_enabled("review"));
         assert!(!slash_commands.is_enabled("archive"));
+        drop(std::fs::remove_file(path));
+    }
+
+    #[test]
+    fn open_reasoning_efforts_round_trip_without_normalization() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "codex-acp-selector-open-reasoning-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let future_effort = ReasoningEffort::Custom("future-effort".to_string());
+        let preferences = super::SelectorPreferences {
+            defaults: Some(SelectorDefaultPreferences {
+                model: None,
+                reasoning_effort: Some(Some(future_effort.clone())),
+                service_tier: None,
+            }),
+            model_selector: Some(ModelSelectorPreferences {
+                reasoning_efforts: vec![
+                    ModelSelectorReasoningEffortEntry::Id(ReasoningEffort::Max),
+                    ModelSelectorReasoningEffortEntry::Id(ReasoningEffort::Ultra),
+                    ModelSelectorReasoningEffortEntry::Id(future_effort.clone()),
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        write_selector_preferences(&path, &preferences).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains(r#""max""#));
+        assert!(written.contains(r#""ultra""#));
+        assert!(written.contains(r#""future-effort""#));
+
+        let restored = restore_selector_preferences(&path).unwrap();
+        assert_eq!(
+            restored
+                .defaults
+                .expect("defaults should restore")
+                .reasoning_effort,
+            Some(Some(future_effort.clone()))
+        );
+        let model_selector = restored
+            .model_selector
+            .expect("model selector should restore");
+        assert_eq!(
+            model_selector.configured_visible_reasoning_efforts(),
+            vec![ReasoningEffort::Max, ReasoningEffort::Ultra, future_effort]
+        );
+
         drop(std::fs::remove_file(path));
     }
 
@@ -681,14 +757,14 @@ mod tests {
             Some("кастомное описание")
         );
         assert!(model_selector.model_entry("gpt-5.2").is_some());
-        assert!(model_selector.explicitly_enables_reasoning_effort(ReasoningEffort::None));
-        assert!(model_selector.explicitly_enables_reasoning_effort(ReasoningEffort::Minimal));
+        assert!(model_selector.explicitly_enables_reasoning_effort(&ReasoningEffort::None));
+        assert!(model_selector.explicitly_enables_reasoning_effort(&ReasoningEffort::Minimal));
         assert_eq!(
-            model_selector.reasoning_effort_name_override(ReasoningEffort::Minimal),
+            model_selector.reasoning_effort_name_override(&ReasoningEffort::Minimal),
             Some("минимум")
         );
         assert_eq!(
-            model_selector.reasoning_effort_description_override(ReasoningEffort::Minimal),
+            model_selector.reasoning_effort_description_override(&ReasoningEffort::Minimal),
             Some("кастомное описание effort")
         );
 
@@ -720,6 +796,9 @@ mod tests {
             default_reasoning_effort: ReasoningEffort::High,
             input_modalities: Vec::new(),
             supports_personality: false,
+            additional_speed_tiers: Vec::new(),
+            service_tiers: Vec::new(),
+            default_service_tier: None,
             is_default: true,
         }];
 
@@ -729,6 +808,79 @@ mod tests {
         assert_eq!(
             materialized.model_description_override("gpt-5.5"),
             Some("кастомное описание")
+        );
+    }
+
+    #[test]
+    fn default_model_selector_excludes_hidden_models_and_their_efforts() {
+        let preferences = ModelSelectorPreferences::default();
+        let models = vec![
+            test_model("gpt-visible", false, vec![ReasoningEffort::Medium]),
+            test_model("gpt-hidden", true, vec![ReasoningEffort::Ultra]),
+        ];
+
+        assert_eq!(
+            preferences
+                .ordered_models(&models)
+                .into_iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gpt-visible"]
+        );
+
+        let materialized = materialized_model_selector(&preferences, &models);
+        assert_eq!(
+            materialized
+                .models
+                .iter()
+                .map(ModelSelectorModelEntry::id)
+                .collect::<Vec<_>>(),
+            vec!["gpt-visible"]
+        );
+        assert_eq!(
+            materialized.configured_visible_reasoning_efforts(),
+            vec![ReasoningEffort::Medium]
+        );
+    }
+
+    #[test]
+    fn explicit_model_selector_includes_and_materializes_hidden_models() {
+        let preferences = ModelSelectorPreferences {
+            models: vec![ModelSelectorModelEntry::Details(
+                ModelSelectorModelDetails {
+                    id: "gpt-hidden".to_string(),
+                    name: Some("Hidden opt-in".to_string()),
+                    description: Some("Explicit hidden model".to_string()),
+                },
+            )],
+            ..Default::default()
+        };
+        let models = vec![
+            test_model("gpt-visible", false, vec![ReasoningEffort::Medium]),
+            test_model("gpt-hidden", true, vec![ReasoningEffort::Ultra]),
+        ];
+
+        assert_eq!(
+            preferences
+                .ordered_models(&models)
+                .into_iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gpt-hidden"]
+        );
+
+        let materialized = materialized_model_selector(&preferences, &models);
+        assert_eq!(
+            materialized.model_name_override("gpt-hidden"),
+            Some("Hidden opt-in")
+        );
+        assert_eq!(
+            materialized.model_description_override("gpt-hidden"),
+            Some("Explicit hidden model")
+        );
+        assert_eq!(
+            materialized.configured_visible_reasoning_efforts(),
+            vec![ReasoningEffort::Ultra]
         );
     }
 
@@ -798,7 +950,11 @@ mod tests {
         );
         assert_eq!(
             layout.status.and_then(|entry| entry.groups),
-            Some(vec!["status".to_string()])
+            Some(vec![
+                "status".to_string(),
+                "integrations".to_string(),
+                "actions".to_string()
+            ])
         );
     }
 }

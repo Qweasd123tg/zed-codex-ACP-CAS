@@ -1,5 +1,7 @@
 //! Mode/sandbox mapping helper-ы для session_config.
 
+use std::path::Path;
+
 use crate::thread::{
     APPROVAL_PRESETS, AUTO_MODE_ID, AppAskForApproval, AppSandboxMode, AppSandboxPolicy,
     AskForApproval, DEFAULT_SESSION_MODE_ID, ModeKind, PLAN_SESSION_MODE_ID, SandboxPolicy,
@@ -55,12 +57,17 @@ pub(in crate::thread) fn mode_state(collaboration_mode_kind: ModeKind) -> Sessio
 pub(in crate::thread) fn current_permission_mode_id(
     approval: AppAskForApproval,
     sandbox: AppSandboxMode,
+    workspace_cwd: &Path,
 ) -> SessionModeId {
     let current = APPROVAL_PRESETS
         .iter()
         .find(|preset| {
+            let preset_sandbox = preset
+                .permission_profile
+                .to_legacy_sandbox_policy(workspace_cwd)
+                .expect("built-in permission profile must convert to legacy sandbox policy");
             to_app_approval(preset.approval) == approval
-                && to_app_sandbox_mode(&preset.sandbox) == sandbox
+                && to_app_sandbox_mode(&preset_sandbox) == sandbox
         })
         .unwrap_or_else(|| {
             APPROVAL_PRESETS

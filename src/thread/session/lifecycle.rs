@@ -9,25 +9,24 @@ use std::time::Duration;
 use agent_client_protocol::schema::v1::{
     EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio, SessionInfo,
 };
-use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
-use codex_core::plugins::PluginsManager;
-use codex_core::skills::SkillsManager;
+use codex_config::{DEFAULT_MCP_SERVER_ENVIRONMENT_ID, McpServerConfig, McpServerTransportConfig};
+use codex_utils_path_uri::LegacyAppPathString;
 use serde_json::Value as JsonValue;
 
 use super::session_config::{
     AccountStatus, ContextSelectorSummary, RateLimitWarningState, build_mcp_summary,
-    build_skills_summary, policy_to_mode, resolve_reasoning_effort,
-    service_tier_override_from_config, service_tier_override_from_session, to_app_approval,
-    to_app_sandbox_mode,
+    policy_to_mode, resolve_reasoning_effort, service_tier_override_from_config,
+    service_tier_override_from_session, to_app_approval, to_app_sandbox_mode,
 };
 use super::{
     AppAskForApproval, AppModel, AppSandboxPolicy, AppServerProcess, Client, ClientCapabilities,
     Config, ConnectionTo, ContextUsageSource, Error, ListSessionsResponse, ModeKind,
-    ReasoningEffort, ServiceTier, SessionClient, SessionId, Thread, ThreadInner, ThreadListParams,
+    ReasoningEffort, SessionClient, SessionId, Thread, ThreadInner, ThreadListParams,
     ThreadReadParams, ThreadResumeParams, ThreadSortKey, ThreadStartParams,
 };
 use crate::adapter_home::cas_home_from_codex_home;
 use crate::app_server::ThreadDeleteParams;
+use crate::startup_diagnostics::configured_backend_binary;
 use crate::thread::features::collab::remember_agent_label;
 use crate::thread::features::resume::common::thread_display_title;
 use crate::thread::session_display_maps::{
@@ -39,13 +38,13 @@ use crate::thread::session_selector_preferences::{
 };
 use crate::thread::session_usage_cache::{context_usage_cache_path, restore_cached_context_usage};
 use codex_app_server_protocol::{
-    Thread as AppThread, ThreadForkParams, ThreadResumeResponse, ThreadStartResponse,
+    Thread as AppThread, ThreadForkParams, ThreadListCwdFilter, ThreadResumeResponse,
+    ThreadStartResponse,
 };
 use tracing::{info, warn};
 
 const RESUME_STARTUP_RETRY_ATTEMPTS: usize = 6;
 const RESUME_STARTUP_RETRY_DELAY_MS: u64 = 300;
-const CODEX_APP_SERVER_BIN_ENV: &str = "CODEX_ACP_CODEX_BIN";
 
 #[derive(Clone)]
 pub(crate) struct SessionMcpSetup {
@@ -64,7 +63,7 @@ struct BackendThreadBootstrap {
     sandbox: AppSandboxPolicy,
     model: String,
     model_provider: String,
-    service_tier: Option<ServiceTier>,
+    service_tier: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
 }
 
@@ -180,15 +179,21 @@ fn insert_http_mcp_server(target: &mut HashMap<String, McpServerConfig>, server:
                 http_headers: headers_to_map(headers),
                 env_http_headers: None,
             },
+            auth: Default::default(),
+            environment_id: DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
             required: false,
             enabled: true,
+            supports_parallel_tool_calls: false,
             startup_timeout_sec: None,
             tool_timeout_sec: None,
+            default_tools_approval_mode: None,
             disabled_tools: None,
             enabled_tools: None,
             disabled_reason: None,
             scopes: None,
+            oauth: None,
             oauth_resource: None,
+            tools: HashMap::new(),
         },
     );
 }
@@ -213,17 +218,23 @@ fn insert_stdio_mcp_server(
                 args,
                 env: env_to_map(env),
                 env_vars: vec![],
-                cwd: Some(cwd.to_path_buf()),
+                cwd: Some(LegacyAppPathString::from_path(cwd)),
             },
+            auth: Default::default(),
+            environment_id: DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
             required: false,
             enabled: true,
+            supports_parallel_tool_calls: false,
             startup_timeout_sec: None,
             tool_timeout_sec: None,
+            default_tools_approval_mode: None,
             disabled_tools: None,
             enabled_tools: None,
             disabled_reason: None,
             scopes: None,
+            oauth: None,
             oauth_resource: None,
+            tools: HashMap::new(),
         },
     );
 }
@@ -235,21 +246,6 @@ fn normalize_mcp_server_name(name: &str) -> String {
     } else {
         normalized
     }
-}
-
-pub(in crate::thread) async fn load_session_skills_summary_for_cwd(
-    codex_home: &Path,
-    bundled_skills_enabled: bool,
-    cwd: &Path,
-) -> ContextSelectorSummary {
-    let plugins_manager = Arc::new(PluginsManager::new(codex_home.to_path_buf()));
-    let skills_manager = SkillsManager::new(
-        codex_home.to_path_buf(),
-        plugins_manager,
-        bundled_skills_enabled,
-    );
-    let outcome = skills_manager.skills_for_cwd(cwd, false).await;
-    build_skills_summary(&outcome)
 }
 
 fn headers_to_map(headers: Vec<HttpHeader>) -> Option<HashMap<String, String>> {
@@ -381,7 +377,7 @@ async fn retry_thread_resume_with_discovered_path(
 }
 
 async fn spawn_initialized_app(session_id: Option<&SessionId>) -> Result<AppServerProcess, Error> {
-    let codex_bin = codex_app_server_binary();
+    let codex_bin = configured_backend_binary();
     let mut app = AppServerProcess::spawn(&codex_bin)
         .await
         .map_err(|error| startup_error("failed to spawn `codex app-server`", error))?;
@@ -396,18 +392,6 @@ async fn spawn_initialized_app(session_id: Option<&SessionId>) -> Result<AppServ
     Ok(app)
 }
 
-fn codex_app_server_binary() -> String {
-    let configured = std::env::var(CODEX_APP_SERVER_BIN_ENV).ok();
-    codex_app_server_binary_from_env_value(configured.as_deref())
-}
-
-fn codex_app_server_binary_from_env_value(value: Option<&str>) -> String {
-    match value {
-        Some(value) if !value.trim().is_empty() => value.trim().to_string(),
-        _ => "codex".to_string(),
-    }
-}
-
 async fn start_backend_thread(
     config: &Config,
     cwd: &Path,
@@ -420,14 +404,15 @@ async fn start_backend_thread(
     } else {
         info!(cwd = %cwd.display(), "Starting backend thread for new ACP session");
     }
+    let sandbox_policy = config.legacy_sandbox_policy();
     let start = app
         .thread_start(ThreadStartParams {
             model: config.model.clone(),
             model_provider: Some(config.model_provider_id.clone()),
-            service_tier: service_tier_override_from_config(config.service_tier),
+            service_tier: service_tier_override_from_config(config.service_tier.as_deref()),
             cwd: Some(cwd.to_string_lossy().to_string()),
             approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
-            sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
+            sandbox: Some(to_app_sandbox_mode(&sandbox_policy)),
             config: session_mcp_config_overrides,
             ..Default::default()
         })
@@ -441,7 +426,6 @@ impl Thread {
     fn build_thread_from_bootstrap(
         session_id: SessionId,
         codex_home: PathBuf,
-        bundled_skills_enabled: bool,
         workspace_cwd: PathBuf,
         client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
@@ -482,9 +466,7 @@ impl Thread {
         let mut inner = ThreadInner {
             session_id: session_id.clone(),
             app: Arc::new(tokio::sync::Mutex::new(app)),
-            codex_home: codex_home.clone(),
             cas_home,
-            bundled_skills_enabled,
             thread_id,
             backend_cli_version,
             context_usage_cache_path,
@@ -535,7 +517,6 @@ impl Thread {
             latest_turn_diff: None,
             turn_diff_history: Vec::new(),
             file_change_paths_this_turn: HashSet::new(),
-            synced_paths_this_turn: HashSet::new(),
             last_plan_steps: Vec::new(),
             carryover_plan_steps: None,
             pending_thread_title_update: None,
@@ -593,7 +574,7 @@ impl Thread {
             let source_thread_id = inner.thread_id.clone();
             let source_model = inner.current_model.clone();
             let source_model_provider = inner.current_model_provider.clone();
-            let source_service_tier = inner.service_tier;
+            let source_service_tier = inner.service_tier.clone();
             let source_approval_policy = inner.approval_policy;
             let source_sandbox_mode = inner.sandbox_mode;
             let session_mcp_config_overrides = if requested_mcp_override_present {
@@ -614,7 +595,9 @@ impl Thread {
                     thread_id: source_thread_id.clone(),
                     model: Some(source_model),
                     model_provider: Some(source_model_provider),
-                    service_tier: service_tier_override_from_session(source_service_tier),
+                    service_tier: service_tier_override_from_session(
+                        source_service_tier.as_deref(),
+                    ),
                     cwd: Some(cwd.to_string_lossy().to_string()),
                     approval_policy: Some(source_approval_policy),
                     sandbox: Some(source_sandbox_mode),
@@ -635,7 +618,7 @@ impl Thread {
             (
                 source_thread_id,
                 SessionId::new(fork.thread.id),
-                fork.thread.cwd,
+                fork.thread.cwd.to_path_buf(),
                 session_mcp_config_overrides,
                 session_mcp_summary,
             )
@@ -692,7 +675,7 @@ impl Thread {
             &resume.thread.id,
             &resume.thread.turns,
         );
-        let resumed_workspace_cwd = resume.thread.cwd.clone();
+        let resumed_workspace_cwd = resume.thread.cwd.to_path_buf();
         info!(
             session_id = %session_id,
             thread_id = %resume.thread.id,
@@ -701,8 +684,7 @@ impl Thread {
         );
         Self::build_thread_from_bootstrap(
             session_id,
-            config.codex_home.clone(),
-            config.bundled_skills_enabled(),
+            config.codex_home.to_path_buf(),
             resumed_workspace_cwd,
             client,
             client_capabilities,
@@ -730,7 +712,6 @@ impl Thread {
     async fn build_started_thread(
         session_id: SessionId,
         codex_home: PathBuf,
-        bundled_skills_enabled: bool,
         cwd: PathBuf,
         client: ConnectionTo<Client>,
         client_capabilities: Arc<RwLock<ClientCapabilities>>,
@@ -751,7 +732,6 @@ impl Thread {
         Self::build_thread_from_bootstrap(
             session_id,
             codex_home,
-            bundled_skills_enabled,
             cwd,
             client,
             client_capabilities,
@@ -799,8 +779,7 @@ impl Thread {
 
         Self::build_started_thread(
             session_id,
-            config.codex_home.clone(),
-            config.bundled_skills_enabled(),
+            config.codex_home.to_path_buf(),
             cwd,
             client,
             client_capabilities,
@@ -830,8 +809,7 @@ impl Thread {
         let session_id = SessionId::new(start.thread.id.clone());
         let thread = Self::build_started_thread(
             session_id.clone(),
-            config.codex_home.clone(),
-            config.bundled_skills_enabled(),
+            config.codex_home.to_path_buf(),
             cwd,
             client,
             client_capabilities,
@@ -862,15 +840,16 @@ impl Thread {
             "Bootstrapping resumed ACP session"
         );
         let mut app = spawn_initialized_app(Some(&session_id)).await?;
+        let sandbox_policy = config.legacy_sandbox_policy();
 
         let resume_params = ThreadResumeParams {
             thread_id: session_id.0.to_string(),
             model: config.model.clone(),
             model_provider: Some(config.model_provider_id.clone()),
-            service_tier: service_tier_override_from_config(config.service_tier),
+            service_tier: service_tier_override_from_config(config.service_tier.as_deref()),
             cwd: Some(cwd.to_string_lossy().to_string()),
             approval_policy: Some(to_app_approval(*config.permissions.approval_policy.get())),
-            sandbox: Some(to_app_sandbox_mode(config.permissions.sandbox_policy.get())),
+            sandbox: Some(to_app_sandbox_mode(&sandbox_policy)),
             config: session_mcp_config_overrides.clone(),
             ..Default::default()
         };
@@ -943,7 +922,7 @@ impl Thread {
     ) -> Result<ListSessionsResponse, Error> {
         // ACP-клиенты (в т.ч. Zed) часто вызывают session/list без cwd.
         // По умолчанию ведём себя как CLI resume: показываем сессии текущего workspace.
-        let effective_cwd = cwd.or_else(|| Some(config.cwd.clone()));
+        let effective_cwd = cwd.or_else(|| Some(config.cwd.to_path_buf()));
 
         info!(
             cwd = %effective_cwd
@@ -959,13 +938,17 @@ impl Thread {
                 cursor,
                 limit: Some(25),
                 sort_key: Some(ThreadSortKey::UpdatedAt),
+                sort_direction: None,
                 model_providers: None,
                 source_kinds: None,
                 archived: Some(false),
                 cwd: effective_cwd
                     .as_ref()
-                    .map(|path| path.to_string_lossy().to_string()),
+                    .map(|path| ThreadListCwdFilter::One(path.to_string_lossy().to_string())),
+                use_state_db_only: false,
                 search_term: None,
+                parent_thread_id: None,
+                ancestor_thread_id: None,
             })
             .await
             .map_err(|error| startup_error("failed to list backend threads", error))?;
@@ -975,7 +958,7 @@ impl Thread {
             .into_iter()
             .map(|thread| {
                 let title = thread_display_title(&thread);
-                SessionInfo::new(SessionId::new(thread.id), thread.cwd)
+                SessionInfo::new(SessionId::new(thread.id), thread.cwd.to_path_buf())
                     .title(Some(title))
                     .updated_at(Some(format_session_updated_at(thread.updated_at)))
             })
@@ -988,35 +971,20 @@ impl Thread {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_session_mcp_config_overrides, codex_app_server_binary_from_env_value,
-        format_session_updated_at, is_missing_rollout_thread_error,
-        resume_params_with_discovered_path, resume_path_discovery_read_params,
+        build_session_mcp_config_overrides, format_session_updated_at,
+        is_missing_rollout_thread_error, resume_params_with_discovered_path,
+        resume_path_discovery_read_params,
     };
     use agent_client_protocol::{
         Error,
         schema::v1::{McpServer, McpServerHttp, McpServerSse, McpServerStdio},
     };
     use codex_app_server_protocol::ThreadResumeParams;
-    use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
+    use codex_config::{
+        DEFAULT_MCP_SERVER_ENVIRONMENT_ID, McpServerConfig, McpServerTransportConfig,
+    };
     use std::collections::HashMap;
     use std::path::PathBuf;
-
-    #[test]
-    fn codex_app_server_binary_defaults_to_codex() {
-        assert_eq!(codex_app_server_binary_from_env_value(None), "codex");
-        assert_eq!(codex_app_server_binary_from_env_value(Some("")), "codex");
-        assert_eq!(codex_app_server_binary_from_env_value(Some("   ")), "codex");
-    }
-
-    #[test]
-    fn codex_app_server_binary_uses_configured_path() {
-        assert_eq!(
-            codex_app_server_binary_from_env_value(Some(
-                r"C:\Users\LOQ\.vscode\extensions\openai.chatgpt\bin\windows-x86_64\codex.exe",
-            )),
-            r"C:\Users\LOQ\.vscode\extensions\openai.chatgpt\bin\windows-x86_64\codex.exe"
-        );
-    }
 
     #[test]
     fn detects_retryable_missing_rollout_resume_error() {
@@ -1157,15 +1125,21 @@ mod tests {
                     env_vars: vec![],
                     cwd: None,
                 },
+                auth: Default::default(),
+                environment_id: DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
                 required: false,
                 enabled: true,
+                supports_parallel_tool_calls: false,
                 disabled_reason: None,
                 startup_timeout_sec: None,
                 tool_timeout_sec: None,
+                default_tools_approval_mode: None,
                 enabled_tools: None,
                 disabled_tools: None,
                 scopes: None,
+                oauth: None,
                 oauth_resource: None,
+                tools: HashMap::new(),
             },
         );
 

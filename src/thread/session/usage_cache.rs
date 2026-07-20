@@ -93,8 +93,12 @@ mod tests {
         AppTurn {
             id: id.to_string(),
             items: vec![],
+            items_view: Default::default(),
             status: codex_app_server_protocol::TurnStatus::Completed,
             error: None,
+            started_at: None,
+            completed_at: None,
+            duration_ms: None,
         }
     }
 

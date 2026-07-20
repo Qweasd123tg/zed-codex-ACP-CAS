@@ -185,7 +185,7 @@ pub(in crate::thread) fn file_change_to_replay_diff(
                 .unwrap_or_else(|| source_path.clone());
 
             // Replay-события для update несут только patch-текст, поэтому восстанавливаем old/new
-            // из unified diff, чтобы после /resume сохранить построчные UI-маркеры (+/-).
+            // из unified diff, чтобы после history replay сохранить построчные UI-маркеры (+/-).
             if let Some((old_text, new_text)) = unified_diff_to_old_new(&change.diff) {
                 Diff::new(target_path, new_text).old_text(Some(old_text))
             } else {

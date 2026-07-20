@@ -13,9 +13,9 @@ use codex_app_server_protocol::{
     InitializeParams, InitializeResponse, JSONRPCError, JSONRPCErrorError, JSONRPCMessage,
     JSONRPCResponse, ModelListParams, ModelListResponse, PermissionsRequestApprovalResponse,
     PluginListParams, PluginListResponse, RequestId, ReviewStartParams, ReviewStartResponse,
-    ThreadArchiveParams, ThreadArchiveResponse, ThreadCompactStartParams,
-    ThreadCompactStartResponse, ThreadForkParams, ThreadForkResponse, ThreadListParams,
-    ThreadListResponse, ThreadReadParams, ThreadReadResponse, ThreadResumeParams,
+    SkillsListParams, SkillsListResponse, ThreadArchiveParams, ThreadArchiveResponse,
+    ThreadCompactStartParams, ThreadCompactStartResponse, ThreadForkParams, ThreadForkResponse,
+    ThreadListParams, ThreadListResponse, ThreadReadParams, ThreadReadResponse, ThreadResumeParams,
     ThreadResumeResponse, ThreadRollbackParams, ThreadRollbackResponse, ThreadSetNameParams,
     ThreadSetNameResponse, ThreadStartParams, ThreadStartResponse, ThreadUnarchiveParams,
     ThreadUnarchiveResponse, ToolRequestUserInputResponse, TurnInterruptParams,
@@ -52,6 +52,13 @@ fn format_timeout_duration(timeout: std::time::Duration) -> String {
         format!("{}s", timeout.as_secs())
     } else {
         format!("{millis}ms")
+    }
+}
+
+fn model_list_params() -> ModelListParams {
+    ModelListParams {
+        include_hidden: Some(true),
+        ..Default::default()
     }
 }
 
@@ -150,6 +157,7 @@ impl AppServerProcess {
                 capabilities: Some(InitializeCapabilities {
                     experimental_api: true,
                     opt_out_notification_methods: None,
+                    ..Default::default()
                 }),
             },
         };
@@ -164,9 +172,21 @@ impl AppServerProcess {
         let request_id = self.next_request_id();
         let request = ClientRequest::ModelList {
             request_id: request_id.clone(),
-            params: ModelListParams::default(),
+            params: model_list_params(),
         };
         self.request(request, request_id, "model/list").await
+    }
+
+    pub async fn skills_list(
+        &mut self,
+        params: SkillsListParams,
+    ) -> Result<SkillsListResponse, Error> {
+        let request_id = self.next_request_id();
+        let request = ClientRequest::SkillsList {
+            request_id: request_id.clone(),
+            params,
+        };
+        self.request(request, request_id, "skills/list").await
     }
 
     pub async fn get_account_rate_limits(&mut self) -> Result<GetAccountRateLimitsResponse, Error> {
@@ -594,5 +614,23 @@ impl AppServerProcess {
             .map_err(|err| io_error(format!("failed to serialize JSON-RPC payload: {err}")))?;
         line.push('\n');
         write_line_to_stdin(&self.stdin, line).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClientRequest, RequestId, model_list_params};
+
+    #[test]
+    fn model_list_requests_the_complete_hidden_catalog() {
+        let request = ClientRequest::ModelList {
+            request_id: RequestId::Integer(1),
+            params: model_list_params(),
+        };
+
+        let serialized =
+            serde_json::to_value(request).expect("model/list request should serialize");
+        assert_eq!(serialized["method"], "model/list");
+        assert_eq!(serialized["params"]["includeHidden"], true);
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "codex-acp"
-version = "0.26.2"
+version = "0.27.0"
 edition = "2024"
 authors = ["Qweasd123tg"]
 license = "Apache-2.0"
@@ -22,13 +22,15 @@ anyhow = "1"
 base64 = "0.22"
 chrono = "0.4"
 clap = "4"
-codex-app-server-protocol = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
-codex-arg0 = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
-codex-core = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
-codex-protocol = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
-codex-login = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
-codex-utils-approval-presets = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
-codex-utils-cli = { git = "https://github.com/zed-industries/codex", rev = "ab7a5b87a9e455235f65637f1675c03051481c87" }
+codex-app-server-protocol = { git = "https://github.com/openai/codex", rev = "5d1fbf26c43abc65a203928b2e31561cb039e06d" }
+codex-arg0 = { git = "https://github.com/openai/codex", rev = "5d1fbf26c43abc65a203928b2e31561cb039e06d" }
+codex-config = { git = "https://github.com/openai/codex", rev = "5d1fbf26c43abc65a203928b2e31561cb039e06d" }
+codex-core = { git = "https://github.com/openai/codex", rev = "5d1fbf26c43abc65a203928b2e31561cb039e06d" }
+codex-protocol = { git = "https://github.com/openai/codex", rev = "5d1fbf26c43abc65a203928b2e31561cb039e06d" }
+codex-login = { git = "https://github.com/openai/codex", rev = "5d1fbf26c43abc65a203928b2e31561cb039e06d" }
+codex-utils-approval-presets = { git = "https://github.com/openai/codex", rev = "5d1fbf26c43abc65a203928b2e31561cb039e06d" }
+codex-utils-cli = { git = "https://github.com/openai/codex", rev = "5d1fbf26c43abc65a203928b2e31561cb039e06d" }
+codex-utils-path-uri = { git = "https://github.com/openai/codex", rev = "5d1fbf26c43abc65a203928b2e31561cb039e06d" }
 regex-lite = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -38,6 +40,9 @@ tokio-util = { version = "0.7", features = ["compat"] }
 tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+toml = "0.9"
 
 [package.metadata.deb]
 maintainer = "Qweasd123tg"

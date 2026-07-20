@@ -12,6 +12,7 @@ use tracing_subscriber::EnvFilter;
 mod adapter_home;
 mod app_server;
 mod codex_agent;
+mod startup_diagnostics;
 mod thread;
 
 /// Запускает ACP-агент Codex.
@@ -35,30 +36,33 @@ pub async fn run_main(
         .try_init();
 
     // Парсим CLI-override-параметры и загружаем конфигурацию.
-    let cli_kv_overrides = cli_config_overrides.parse_overrides().map_err(|e| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("error parsing -c overrides: {e}"),
-        )
-    })?;
+    let cli_kv_overrides = match cli_config_overrides.parse_overrides() {
+        Ok(overrides) => overrides,
+        Err(error) => {
+            return Err(startup_diagnostics::config_load_error(format!(
+                "error parsing -c overrides: {error}"
+            ))
+            .await);
+        }
+    };
 
     let config_overrides = ConfigOverrides {
         codex_linux_sandbox_exe,
         ..ConfigOverrides::default()
     };
 
-    let config =
-        Config::load_with_cli_overrides_and_harness_overrides(cli_kv_overrides, config_overrides)
-            .await
-            .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("error loading config: {e}"),
-                )
-            })?;
+    let config = match Config::load_with_cli_overrides_and_harness_overrides(
+        cli_kv_overrides,
+        config_overrides,
+    )
+    .await
+    {
+        Ok(config) => config,
+        Err(error) => return Err(startup_diagnostics::config_load_error(error).await),
+    };
 
     // Создаём реализацию Agent с каналом уведомлений.
-    let agent = std::sync::Arc::new(codex_agent::CodexAgent::new(config));
+    let agent = std::sync::Arc::new(codex_agent::CodexAgent::new(config).await);
 
     let stdin = tokio::io::stdin().compat();
     let stdout = tokio::io::stdout().compat_write();

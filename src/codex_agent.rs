@@ -19,12 +19,12 @@ use acp::{
     },
 };
 use agent_client_protocol as acp;
-use codex_core::{
-    CodexAuth,
-    auth::{AuthManager, read_codex_api_key_from_env, read_openai_api_key_from_env},
-    config::Config,
+use codex_core::config::Config;
+use codex_login::auth::read_codex_api_key_from_env;
+use codex_login::{
+    AuthManager, CLIENT_ID, CODEX_API_KEY_ENV_VAR, CodexAuth, OPENAI_API_KEY_ENV_VAR,
+    read_openai_api_key_from_env,
 };
-use codex_login::{CODEX_API_KEY_ENV_VAR, OPENAI_API_KEY_ENV_VAR};
 use serde::Deserialize;
 use serde_json::value::to_raw_value;
 use std::{
@@ -89,12 +89,8 @@ impl CodexAgent {
     }
 
     // Сохраняем общий стартовый конфиг, который используется всеми ACP-сессиями.
-    pub fn new(config: Config) -> Self {
-        let auth_manager = AuthManager::shared(
-            config.codex_home.clone(),
-            false,
-            config.cli_auth_credentials_store_mode,
-        );
+    pub async fn new(config: Config) -> Self {
+        let auth_manager = AuthManager::shared_from_config(&config, false).await;
         let auto_restore_enabled = Self::auto_restore_enabled_from_env();
 
         Self {
@@ -611,10 +607,12 @@ impl CodexAgent {
         match auth_method {
             CodexAuthMethod::ChatGpt => {
                 let opts = codex_login::ServerOptions::new(
-                    self.config.codex_home.clone(),
-                    codex_core::auth::CLIENT_ID.to_string(),
+                    self.config.codex_home.to_path_buf(),
+                    CLIENT_ID.to_string(),
                     None,
                     self.config.cli_auth_credentials_store_mode,
+                    self.config.auth_keyring_backend_kind(),
+                    self.config.auth_route_config(),
                 );
 
                 let server =
@@ -623,7 +621,7 @@ impl CodexAgent {
                     .block_until_done()
                     .await
                     .map_err(Error::into_internal_error)?;
-                self.auth_manager.reload();
+                self.auth_manager.reload().await;
             }
             CodexAuthMethod::CodexApiKey => {
                 let api_key = read_codex_api_key_from_env().ok_or_else(|| {
@@ -633,6 +631,7 @@ impl CodexAgent {
                     &self.config.codex_home,
                     &api_key,
                     self.config.cli_auth_credentials_store_mode,
+                    self.config.auth_keyring_backend_kind(),
                 )
                 .map_err(Error::into_internal_error)?;
             }
@@ -644,18 +643,20 @@ impl CodexAgent {
                     &self.config.codex_home,
                     &api_key,
                     self.config.cli_auth_credentials_store_mode,
+                    self.config.auth_keyring_backend_kind(),
                 )
                 .map_err(Error::into_internal_error)?;
             }
         }
 
-        self.auth_manager.reload();
+        self.auth_manager.reload().await;
         Ok(AuthenticateResponse::new())
     }
 
     async fn logout(&self, _request: LogoutRequest) -> Result<LogoutResponse, Error> {
         self.auth_manager
             .logout()
+            .await
             .map_err(Error::into_internal_error)?;
         Ok(LogoutResponse::new())
     }
@@ -1019,17 +1020,19 @@ impl TryFrom<AuthMethodId> for CodexAuthMethod {
 mod tests {
     use super::*;
     use codex_core::config::Config;
-    use std::path::PathBuf;
 
     fn build_ext_request(method: &str, value: serde_json::Value) -> ExtRequest {
         let raw = to_raw_value(&value).expect("raw value");
         ExtRequest::new(method, Arc::from(raw))
     }
 
-    fn build_test_config() -> Config {
+    async fn build_test_config() -> Config {
         let mut config = Config::load_default_with_cli_overrides(vec![])
+            .await
             .expect("default config should load for tests");
-        config.cwd = PathBuf::from("/tmp/codex-acp-cas-tests");
+        config.cwd = "/tmp/codex-acp-cas-tests"
+            .try_into()
+            .expect("absolute test workspace path");
         config
     }
 
@@ -1102,7 +1105,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn initialize_advertises_session_lifecycle_capabilities() {
-        let agent = CodexAgent::new(build_test_config());
+        let agent = CodexAgent::new(build_test_config().await).await;
         let response = agent
             .initialize(InitializeRequest::new(ProtocolVersion::V1))
             .await

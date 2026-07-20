@@ -9,7 +9,6 @@ use agent_client_protocol::schema::v1::{
     ToolKind,
 };
 use codex_app_server_protocol::{FileUpdateChange, PatchApplyStatus, PatchChangeKind};
-use tracing::warn;
 
 use crate::thread::features::status_mapping;
 use crate::thread::{SessionClient, ThreadInner};
@@ -21,7 +20,6 @@ pub(in crate::thread) struct FileChangeStartedSnapshot {
     pub(in crate::thread) locations: Vec<ToolCallLocation>,
     pub(in crate::thread) preview_content: Vec<ToolCallContent>,
     pub(in crate::thread) title: String,
-    pub(in crate::thread) prime_paths: Vec<PathBuf>,
 }
 
 pub(in crate::thread) struct FileChangeCompletedSnapshot {
@@ -33,7 +31,6 @@ pub(in crate::thread) struct FileChangeCompletedSnapshot {
     pub(in crate::thread) workspace_cwd: PathBuf,
     pub(in crate::thread) changes: Vec<FileUpdateChange>,
     pub(in crate::thread) before_contents: HashMap<PathBuf, Option<String>>,
-    pub(in crate::thread) writeback_paths: Vec<PathBuf>,
 }
 
 pub(in crate::thread) fn prepare_file_change_started_snapshot(
@@ -92,31 +89,6 @@ pub(in crate::thread) fn prepare_file_change_started_snapshot(
         .collect::<Vec<_>>();
     let title = file_change_tool_title(&inner.workspace_cwd, &changes);
 
-    let mut prime_paths = Vec::new();
-    if inner.client.supports_read_text_file() {
-        let mut primed_paths = HashSet::new();
-        for change in &changes {
-            let source_path = super::changes::resolve_workspace_path(
-                &inner.workspace_cwd,
-                Path::new(&change.path),
-            );
-            if primed_paths.insert(source_path.clone()) {
-                prime_paths.push(source_path.clone());
-            }
-
-            if let PatchChangeKind::Update {
-                move_path: Some(move_path),
-            } = &change.kind
-            {
-                let target_path =
-                    super::changes::resolve_workspace_path(&inner.workspace_cwd, move_path);
-                if target_path != source_path && primed_paths.insert(target_path.clone()) {
-                    prime_paths.push(target_path);
-                }
-            }
-        }
-    }
-
     FileChangeStartedSnapshot {
         client: inner.client.clone(),
         id,
@@ -124,7 +96,6 @@ pub(in crate::thread) fn prepare_file_change_started_snapshot(
         locations,
         preview_content,
         title,
-        prime_paths,
     }
 }
 
@@ -141,18 +112,9 @@ pub(in crate::thread) async fn emit_file_change_started_snapshot(
                 .content(snapshot.preview_content),
         )
         .await;
-
-    for path in snapshot.prime_paths {
-        if let Err(err) = snapshot.client.prime_file_snapshot(path.clone()).await {
-            warn!(
-                "Failed to prime ACP snapshot for {}: {err:?}",
-                path.display()
-            );
-        }
-    }
 }
 
-// Публикуем старт file-change: превью, locations и pre-edit snapshot для корректного writeback.
+// Публикуем старт file-change: превью и locations.
 pub(in crate::thread) async fn emit_file_change_started(
     inner: &mut ThreadInner,
     id: String,
@@ -161,24 +123,6 @@ pub(in crate::thread) async fn emit_file_change_started(
 ) {
     let snapshot = prepare_file_change_started_snapshot(inner, id, changes, status);
     emit_file_change_started_snapshot(snapshot).await;
-}
-
-fn collect_file_change_writeback_paths(
-    workspace_cwd: &Path,
-    changes: &[FileUpdateChange],
-) -> Vec<PathBuf> {
-    let mut writeback_paths = Vec::new();
-    let mut seen_writeback_paths = HashSet::new();
-    for change in changes {
-        if matches!(change.kind, PatchChangeKind::Delete) {
-            continue;
-        }
-        let path = super::changes::file_change_target_path(workspace_cwd, change);
-        if seen_writeback_paths.insert(path.clone()) {
-            writeback_paths.push(path);
-        }
-    }
-    writeback_paths
 }
 
 pub(in crate::thread) fn prepare_file_change_completed_snapshot(
@@ -193,13 +137,6 @@ pub(in crate::thread) fn prepare_file_change_completed_snapshot(
         .iter()
         .map(|change| super::changes::file_change_tool_location(&workspace_cwd, change))
         .collect();
-    let writeback_paths = if matches!(status, PatchApplyStatus::Completed)
-        && inner.client.supports_buffer_writeback()
-    {
-        collect_file_change_writeback_paths(&workspace_cwd, &changes)
-    } else {
-        Vec::new()
-    };
     let before_contents = inner
         .file_change_before_contents
         .remove(&id)
@@ -218,7 +155,6 @@ pub(in crate::thread) fn prepare_file_change_completed_snapshot(
         workspace_cwd,
         changes,
         before_contents,
-        writeback_paths,
     }
 }
 
@@ -280,19 +216,7 @@ fn display_path(workspace_cwd: &Path, path: &Path) -> String {
     display_path.display().to_string()
 }
 
-pub(in crate::thread) fn collect_file_change_writeback_targets(
-    snapshot: &FileChangeCompletedSnapshot,
-) -> Vec<(PathBuf, String)> {
-    snapshot
-        .writeback_paths
-        .iter()
-        .filter_map(|path| {
-            super::changes::read_file_text(path).map(|content| (path.clone(), content))
-        })
-        .collect()
-}
-
-// Публикуем завершение file-change: финальный diff и writeback в ACP text-buffer.
+// Публикуем завершение file-change: финальный diff без повторной full-buffer записи в редактор.
 pub(in crate::thread) async fn emit_file_change_completed(
     inner: &mut ThreadInner,
     id: String,
@@ -301,31 +225,11 @@ pub(in crate::thread) async fn emit_file_change_completed(
 ) {
     let snapshot = prepare_file_change_completed_snapshot(inner, id, changes, status);
     let tool_call_update = build_file_change_completed_update(&snapshot);
-    let writeback_targets = collect_file_change_writeback_targets(&snapshot);
 
     snapshot
         .client
         .send_tool_call_update(tool_call_update)
         .await;
-
-    for (path, content) in writeback_targets {
-        match snapshot
-            .client
-            .sync_text_file_if_changed(path.clone(), content)
-            .await
-        {
-            Ok(true) => {
-                inner.synced_paths_this_turn.insert(path);
-            }
-            Ok(false) => {}
-            Err(err) => {
-                warn!(
-                    "Failed to sync file change into ACP buffer for {}: {err:?}",
-                    path.display()
-                );
-            }
-        }
-    }
 }
 
 // Replay-рендер file-change карточки с восстановленным unified-diff.

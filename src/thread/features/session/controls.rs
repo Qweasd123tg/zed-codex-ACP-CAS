@@ -1,4 +1,4 @@
-//! Обработчики slash-команд управления сессией (без `/resume` и `/undo`).
+//! Обработчики slash-команд управления сессией (без `/undo`).
 //! Сюда вынесены compact/archive/rename/fork ветки.
 
 use std::collections::HashMap;
@@ -40,7 +40,7 @@ struct ThreadSwitchState {
     sandbox_policy: AppSandboxPolicy,
     model: String,
     model_provider: String,
-    service_tier: Option<codex_protocol::config_types::ServiceTier>,
+    service_tier: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
 }
 
@@ -205,7 +205,7 @@ impl SessionThread {
                     thread_id: inner.thread_id.clone(),
                     model: Some(inner.current_model.clone()),
                     model_provider: Some(inner.current_model_provider.clone()),
-                    service_tier: service_tier_override_from_session(inner.service_tier),
+                    service_tier: service_tier_override_from_session(inner.service_tier.as_deref()),
                     cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
                     approval_policy: Some(inner.approval_policy),
                     sandbox: Some(inner.sandbox_mode),
@@ -258,7 +258,7 @@ impl SessionThread {
                 ThreadStartParams {
                     model: Some(inner.current_model.clone()),
                     model_provider: Some(inner.current_model_provider.clone()),
-                    service_tier: service_tier_override_from_session(inner.service_tier),
+                    service_tier: service_tier_override_from_session(inner.service_tier.as_deref()),
                     cwd: Some(inner.workspace_cwd.to_string_lossy().to_string()),
                     approval_policy: Some(inner.approval_policy),
                     sandbox: Some(inner.sandbox_mode),
@@ -379,7 +379,7 @@ async fn apply_thread_switch(
     sync_reason: &'static str,
 ) -> Result<(), Error> {
     inner.thread_id = thread.id.clone();
-    inner.workspace_cwd = thread.cwd.clone();
+    inner.workspace_cwd = thread.cwd.to_path_buf();
     inner.approval_policy = state.approval_policy;
     inner.sandbox_policy = state.sandbox_policy.clone();
     inner.sandbox_mode = crate::thread::session_config::policy_to_mode(&state.sandbox_policy);
@@ -639,16 +639,25 @@ mod tests {
     fn thread_picker_raw_input_keeps_original_preview_text() {
         let thread = Thread {
             id: "019-test".to_string(),
+            extra: None,
+            session_id: "session-test".to_string(),
+            forked_from_id: None,
+            parent_thread_id: None,
             preview: "line one\n\nline   two".to_string(),
             ephemeral: false,
+            history_mode: Default::default(),
             model_provider: "openai".to_string(),
             created_at: 10,
             updated_at: 20,
+            recency_at: None,
             status: ThreadStatus::Idle,
             path: None,
-            cwd: PathBuf::from("/tmp/workspace"),
+            cwd: PathBuf::from("/tmp/workspace")
+                .try_into()
+                .expect("test cwd should be absolute"),
             cli_version: "0.0.0".to_string(),
             source: SessionSource::Cli,
+            thread_source: None,
             agent_nickname: None,
             agent_role: None,
             git_info: None,

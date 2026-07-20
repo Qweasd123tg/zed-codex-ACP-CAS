@@ -37,12 +37,12 @@ use agent_client_protocol::schema::v1::{
 };
 use codex_app_server_protocol::{
     CollabAgentState, CollabAgentStatus, CollabAgentTool, CollabAgentToolCallStatus, CommandAction,
-    PatchChangeKind, ReadOnlyAccess as AppReadOnlyAccess, SandboxMode as AppSandboxMode,
-    SandboxPolicy as AppSandboxPolicy, ToolRequestUserInputQuestion,
+    PatchChangeKind, SandboxMode as AppSandboxMode, SandboxPolicy as AppSandboxPolicy,
+    ToolRequestUserInputQuestion,
 };
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::protocol::{ReadOnlyAccess, SandboxPolicy};
+use codex_protocol::protocol::SandboxPolicy;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

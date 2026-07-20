@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use super::{DiffScope, Error, SessionCommand, StopReason, ThreadInner};
-use crate::thread::features::{plan::parse_collaboration_mode, resume, session};
+use crate::thread::features::{plan::parse_collaboration_mode, session};
 use crate::thread::session_selector_preferences::SlashCommandPreferences;
 use agent_client_protocol::schema::v1::{
     AvailableCommand, AvailableCommandInput, ContentBlock, EmbeddedResource,
@@ -25,6 +25,7 @@ pub(super) fn build_prompt_items(prompt: Vec<ContentBlock>) -> Vec<UserInput> {
             }),
             ContentBlock::Image(image_block) => Some(UserInput::Image {
                 url: format!("data:{};base64,{}", image_block.mime_type, image_block.data),
+                detail: None,
             }),
             ContentBlock::ResourceLink(ResourceLink { name, uri, .. }) => Some(UserInput::Text {
                 text: format_uri_as_link(Some(name), uri),
@@ -82,28 +83,6 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
         });
     }
 
-    if let Some(rest) = text.strip_prefix("/resume") {
-        let mut include_history = true;
-        let mut query_parts = Vec::new();
-        for token in rest.split_whitespace() {
-            if token == "--history" {
-                include_history = true;
-            } else if token == "--no-history" {
-                include_history = false;
-            } else {
-                query_parts.push(token);
-            }
-        }
-
-        let query = query_parts.join(" ");
-        let thread_id = if query.is_empty() { None } else { Some(query) };
-
-        return Some(SessionCommand::Resume {
-            thread_id,
-            include_history,
-        });
-    }
-
     if let Some(rest) = text.strip_prefix("/rename") {
         let name = rest.trim();
         return Some(SessionCommand::Rename {
@@ -155,7 +134,6 @@ pub(super) fn parse_session_command(prompt: &[ContentBlock]) -> Option<SessionCo
 
     let mut parts = text.split_whitespace();
     match parts.next()? {
-        "/threads" => Some(SessionCommand::Threads),
         "/compact" => Some(SessionCommand::Compact),
         "/undo" => {
             let num_turns = parts
@@ -281,9 +259,6 @@ pub(super) async fn dispatch_session_command(
                 .await;
             Ok(CommandDispatchOutcome::Stop(StopReason::EndTurn))
         }
-        SessionCommand::Threads => Ok(CommandDispatchOutcome::Stop(
-            resume::listing::handle_threads_command(inner).await?,
-        )),
         SessionCommand::Review { instructions } => {
             match session::review::handle_review_command(inner, instructions).await? {
                 session::review::ReviewDispatch::Start(target) => {
@@ -293,9 +268,6 @@ pub(super) async fn dispatch_session_command(
                     Ok(CommandDispatchOutcome::Stop(stop_reason))
                 }
             }
-        }
-        SessionCommand::Resume { .. } => {
-            Err(Error::internal_error().data("resume should be handled directly in prompt flow"))
         }
         SessionCommand::Archive { .. } => {
             Err(Error::internal_error().data("archive should be handled directly in prompt flow"))
@@ -333,9 +305,7 @@ pub(super) fn session_command_name(command: &SessionCommand) -> &'static str {
     match command {
         SessionCommand::Init { .. } => "init",
         SessionCommand::Status { .. } => "status",
-        SessionCommand::Threads => "threads",
         SessionCommand::Review { .. } => "review",
-        SessionCommand::Resume { .. } => "resume",
         SessionCommand::Archive { .. } => "archive",
         SessionCommand::Unarchive { .. } => "unarchive",
         SessionCommand::Compact => "compact",
@@ -375,14 +345,6 @@ pub(super) fn builtin_commands(slash_commands: &SlashCommandPreferences) -> Vec<
         )
         .input(AvailableCommandInput::Unstructured(
             UnstructuredCommandInput::new("optional custom review instructions"),
-        )),
-        AvailableCommand::new("threads", "List saved Codex threads for this account"),
-        AvailableCommand::new(
-            "resume",
-            "Resume a thread and replay history. Add `--no-history` for a clean ACP chat switch",
-        )
-        .input(AvailableCommandInput::Unstructured(
-            UnstructuredCommandInput::new("optional partial thread id and/or --no-history"),
         )),
         AvailableCommand::new(
             "fork",

@@ -1,15 +1,13 @@
 //! Тонкая обёртка вокруг вызовов ACP-клиента, ограниченная одним session id и снимком capability.
 
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use tracing::error;
 
 use crate::thread::{
     Client, ClientCapabilities, ConnectionTo, ContentChunk, Error, PermissionOption,
-    ReadTextFileRequest, RequestPermissionOutcome, RequestPermissionRequest, SessionClient,
-    SessionId, SessionNotification, SessionUpdate, ToolCall, ToolCallUpdate, UsageUpdate,
-    WriteTextFileRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, SessionClient, SessionId,
+    SessionNotification, SessionUpdate, ToolCall, ToolCallUpdate, UsageUpdate,
 };
 
 impl SessionClient {
@@ -35,15 +33,6 @@ impl SessionClient {
                 .and_then(|value| value.as_bool())
                 .unwrap_or(false)
         })
-    }
-
-    pub(super) fn supports_buffer_writeback(&self) -> bool {
-        !env_flag("CODEX_ACP_DISABLE_SYNC_EDIT_BUFFERS")
-            && read_client_capabilities(&self.client_capabilities, |caps| caps.fs.write_text_file)
-    }
-
-    pub(super) fn supports_read_text_file(&self) -> bool {
-        read_client_capabilities(&self.client_capabilities, |caps| caps.fs.read_text_file)
     }
 
     pub(super) async fn send_notification(&self, update: SessionUpdate) {
@@ -120,47 +109,6 @@ impl SessionClient {
             .block_task()
             .await?;
         Ok(response.outcome)
-    }
-
-    pub(super) async fn write_text_file(
-        &self,
-        path: PathBuf,
-        content: String,
-    ) -> Result<(), Error> {
-        self.client
-            .send_request(WriteTextFileRequest::new(
-                self.session_id.clone(),
-                path,
-                content,
-            ))
-            .block_task()
-            .await?;
-        Ok(())
-    }
-
-    pub(super) async fn sync_text_file_if_changed(
-        &self,
-        path: PathBuf,
-        content: String,
-    ) -> Result<bool, Error> {
-        if self.supports_read_text_file() {
-            let current = self.prime_file_snapshot(path.clone()).await?;
-            if current == content {
-                return Ok(false);
-            }
-        }
-
-        self.write_text_file(path, content).await?;
-        Ok(true)
-    }
-
-    pub(super) async fn prime_file_snapshot(&self, path: PathBuf) -> Result<String, Error> {
-        let response = self
-            .client
-            .send_request(ReadTextFileRequest::new(self.session_id.clone(), path))
-            .block_task()
-            .await?;
-        Ok(response.content)
     }
 
     pub(super) async fn send_usage_update(&self, used: u64, size: u64) {

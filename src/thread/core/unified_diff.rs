@@ -59,6 +59,13 @@ fn parse_unified_diff_hunks(unified_diff: &str) -> Option<Vec<UnifiedDiffHunk>> 
             continue;
         };
 
+        if line == "\\ No newline at end of file" {
+            if let Some(previous_line) = hunk.lines.last_mut() {
+                previous_line.text = previous_line.text.trim_end_matches('\n').to_string();
+            }
+            continue;
+        }
+
         let Some(kind) = line.chars().next() else {
             continue;
         };

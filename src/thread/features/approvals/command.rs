@@ -146,7 +146,7 @@ fn command_approval_fields(
     command_actions: &[codex_app_server_protocol::CommandAction],
     use_terminal_preflight: bool,
 ) -> ToolCallUpdateFields {
-    let cwd = params.cwd.as_deref().unwrap_or(workspace_cwd);
+    let cwd = command_approval_cwd(params, workspace_cwd);
     let title = if use_terminal_preflight {
         content::command_tool_label(command, cwd, command_actions)
     } else {
@@ -196,7 +196,6 @@ fn should_use_terminal_approval_preflight(
         && tool_events::command::command_uses_native_terminal(command, command_actions)
         && params.network_approval_context.is_none()
         && params.additional_permissions.is_none()
-        && params.skill_metadata.is_none()
 }
 
 fn command_approval_preflight_tool_call(
@@ -205,7 +204,7 @@ fn command_approval_preflight_tool_call(
     command: &str,
     command_actions: &[codex_app_server_protocol::CommandAction],
 ) -> ToolCall {
-    let cwd = params.cwd.as_deref().unwrap_or(workspace_cwd);
+    let cwd = command_approval_cwd(params, workspace_cwd);
     ToolCall::new(
         ToolCallId::new(params.item_id.clone()),
         content::command_tool_label(command, cwd, command_actions),
@@ -221,6 +220,17 @@ fn command_approval_preflight_tool_call(
         &params.item_id,
         cwd,
     ))
+}
+
+fn command_approval_cwd<'a>(
+    params: &'a CommandExecutionRequestApprovalParams,
+    workspace_cwd: &'a Path,
+) -> &'a Path {
+    params
+        .cwd
+        .as_ref()
+        .map(|cwd| Path::new(cwd.as_str()))
+        .unwrap_or(workspace_cwd)
 }
 
 pub(in crate::thread) fn command_approval_decision_from_outcome(
@@ -383,7 +393,10 @@ fn command_approval_lines(params: &CommandExecutionRequestApprovalParams) -> Vec
         if !lines.is_empty() {
             lines.push(String::new());
         }
-        lines.push(indented(&format!("Working directory: `{}`", cwd.display())));
+        lines.push(indented(&format!(
+            "Working directory: `{}`",
+            cwd.render_for_ui()
+        )));
     }
 
     if let Some(network) = params.network_approval_context.as_ref() {
@@ -399,13 +412,6 @@ fn command_approval_lines(params: &CommandExecutionRequestApprovalParams) -> Vec
 
     if let Some(additional_permissions) = params.additional_permissions.as_ref() {
         lines.extend(additional_permission_lines(additional_permissions));
-    }
-
-    if let Some(skill_metadata) = params.skill_metadata.as_ref() {
-        lines.push(format!(
-            "Requested by skill: `{}`",
-            skill_metadata.path_to_skills_md.display()
-        ));
     }
 
     lines
@@ -429,7 +435,7 @@ fn additional_permission_lines(profile: &AdditionalPermissionProfile) -> Vec<Str
             lines.push(indented(&format!(
                 "Additional file system read: {}",
                 read.iter()
-                    .map(|path| path.display().to_string())
+                    .map(|path| path.render_for_ui())
                     .collect::<Vec<_>>()
                     .join(", ")
             )));
@@ -441,7 +447,7 @@ fn additional_permission_lines(profile: &AdditionalPermissionProfile) -> Vec<Str
                 "Additional file system write: {}",
                 write
                     .iter()
-                    .map(|path| path.display().to_string())
+                    .map(|path| path.render_for_ui())
                     .collect::<Vec<_>>()
                     .join(", ")
             )));
@@ -480,6 +486,7 @@ mod tests {
                 "threadId": "thread_1",
                 "turnId": "turn_1",
                 "itemId": "item_1",
+                "startedAtMs": 0,
                 "reason": "Need to inspect the workspace",
                 "command": "/bin/bash -lc 'pwd && ls -la'",
                 "cwd": "/tmp/workspace",
@@ -509,6 +516,7 @@ mod tests {
                 "threadId": "thread_1",
                 "turnId": "turn_1",
                 "itemId": "item_1",
+                "startedAtMs": 0,
                 "reason": "Need to inspect the workspace",
                 "command": "/bin/bash -lc 'git status --short'",
                 "cwd": "/tmp/workspace",
@@ -538,6 +546,7 @@ mod tests {
                 "threadId": "thread_1",
                 "turnId": "turn_1",
                 "itemId": "item_1",
+                "startedAtMs": 0,
                 "command": "curl -I https://example.com",
                 "networkApprovalContext": {
                     "host": "example.com",
@@ -563,6 +572,7 @@ mod tests {
                 "threadId": "thread_1",
                 "turnId": "turn_1",
                 "itemId": "call_1",
+                "startedAtMs": 0,
                 "reason": "Need to run a shell command",
                 "command": "/bin/bash -lc 'echo hi && date'",
                 "cwd": "/tmp/workspace",
@@ -612,6 +622,7 @@ mod tests {
                 "threadId": "thread_1",
                 "turnId": "turn_1",
                 "itemId": "call_1",
+                "startedAtMs": 0,
                 "reason": "Need to run a shell command",
                 "command": "/bin/bash -lc 'cargo test'",
                 "cwd": "/tmp/workspace",
@@ -643,6 +654,7 @@ mod tests {
                 "threadId": "thread_1",
                 "turnId": "turn_1",
                 "itemId": "call_1",
+                "startedAtMs": 0,
                 "command": "curl -I https://example.com",
                 "networkApprovalContext": {
                     "host": "example.com",
@@ -670,6 +682,7 @@ mod tests {
                 "threadId": "thread_1",
                 "turnId": "turn_1",
                 "itemId": "call_1",
+                "startedAtMs": 0,
                 "reason": "Need to remove a generated file",
                 "command": "rm -f /tmp/generated.md",
                 "cwd": "/tmp/workspace"
@@ -695,6 +708,7 @@ mod tests {
                 "threadId": "thread_1",
                 "turnId": "turn_1",
                 "itemId": "item_1",
+                "startedAtMs": 0,
                 "command": "curl -I https://example.com",
                 "networkApprovalContext": {
                     "host": "example.com",
@@ -776,6 +790,7 @@ mod tests {
             "threadId": "thread_1",
             "turnId": "turn_1",
             "itemId": "item_1",
+            "startedAtMs": 0,
             "command": "cargo test",
             "cwd": "/tmp/workspace"
         }))

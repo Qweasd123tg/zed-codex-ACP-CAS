@@ -48,15 +48,16 @@ pub(in crate::thread) fn build_plugins_summary(
         }
     }
 
-    installed_entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
-    available_entries.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+    installed_entries.sort_by_key(|entry| entry.0.to_lowercase());
+    available_entries.sort_by_key(|entry| entry.0.to_lowercase());
 
     let marketplace_count = response.marketplaces.len();
+    let load_error_count = response.marketplace_load_errors.len();
     let installed_count = installed_entries.len();
     let enabled_count = installed_entries.iter().filter(|entry| entry.3).count();
     let disabled_count = installed_count.saturating_sub(enabled_count);
 
-    if total_plugins == 0 && response.remote_sync_error.is_none() {
+    if total_plugins == 0 && load_error_count == 0 {
         return ContextSelectorSummary {
             label: "Plugins · none".to_string(),
             description: "No plugins were discovered for this session.".to_string(),
@@ -95,8 +96,8 @@ pub(in crate::thread) fn build_plugins_summary(
         }
     }
 
-    if response.remote_sync_error.is_some() {
-        description_lines.push("remote sync unavailable".to_string());
+    if load_error_count > 0 {
+        description_lines.push(format!("{load_error_count} marketplace load error(s)"));
     }
 
     let mut report_lines = vec![format!(
@@ -125,9 +126,16 @@ pub(in crate::thread) fn build_plugins_summary(
         }
     }
 
-    if let Some(error) = &response.remote_sync_error {
+    if load_error_count > 0 {
         report_lines.push(String::new());
-        report_lines.push(format!("Remote sync error: {error}"));
+        report_lines.push("Marketplace load errors:".to_string());
+        report_lines.extend(response.marketplace_load_errors.iter().map(|error| {
+            format!(
+                "- {}: {}",
+                error.marketplace_path.as_path().display(),
+                error.message
+            )
+        }));
     }
 
     let mut label = if installed_count == 0 {
@@ -138,8 +146,8 @@ pub(in crate::thread) fn build_plugins_summary(
     if disabled_count > 0 {
         label.push_str(&format!(" · {disabled_count} off"));
     }
-    if response.remote_sync_error.is_some() {
-        label.push_str(" · sync err");
+    if load_error_count > 0 {
+        label.push_str(&format!(" · {load_error_count} load err"));
     }
 
     ContextSelectorSummary {
@@ -187,6 +195,41 @@ fn format_plugin_report_entry(
     match &plugin.source {
         PluginSource::Local { .. } => {
             lines.push("  source: local".to_string());
+        }
+        PluginSource::Git {
+            url,
+            path,
+            ref_name,
+            sha,
+        } => {
+            let mut source = format!("  source: git {url}");
+            if let Some(path) = path {
+                source.push_str(&format!(" path={path}"));
+            }
+            if let Some(ref_name) = ref_name {
+                source.push_str(&format!(" ref={ref_name}"));
+            }
+            if let Some(sha) = sha {
+                source.push_str(&format!(" sha={sha}"));
+            }
+            lines.push(source);
+        }
+        PluginSource::Npm {
+            package,
+            version,
+            registry,
+        } => {
+            let mut source = format!("  source: npm {package}");
+            if let Some(version) = version {
+                source.push_str(&format!("@{version}"));
+            }
+            if let Some(registry) = registry {
+                source.push_str(&format!(" registry={registry}"));
+            }
+            lines.push(source);
+        }
+        PluginSource::Remote => {
+            lines.push("  source: remote".to_string());
         }
     }
     lines.join("\n")

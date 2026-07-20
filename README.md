@@ -2,7 +2,7 @@
 
 `codex-acp` is a practical fork of the Zed Codex ACP adapter. It connects Codex to ACP-compatible clients such as Zed through `codex app-server`.
 
-This fork is focused on real daily use: better startup diagnostics, better session lifecycle behavior, more usable resume/archive/rename flows, and Linux-first stability improvements.
+This fork is focused on real daily use: better startup diagnostics, better session lifecycle behavior, more usable archive/rename flows, and Linux-first stability improvements.
 
 ## Status
 
@@ -18,11 +18,7 @@ This project is usable, but still beta.
 
 ## Screenshots
 
-### Resume and thread management
-
-Resume picker with workspace-scoped thread selection:
-
-![Resume picker](screenshot/resume.png)
+### Session selectors
 
 Session selectors and controls:
 
@@ -75,8 +71,6 @@ Sub-agent and collaboration tool-call rendering:
   - `/init`
   - `/status`
   - `/review`
-  - `/threads`
-  - `/resume`
   - `/fork`
   - `/archive`
   - `/unarchive`
@@ -85,7 +79,7 @@ Sub-agent and collaboration tool-call rendering:
   - `/undo`
   - `/plan`
   - `/diff`
-- Better thread title handling for resume/archive/rename/fork flows
+- Better thread title handling for native resume/archive/rename/fork flows
 - Inline review flows for uncommitted changes, base branches, and specific commits, centered on one ACP picker behind `/review`
 - Standard ACP `session/fork` plus practical in-place `/fork` support on top of native `thread/fork`
 - Tool call cards for command, MCP, web, image, generated-image, file, and collab branches
@@ -107,18 +101,16 @@ Sub-agent and collaboration tool-call rendering:
 - Shorter first-open loading pulse: skills/account/limits metadata now hydrate right after the initial session response instead of blocking `new_session` / `load_session` / `resume_session`
 - Safer turn-start timeout and stale turn-tail cleanup around reconnects
 - Safer history replay fencing for `/undo` and auto-restored session history
-- Less UI freeze risk during `/resume --history` by replaying restored history outside the main session mutex
 - Less duplicate file-change I/O when one patch item touches the same path multiple times
 - More reliable file navigation from completed grouped file-change diff cards
 - Less mutex hold time while waiting for file-change approval prompts
 - Less chat stall while command approval prompts are pending
-- Faster file-change start cards with ACP snapshot priming moved out of the main session mutex
-- Less mutex hold time while final file-change diff is published; ACP buffer writeback still runs outside the main session mutex and can be disabled via `CODEX_ACP_DISABLE_SYNC_EDIT_BUFFERS=1`
+- Less mutex hold time while final file-change diff is published; completed file-change items no longer push a second full-buffer write into Zed after the filesystem edit has already landed
 - Safer transport drain: stale server requests are rejected during post-turn and pre-prompt cleanup instead of triggering late approvals
 - Less reconnect spam: reconnect warnings now collapse into one normalized status line while reconnect-assisted stalled turns still abort cleanly
 - Less brittle transport cleanup: background drain and thread-switch flush now wait for the queue to go quiet instead of assuming `64` messages or one tiny timeout is enough
-- Less turn-completion lock contention: turn diff rendering now runs outside the main session mutex and optional ACP buffer writeback skips paths already reserved by file-change lifecycle
-- Safer Zed buffer writeback after backend edits: the adapter refreshes the current ACP buffer snapshot and skips no-op writes before asking Zed to update an open document, reducing duplicate insertions and format-on-save loops
+- Less turn-completion lock contention: turn diff rendering runs outside the main session mutex and remains a transcript-only reporting path
+- Dirty-buffer-safe file edit synchronization: after Codex changes the filesystem, the adapter publishes the diff but never pushes a second full-buffer write into Zed; the native file watcher reloads clean buffers and preserves dirty buffers as conflicts
 - Less sparse completed tool cards: no-output commands, MCP results, and completed collab/sub-agent calls now keep a short visible summary while retaining raw details
 - Less transport serialization during quiet backend periods: app-server stdout now has a dedicated reader/inbox, so cancel, interrupt, post-turn drain, and thread-switch cleanup do not sit behind one long `next_message()` mutex wait
 - `/diff` slash-command: replays the diff of the last turn as an ACP diff card, with `/diff --session`, `/diff --last N`, and optional path filters for wider or narrower review. Diff history is kept in-memory per thread and is cleared on thread switch
@@ -147,13 +139,12 @@ Current strengths of this fork:
 - Less startup latency before Zed gets a ready ACP thread
 - Better session lifecycle handling in ACP clients
 - Less UI freeze risk during `/undo` history rebuilds
-- Less UI freeze risk during `/resume --history` thread switches
-- Less repeated ACP snapshot and writeback churn on multi-hunk file edits
+- Less repeated filesystem and transcript churn on multi-hunk file edits
 - Less chat stall while waiting for file edit approval
 - Less chat stall while waiting for shell command approval
 - Less lock contention while file-change start cards are published
-- Less lock contention while file-change completion diff/writeback is published
-- Less lock contention while final turn-diff cards and ACP buffer sync are published
+- Less lock contention while file-change completion diff is published
+- Less lock contention while final turn-diff cards are published
 - Less risk of ghost approvals from stale app-server requests during drain/flush cleanup
 - Less risk of Zed getting stuck behind an unfinished context compaction state after using `/compact` or the compact context selector
 - Clearer reconnect UX with one normalized retry status and cleaner reconnect-assisted stall aborts
@@ -161,7 +152,7 @@ Current strengths of this fork:
 - Better transport responsiveness while the backend is quiet: app-server message reads no longer monopolize the transport mutex for the full wait window
 - Better thread titles in lists and resumed sessions
 - Inline review flows backed by native `review/start`
-- Practical thread switching with native `Zed` `New Thread`, `/fork`, `/resume`, and archive-triggered replacement
+- Practical thread switching with native `Zed` `New Thread`, `/fork`, and archive-triggered replacement
 - Standard ACP `session/fork` surfaced separately from the in-place slash `/fork` flow
 - Canonical session status surfacing through `/status` plus the compact context `%` selector
 - `plugins` now sit alongside `status`, `MCP`, `skills`, and limits in the context selector UX
@@ -419,7 +410,9 @@ Default config:
         "name": "High",
         "description": "Greater reasoning depth for complex problems"
       },
-      "xhigh"
+      "xhigh",
+      "max",
+      "ultra"
     ]
   },
 
@@ -439,7 +432,7 @@ Default config:
     "status": {
       "visible": true,
       "name": "Status",
-      "groups": ["status"]
+      "groups": ["status", "integrations", "actions"]
     }
   },
 
@@ -448,8 +441,6 @@ Default config:
     "init",
     "status",
     "review",
-    "threads",
-    "resume",
     "fork",
     "archive",
     "unarchive",
@@ -552,8 +543,10 @@ medium/high effort choices in the selector:
         "id": "high",
         "name": "много",
         "description": "Глубже думает, но сильнее тратит лимиты"
-      }
-      // "xhigh"
+      },
+      // "xhigh",
+      // "max",
+      // "ultra"
     ]
   }
 }
@@ -565,17 +558,19 @@ Fields:
 
 - `defaults.model`: startup default model id, or `null` to keep the app-server/session default.
 - `defaults.reasoning_effort`: startup default for reasoning effort.
-  Common values: `minimal`, `low`, `medium`, `high`, `xhigh`, or `null` to use the backend/model default.
-  `minimal` is real Codex/API config, but current app-server turns can fail with
-  `image_gen`/`web_search` enabled because those tools are not compatible with
-  `reasoning.effort = "minimal"`. `none` is protocol-visible mainly for plan/collaboration
-  overrides; in this adapter it can work for simple turns, but normal model turns may still reject it.
+  Known values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`;
+  `null` keeps the backend/model default. The config contract is an open, non-empty string, so a
+  future value is preserved exactly instead of being downgraded or rejected by the adapter. The
+  current backend/model may still reject an effort it does not support. `Custom` is the internal
+  Rust representation for an unknown value, not a literal value to put in JSONC or TOML.
 - `defaults.service_tier`: startup default service tier. `null` clears any saved override and uses
   the app-server default.
   Values: `fast`, `flex`, or `null` for the standard/default tier.
 - `model_selector.models`: ordered visible model list for the lower `Model` selector.
   Rows can be model id strings or objects with `id`, `name`, and `description`.
   Comment out a row to hide it. The list order controls menu order.
+  An empty/default list shows only models the backend marks visible. The adapter requests the full
+  catalog, so explicitly listing a backend-hidden model id opts that model into the selector.
   `name` overrides the visible model label, `description` overrides the hover text, and the
   currently selected model remains visible even if omitted, so Zed never gets a `currentValue`
   without a matching option.
@@ -584,10 +579,9 @@ Fields:
   group. Rows can be effort id strings or objects with `id`, `name`, and `description`.
   Comment out a row to hide it. The list order controls menu order.
   `name` overrides the visible effort label, `description` overrides the hover text.
-  `none` and `minimal` are present as experimental/protocol entries;
-  if enabled manually, the selector will show them even when the current backend model list does
-  not advertise them. The backend may still reject unsupported combinations; observed failure:
-  `minimal` with `image_gen`/`web_search` returns an invalid-request error.
+  Known and future non-empty effort ids use the same path. A manually configured value remains
+  selectable and round-trips unchanged even when the current model list does not advertise it;
+  backend/model acceptance is still checked when the turn runs.
 - `layout.order`: order of lower selectors.
   Known ids: `permissions`, `model`, `status`.
 - `layout.<selector>.visible`: show or hide a selector.
@@ -606,7 +600,7 @@ Known groups:
 
 Known slash commands:
 
-- `init`, `status`, `review`, `threads`, `resume`, `fork`, `archive`, `unarchive`, `compact`, `undo`, `plan`, `rename`, `diff`.
+- `init`, `status`, `review`, `fork`, `archive`, `unarchive`, `compact`, `undo`, `plan`, `rename`, `diff`.
 
 Unknown selector/group ids are ignored; if a group override matches nothing, the adapter keeps the
 default groups to avoid rendering an empty selector.
@@ -749,6 +743,13 @@ Important log lines:
 
 What they usually mean:
 
+- `error loading Codex config`: the adapter failed before ACP startup. The report includes a stable
+  classification, adapter version, compiled Codex schema tag/revision, backend command and resolved
+  path, a best-effort backend version, `CODEX_HOME`, the exact config path, and the original parse
+  error. The same report is used for invalid CLI `-c` overrides. Classification
+  `unsupported-config-schema-value` usually means the adapter and backend/config schema are from
+  different generations. The diagnostic probe is read-only and the adapter never rewrites
+  `config.toml` to recover.
 - Timeout during `initialize`, `thread/start`, or `turn/start`: app-server is stuck before the adapter can safely continue, or the bundled `codex.exe` version is incompatible with this adapter's pinned app-server protocol
 - `failed to start 'codex' app-server`: `codex` is missing or not available in `PATH`; on Windows, set `CODEX_ACP_CODEX_BIN` to the intended `codex.exe`
 - `Turn appears stuck after repeated reconnect failures`: the adapter aborted a stalled turn and drained queued tail notifications so the next prompt starts from a clean state
@@ -778,7 +779,11 @@ User-facing documentation stays in this README. Deeper project notes are kept se
 
 Current Zed-specific UI caveats are tracked in [docs/upstream-feature-matrix.md](docs/upstream-feature-matrix.md), especially around approval-card layout and command/review/session UX that the adapter alone cannot fully control.
 
-The latest local upstream reference sweep was run on `2026-06-13`. At that point Zed stable was `1.6.3`, preview was `1.7.2`, official `codex-acp` was `v0.16.0`, and ACP had moved through `v0.13.6` with stabilized `additionalDirectories`, session usage updates, and `session/delete`. Treat dependency updates as scoped migrations, not a mechanical version bump.
+The latest local upstream reference sweep was run on `2026-07-12` and includes the current
+`agentclientprotocol/codex-acp` successor alongside ACP, Codex, and Zed references. Separately, this
+adapter compiles its Codex crates from the official stable `rust-v0.144.6` baseline. The reference
+snapshot and compiled dependency baseline are intentionally tracked as different facts; treat later
+dependency updates as scoped migrations, not mechanical version bumps.
 
 If Zed's agent input area or lower selector toolbar looks squeezed, enable Zed's content-width
 limit:
@@ -799,7 +804,8 @@ That is a Zed panel layout setting, not an ACP adapter option.
 Near-term work:
 
 - Keep refining the compact context `%` selector and `/status` report where it helps daily use
-- Audit and selectively port upstream `codex-acp v0.16.0` parity items: `additionalDirectories`, session usage/delete semantics, richer permission/account-limit mapping, plan update rendering, and the next permission/elicitation details
+- Audit and selectively port parity items from the current `agentclientprotocol/codex-acp` successor;
+  use the legacy `zed-industries/codex-acp v0.16.0` only as historical context
 - Keep new slash/preview UX scoped to explicit user demand; avoid adding parallel flows when Zed already has native UI
 
 Later candidates:

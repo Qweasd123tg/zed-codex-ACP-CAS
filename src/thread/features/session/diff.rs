@@ -255,7 +255,7 @@ fn count_diff_lines(file: &TurnUnifiedDiffFile) -> (usize, usize) {
         if added == 0 && removed == 0 {
             (changed, changed)
         } else {
-            (added.max(0), removed.max(0))
+            (added, removed)
         }
     }
 }

@@ -316,7 +316,9 @@ mod tests {
                 resets_at: Some(4_102_531_200),
             }),
             credits: None,
+            individual_limit: None,
             plan_type: Some(PlanType::Pro),
+            rate_limit_reached_type: None,
         };
 
         assert!(five_hour_reset_message(Some(&snapshot)).contains("5-hour: resets"));
@@ -346,7 +348,9 @@ mod tests {
                 resets_at: Some(4_102_531_200),
             }),
             credits: None,
+            individual_limit: None,
             plan_type: Some(PlanType::Pro),
+            rate_limit_reached_type: None,
         };
         let mut display_maps = DisplayMapsConfig::default();
         display_maps.limits = LimitsDisplayMapSelection {
@@ -376,7 +380,9 @@ mod tests {
                 unlimited: false,
                 balance: Some("$12.34".to_string()),
             }),
+            individual_limit: None,
             plan_type: Some(PlanType::Pro),
+            rate_limit_reached_type: None,
         };
 
         let description = limits_status_description(Some(&snapshot), &DisplayMapsConfig::default());
@@ -411,7 +417,9 @@ mod tests {
                 resets_at: Some(4_102_531_200),
             }),
             credits: None,
+            individual_limit: None,
             plan_type: Some(PlanType::Plus),
+            rate_limit_reached_type: None,
         };
 
         assert!(take_rate_limit_warnings(&mut state, &snapshot).is_empty());
@@ -452,7 +460,9 @@ mod tests {
             }),
             secondary: None,
             credits: None,
+            individual_limit: None,
             plan_type: Some(PlanType::Plus),
+            rate_limit_reached_type: None,
         };
 
         observe_rate_limit_snapshot(&mut state, &snapshot);
@@ -484,7 +494,9 @@ mod tests {
             }),
             secondary: None,
             credits: None,
+            individual_limit: None,
             plan_type: Some(PlanType::Plus),
+            rate_limit_reached_type: None,
         };
 
         assert_eq!(

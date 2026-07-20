@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use codex_core::config::types::{McpServerConfig, McpServerTransportConfig};
+use codex_config::{McpServerConfig, McpServerTransportConfig};
 
 use super::ContextSelectorSummary;
 
@@ -15,7 +15,7 @@ pub(in crate::thread) fn build_mcp_summary(
                     "stdio",
                     command.clone(),
                     cwd.as_ref()
-                        .map(|path| format!("cwd {}", path.display()))
+                        .map(|path| format!("cwd {}", path.render_for_ui()))
                         .unwrap_or_default(),
                 ),
                 McpServerTransportConfig::StreamableHttp { url, .. } => {
@@ -101,7 +101,7 @@ fn format_mcp_report_entry(name: &str, config: &McpServerConfig) -> String {
                 lines.push(format!("  args: {}", args.join(" ")));
             }
             if let Some(cwd) = cwd {
-                lines.push(format!("  cwd: {}", cwd.display()));
+                lines.push(format!("  cwd: {}", cwd.render_for_ui()));
             }
         }
         McpServerTransportConfig::StreamableHttp { url, .. } => {

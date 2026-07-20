@@ -29,7 +29,7 @@ pub(in crate::thread) async fn handle_item_started(
                 inner,
                 id,
                 command,
-                cwd,
+                cwd.into_string().into(),
                 status,
                 command_actions,
             )
@@ -47,16 +47,16 @@ pub(in crate::thread) async fn handle_item_started(
             mcp::emit_mcp_tool_call_started(inner, id, server, tool, status, arguments).await;
             None
         }
-        ThreadItem::WebSearch { id, query, .. } => {
-            web_image::emit_web_search_started(inner, id, query).await;
+        ThreadItem::WebSearch(item) => {
+            web_image::emit_web_search_started(inner, item.id, item.query).await;
             None
         }
         ThreadItem::ImageView { id, path } => {
-            web_image::emit_image_view_started(inner, id, path).await;
+            web_image::emit_image_view_started(inner, id, path.render_for_ui()).await;
             None
         }
-        ThreadItem::ImageGeneration { id, status, .. } => {
-            web_image::emit_image_generation_started(inner, id, status).await;
+        ThreadItem::ImageGeneration(item) => {
+            web_image::emit_image_generation_started(inner, item.id, item.status).await;
             None
         }
         _ => Some(item),
@@ -84,7 +84,7 @@ pub(in crate::thread) async fn handle_item_completed(
                 command::CompletedCommandExecution {
                     id,
                     command,
-                    cwd,
+                    cwd: cwd.into_string().into(),
                     status,
                     command_actions,
                     aggregated_output,
@@ -112,18 +112,19 @@ pub(in crate::thread) async fn handle_item_completed(
             .await;
             None
         }
-        ThreadItem::WebSearch { id, .. } => {
-            web_image::emit_web_search_completed(inner, id).await;
+        ThreadItem::WebSearch(item) => {
+            web_image::emit_web_search_completed(inner, item.id).await;
             None
         }
-        ThreadItem::ImageGeneration {
-            id,
-            status,
-            revised_prompt,
-            result,
-        } => {
-            web_image::emit_image_generation_completed(inner, id, status, revised_prompt, result)
-                .await;
+        ThreadItem::ImageGeneration(item) => {
+            web_image::emit_image_generation_completed(
+                inner,
+                item.id,
+                item.status,
+                item.revised_prompt,
+                item.result,
+            )
+            .await;
             None
         }
         _ => Some(item),
@@ -152,7 +153,7 @@ pub(in crate::thread) async fn replay_item(
                 command::ReplayCommandExecution {
                     id,
                     command,
-                    cwd,
+                    cwd: cwd.into_string().into(),
                     status,
                     command_actions,
                     aggregated_output,
@@ -188,27 +189,22 @@ pub(in crate::thread) async fn replay_item(
             .await;
             None
         }
-        ThreadItem::WebSearch { id, query, .. } => {
-            web_image::replay_web_search(client, id, query).await;
+        ThreadItem::WebSearch(item) => {
+            web_image::replay_web_search(client, item.id, item.query).await;
             None
         }
         ThreadItem::ImageView { id, path } => {
-            web_image::replay_image_view(client, id, path).await;
+            web_image::replay_image_view(client, id, path.render_for_ui()).await;
             None
         }
-        ThreadItem::ImageGeneration {
-            id,
-            status,
-            revised_prompt,
-            result,
-        } => {
+        ThreadItem::ImageGeneration(item) => {
             web_image::replay_image_generation(
                 client,
                 cas_home,
-                id,
-                status,
-                revised_prompt,
-                result,
+                item.id,
+                item.status,
+                item.revised_prompt,
+                item.result,
             )
             .await;
             None

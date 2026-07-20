@@ -16,8 +16,9 @@ pub(in crate::thread) fn resolve_reasoning_effort(
     current_model: &str,
     current: Option<ReasoningEffort>,
 ) -> ReasoningEffort {
-    let effort = current.unwrap_or_default();
-    normalize_reasoning_effort_for_model(models, current_model, effort)
+    current.unwrap_or_else(|| {
+        normalize_reasoning_effort_for_model(models, current_model, ReasoningEffort::default())
+    })
 }
 
 pub(in crate::thread) fn normalize_reasoning_effort_for_model(
@@ -35,43 +36,51 @@ pub(in crate::thread) fn normalize_reasoning_effort_for_model(
     {
         return current_effort;
     }
-    model.default_reasoning_effort
+    model.default_reasoning_effort.clone()
 }
 
 pub(in crate::thread) fn parse_reasoning_effort(value: &str) -> Option<ReasoningEffort> {
-    match value {
-        "none" => Some(ReasoningEffort::None),
-        "minimal" => Some(ReasoningEffort::Minimal),
-        "low" => Some(ReasoningEffort::Low),
-        "medium" => Some(ReasoningEffort::Medium),
-        "high" => Some(ReasoningEffort::High),
-        "xhigh" => Some(ReasoningEffort::XHigh),
-        _ => None,
-    }
+    value.parse().ok()
 }
 
-pub(in crate::thread) fn reasoning_effort_value(effort: ReasoningEffort) -> &'static str {
+pub(in crate::thread) fn reasoning_effort_value(effort: &ReasoningEffort) -> &str {
+    effort.as_str()
+}
+
+pub(in crate::thread) fn reasoning_effort_label(effort: &ReasoningEffort) -> String {
     match effort {
-        ReasoningEffort::None => "none",
-        ReasoningEffort::Minimal => "minimal",
-        ReasoningEffort::Low => "low",
-        ReasoningEffort::Medium => "medium",
-        ReasoningEffort::High => "high",
-        ReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::None => "None".to_string(),
+        ReasoningEffort::Minimal => "Minimal".to_string(),
+        ReasoningEffort::Low => "Low".to_string(),
+        ReasoningEffort::Medium => "Medium".to_string(),
+        ReasoningEffort::High => "High".to_string(),
+        ReasoningEffort::XHigh => "Extra High".to_string(),
+        ReasoningEffort::Max => "Max".to_string(),
+        ReasoningEffort::Ultra => "Ultra".to_string(),
+        ReasoningEffort::Custom(value) => value.clone(),
     }
 }
 
-pub(in crate::thread) fn reasoning_effort_label(effort: ReasoningEffort) -> &'static str {
-    match effort {
-        ReasoningEffort::None => "None",
-        ReasoningEffort::Minimal => "Minimal",
-        ReasoningEffort::Low => "Low",
-        ReasoningEffort::Medium => "Medium",
-        ReasoningEffort::High => "High",
-        ReasoningEffort::XHigh => "Extra High",
-    }
+pub(in crate::thread) fn reasoning_effort_description_label(effort: &ReasoningEffort) -> String {
+    reasoning_effort_label(effort)
 }
 
-pub(in crate::thread) fn reasoning_effort_description_label(effort: ReasoningEffort) -> String {
-    reasoning_effort_label(effort).to_string()
+#[cfg(test)]
+mod tests {
+    use super::resolve_reasoning_effort;
+    use crate::thread::ReasoningEffort;
+
+    #[test]
+    fn backend_reasoning_effort_is_preserved_without_closed_enum_normalization() {
+        for effort in [
+            ReasoningEffort::Max,
+            ReasoningEffort::Ultra,
+            ReasoningEffort::Custom("future-effort".to_string()),
+        ] {
+            assert_eq!(
+                resolve_reasoning_effort(&[], "future-model", Some(effort.clone())),
+                effort
+            );
+        }
+    }
 }
