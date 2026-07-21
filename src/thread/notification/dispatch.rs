@@ -27,6 +27,7 @@ struct DrainConfig {
     poll_timeout: Duration,
     idle_polls_to_drain: usize,
     max_messages: usize,
+    yield_to_active_turn: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +49,10 @@ impl DrainOutcome {
     pub(super) fn was_truncated(self) -> bool {
         matches!(self, Self::TimedOut { .. } | Self::HitLimit { .. })
     }
+}
+
+fn background_drain_may_receive(active_turn_id: Option<&str>) -> bool {
+    active_turn_id.is_none()
 }
 
 // Рано отбрасываем шум вне текущего turn, чтобы состояние клиента оставалось консистентным.
@@ -173,7 +178,21 @@ async fn drain_transport_until_quiet_ext(
 
         let remaining = deadline - now;
         let wait_for = remaining.min(config.poll_timeout);
-        let Some(message) = receive_drain_message(inbox, wait_for).await? else {
+        let message = if config.yield_to_active_turn {
+            // Держим state lock до завершения короткого poll: turn-start тоже берёт
+            // этот lock, поэтому background drain не может начать recv до active turn
+            // или забрать его первое notification после старта.
+            let inner = thread.inner.lock().await;
+            if !background_drain_may_receive(inner.active_turn_id.as_deref()) {
+                return Ok(DrainOutcome::Drained { processed });
+            }
+            let message = receive_drain_message(inbox, wait_for).await?;
+            drop(inner);
+            message
+        } else {
+            receive_drain_message(inbox, wait_for).await?
+        };
+        let Some(message) = message else {
             quiet_polls += 1;
             if quiet_polls >= config.idle_polls_to_drain {
                 return Ok(DrainOutcome::Drained { processed });
@@ -260,6 +279,7 @@ impl Thread {
                 poll_timeout: POST_TURN_DRAIN_POLL_TIMEOUT,
                 idle_polls_to_drain: POST_TURN_DRAIN_IDLE_POLLS,
                 max_messages: POST_TURN_DRAIN_MAX_MESSAGES,
+                yield_to_active_turn: false,
             },
         )
         .await
@@ -294,8 +314,20 @@ impl Thread {
                 poll_timeout: BACKGROUND_DRAIN_POLL_TIMEOUT,
                 idle_polls_to_drain: BACKGROUND_DRAIN_IDLE_POLLS,
                 max_messages: BACKGROUND_DRAIN_MAX_MESSAGES,
+                yield_to_active_turn: true,
             },
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::background_drain_may_receive;
+
+    #[test]
+    fn background_drain_yields_the_inbox_to_an_active_turn() {
+        assert!(!background_drain_may_receive(Some("turn-123")));
+        assert!(background_drain_may_receive(None));
     }
 }

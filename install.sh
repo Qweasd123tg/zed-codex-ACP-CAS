@@ -23,12 +23,16 @@ Options:
 
 Defaults:
   install_dir  = $HOME/.local/bin
-  binary_name  = codex-acp (codex-acp.exe on Windows)
+  binary_name  = codex-acp (codex-acp.exe on Windows source installs)
+
+Prebuilt downloads:
+  GitHub Releases publish only Linux x86_64 GNU binaries. On macOS or Windows,
+  build from source instead (for example: cargo build --release && ./install.sh).
 
 Examples:
   ./install.sh
   ./install.sh --download latest
-  ./install.sh --download 0.23.5
+  ./install.sh --download 0.27.1
   ./install.sh --from-binary ./codex-acp-linux-x86_64-gnu --sha256 ./codex-acp-linux-x86_64-gnu.sha256
   ./install.sh "$HOME/bin" codex-acp
 EOF
@@ -141,10 +145,19 @@ release_asset_name() {
   local arch="$2"
   case "$os-$arch" in
     linux-x64) echo "codex-acp-linux-x86_64-gnu" ;;
-    darwin-arm64) echo "codex-acp-macos-aarch64-apple-darwin" ;;
-    windows-x64) echo "codex-acp-windows-x86_64-pc-windows-msvc.exe" ;;
     *)
-      echo "No release artifact is published for $os-$arch." >&2
+      echo "Prebuilt GitHub Release downloads are available only for Linux x86_64 GNU." >&2
+      case "$os" in
+        darwin)
+          echo "macOS binaries are not published yet; build from source: cargo build --release && ./install.sh" >&2
+          ;;
+        windows)
+          echo "Windows binaries are not published yet; build from source: cargo build --release && ./install.sh" >&2
+          ;;
+        *)
+          echo "No prebuilt release artifact is published for $os-$arch; build from source instead." >&2
+          ;;
+      esac
       return 1
       ;;
   esac
@@ -389,7 +402,7 @@ else
   fi
   echo "[install] cargo build --release"
   cargo build --release
-  SOURCE_BIN="$ROOT_DIR/target/release/codex-acp"
+  SOURCE_BIN="$ROOT_DIR/target/release/$(default_binary_name)"
   VERSION="$(awk -F'"' '/^version = / {print $2; exit}' Cargo.toml)"
   COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
   if [[ -n "$(git status --porcelain 2>/dev/null || true)" ]]; then

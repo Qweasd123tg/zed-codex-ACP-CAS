@@ -44,6 +44,12 @@ Paste this file into https://markmap.js.org/repl
 - Used by
   - ServerRequests - src/thread/core/server_requests.rs
 
+## CodexAgent - src/codex_agent.rs
+- Depends on
+  - SessionLifecycle - src/thread/session/lifecycle.rs
+  - SessionView - src/thread/session/view.rs
+- Used by: none
+
 ## CollabContent - CollabContent
 - Depends on: none
 - Used by
@@ -168,8 +174,6 @@ Paste this file into https://markmap.js.org/repl
 ## PromptFlow - src/thread/prompt/flow.rs
 - Depends on
   - PromptCommands - src/thread/prompt/commands.rs
-  - ResumeListing - src/thread/features/resume/listing.rs
-  - ResumeSelector - src/thread/features/resume/selector.rs
   - SessionControls - src/thread/features/session/controls.rs
   - SessionModes - src/thread/features/session/modes.rs
   - TurnExecution - src/thread/turn/execution.rs
@@ -191,24 +195,12 @@ Paste this file into https://markmap.js.org/repl
   - SessionReplay - src/thread/features/session/events.rs
   - WebImageReplay - src/thread/features/tool_events/web_image.rs
 - Used by
-  - ResumeApply - src/thread/features/resume/apply.rs
+  - SessionView - src/thread/session/view.rs
 
-## ResumeApply - src/thread/features/resume/apply.rs
-- Depends on
-  - Replay - src/thread/core/replay.rs
-- Used by
-  - ResumeSelector - src/thread/features/resume/selector.rs
-
-## ResumeListing - src/thread/features/resume/listing.rs
+## ResumeCommon - src/thread/features/resume/common.rs
 - Depends on: none
 - Used by
-  - PromptFlow - src/thread/prompt/flow.rs
-
-## ResumeSelector - src/thread/features/resume/selector.rs
-- Depends on
-  - ResumeApply - src/thread/features/resume/apply.rs
-- Used by
-  - PromptFlow - src/thread/prompt/flow.rs
+  - SessionLifecycle - src/thread/session/lifecycle.rs
 
 ## ServerRequests - src/thread/core/server_requests.rs
 - Depends on
@@ -229,6 +221,12 @@ Paste this file into https://markmap.js.org/repl
 - Used by
   - ItemHandlers - src/thread/core/item_handlers.rs
 
+## SessionLifecycle - src/thread/session/lifecycle.rs
+- Depends on
+  - ResumeCommon - src/thread/features/resume/common.rs
+- Used by
+  - CodexAgent - src/codex_agent.rs
+
 ## SessionModes - src/thread/features/session/modes.rs
 - Depends on: none
 - Used by
@@ -238,6 +236,12 @@ Paste this file into https://markmap.js.org/repl
 - Depends on: none
 - Used by
   - Replay - src/thread/core/replay.rs
+
+## SessionView - src/thread/session/view.rs
+- Depends on
+  - Replay - src/thread/core/replay.rs
+- Used by
+  - CodexAgent - src/codex_agent.rs
 
 ## StatusMapping - src/thread/features/status_mapping.rs
 - Depends on: none
@@ -255,6 +259,7 @@ Paste this file into https://markmap.js.org/repl
 - Depends on
   - StatusMapping - src/thread/features/status_mapping.rs
   - ToolUiKind - src/thread/features/tool_call_ui/kind.rs
+  - ToolUiLocation - src/thread/features/tool_call_ui/location.rs
   - ToolUiRaw - src/thread/features/tool_call_ui/raw.rs
   - ToolUiTitle - src/thread/features/tool_call_ui/title.rs
 - Used by
@@ -267,12 +272,16 @@ Paste this file into https://markmap.js.org/repl
   - ItemHandlers - src/thread/core/item_handlers.rs
 
 ## ToolEventsWebImage - src/thread/features/tool_events/web_image.rs
-- Depends on
-  - ACP image content schema
+- Depends on: none
 - Used by
   - ItemHandlers - src/thread/core/item_handlers.rs
 
 ## ToolUiKind - src/thread/features/tool_call_ui/kind.rs
+- Depends on: none
+- Used by
+  - ToolEventsCommand - src/thread/features/tool_events/command.rs
+
+## ToolUiLocation - src/thread/features/tool_call_ui/location.rs
 - Depends on: none
 - Used by
   - ToolEventsCommand - src/thread/features/tool_events/command.rs
@@ -307,7 +316,6 @@ Paste this file into https://markmap.js.org/repl
 - Used by: none
 
 ## WebImageReplay - src/thread/features/tool_events/web_image.rs
-- Depends on
-  - ACP image content schema
+- Depends on: none
 - Used by
   - Replay - src/thread/core/replay.rs

@@ -1,10 +1,9 @@
 //! Обновления runtime-настроек сессии (mode/model/reasoning/context), доступные ACP-клиентам.
 
 use super::session_config::{
-    MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE, SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE,
-    STATUS_COMPACT_VALUE, STATUS_LIMITS_VALUE, find_model_for_current,
-    normalize_reasoning_effort_for_model, parse_limits_summary_value, parse_model_reasoning_value,
-    parse_model_speed_value, reasoning_effort_value,
+    STATUS_COMPACT_VALUE, find_model_for_current, normalize_reasoning_effort_for_model,
+    parse_limits_summary_value, parse_model_reasoning_value, parse_model_speed_value,
+    reasoning_effort_value,
 };
 use super::{
     APPROVAL_PRESETS, DEFAULT_SESSION_MODE_ID, Error, ModeKind, PLAN_SESSION_MODE_ID,
@@ -162,8 +161,6 @@ impl Thread {
         }
 
         match value.0.as_ref() {
-            STATUS_LIMITS_VALUE | SESSION_STATUS_VALUE | MCP_STATUS_VALUE | SKILLS_STATUS_VALUE
-            | PLUGINS_STATUS_VALUE => Ok(()),
             STATUS_COMPACT_VALUE => {
                 if self.request_context_compaction_ext().await? {
                     self.spawn_compaction_drain_task();

@@ -25,11 +25,6 @@ pub(in crate::thread) use mcp::build_mcp_summary;
 pub(in crate::thread) use plugins::build_plugins_summary;
 pub(in crate::thread) use skills::build_skills_summary;
 
-pub(in crate::thread) const STATUS_LIMITS_VALUE: &str = "limits_status";
-pub(in crate::thread) const SESSION_STATUS_VALUE: &str = "session_status";
-pub(in crate::thread) const MCP_STATUS_VALUE: &str = "mcp_status";
-pub(in crate::thread) const SKILLS_STATUS_VALUE: &str = "skills_status";
-pub(in crate::thread) const PLUGINS_STATUS_VALUE: &str = "plugins_status";
 pub(in crate::thread) const STATUS_COMPACT_VALUE: &str = "compact_now";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -55,17 +50,10 @@ pub(crate) struct AccountStatus {
     pub(crate) plan_type: Option<PlanType>,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(in crate::thread) fn status_control_option_groups(
     rate_limits: Option<&RateLimitSnapshot>,
     display_maps: &DisplayMapsConfig,
-    workspace_cwd: &Path,
-    backend_cli_version: &str,
-    account_status: &AccountStatus,
     compaction_in_progress: bool,
-    mcp_summary: &ContextSelectorSummary,
-    skills_summary: &ContextSelectorSummary,
-    plugins_summary: &ContextSelectorSummary,
 ) -> Vec<SessionConfigSelectGroup> {
     let compact_label = if compaction_in_progress {
         "Compacting..."
@@ -74,7 +62,7 @@ pub(in crate::thread) fn status_control_option_groups(
     };
     let primary_remaining_percent = primary_remaining(rate_limits);
     let secondary_remaining_percent = secondary_remaining(rate_limits);
-    let mut status_options = display_maps
+    let status_options = display_maps
         .limits_summary_options()
         .iter()
         .map(|option| {
@@ -93,30 +81,8 @@ pub(in crate::thread) fn status_control_option_groups(
             ))
         })
         .collect::<Vec<_>>();
-    status_options.push(
-        SessionConfigSelectOption::new(SESSION_STATUS_VALUE, "Session").description(
-            session_status_description(
-                workspace_cwd,
-                backend_cli_version,
-                account_status,
-                rate_limits,
-            ),
-        ),
-    );
     vec![
         SessionConfigSelectGroup::new("status", "Status", status_options),
-        SessionConfigSelectGroup::new(
-            "integrations",
-            "Integrations",
-            vec![
-                SessionConfigSelectOption::new(MCP_STATUS_VALUE, &mcp_summary.label)
-                    .description(mcp_summary.description.clone()),
-                SessionConfigSelectOption::new(SKILLS_STATUS_VALUE, &skills_summary.label)
-                    .description(skills_summary.description.clone()),
-                SessionConfigSelectOption::new(PLUGINS_STATUS_VALUE, &plugins_summary.label)
-                    .description(plugins_summary.description.clone()),
-            ],
-        ),
         SessionConfigSelectGroup::new(
             "actions",
             "Actions",

@@ -1,4 +1,4 @@
-name: CI Build
+name: CI
 
 on:
   push:
@@ -12,8 +12,8 @@ env:
   BINARY_NAME: codex-acp
 
 jobs:
-  build-release-artifact:
-    name: Build release artifact - Linux x86_64 GNU
+  verify-linux-x86_64:
+    name: Verify Linux x86_64 GNU
     runs-on: ubuntu-22.04
 
     steps:
@@ -33,25 +33,25 @@ jobs:
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ci-build-x86_64-unknown-linux-gnu
+          shared-key: ci-linux-x86_64-gnu
 
-      - name: Build release binary
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test release target
+        run: cargo test --release --target x86_64-unknown-linux-gnu
+
+      - name: Build release binary for installer smoke test
         run: cargo build --release --target x86_64-unknown-linux-gnu
-
-      - name: Prepare binary artifact
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }} dist/${{ env.BINARY_NAME }}-linux-x86_64-gnu
 
       - name: Verify install script against artifact
         shell: bash
-        run: ./install.sh --from-binary dist/${{ env.BINARY_NAME }}-linux-x86_64-gnu /tmp/codex-acp-ci codex-acp
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: codex-acp-linux-x86_64-gnu
-          path: dist/${{ env.BINARY_NAME }}-linux-x86_64-gnu
-          if-no-files-found: error
-          retention-days: 14
+        run: >-
+          ./install.sh
+          --from-binary target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
+          --config-home /tmp/codex-acp-ci-config
+          /tmp/codex-acp-ci
+          ${{ env.BINARY_NAME }}

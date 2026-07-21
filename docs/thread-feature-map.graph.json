@@ -1,10 +1,10 @@
 {
   "title": "Thread Feature Map (Curated)",
   "source": "docs/thread-feature-map.md",
-  "generated_at": "2026-04-24T17:57:17.706504+00:00",
+  "generated_at": "2026-07-21T21:16:16.486430+00:00",
   "stats": {
-    "nodes": 50,
-    "edges": 52
+    "nodes": 52,
+    "edges": 53
   },
   "nodes": [
     {
@@ -48,6 +48,12 @@
       "label": "src/thread/features/approvals/user_input.rs",
       "kind": "file",
       "path": "src/thread/features/approvals/user_input.rs"
+    },
+    {
+      "id": "CodexAgent",
+      "label": "src/codex_agent.rs",
+      "kind": "file",
+      "path": "src/codex_agent.rs"
     },
     {
       "id": "CollabContent",
@@ -186,22 +192,10 @@
       "path": "src/thread/core/replay.rs"
     },
     {
-      "id": "ResumeApply",
-      "label": "src/thread/features/resume/apply.rs",
+      "id": "ResumeCommon",
+      "label": "src/thread/features/resume/common.rs",
       "kind": "file",
-      "path": "src/thread/features/resume/apply.rs"
-    },
-    {
-      "id": "ResumeListing",
-      "label": "src/thread/features/resume/listing.rs",
-      "kind": "file",
-      "path": "src/thread/features/resume/listing.rs"
-    },
-    {
-      "id": "ResumeSelector",
-      "label": "src/thread/features/resume/selector.rs",
-      "kind": "file",
-      "path": "src/thread/features/resume/selector.rs"
+      "path": "src/thread/features/resume/common.rs"
     },
     {
       "id": "ServerRequests",
@@ -222,6 +216,12 @@
       "path": "src/thread/features/session/events.rs"
     },
     {
+      "id": "SessionLifecycle",
+      "label": "src/thread/session/lifecycle.rs",
+      "kind": "file",
+      "path": "src/thread/session/lifecycle.rs"
+    },
+    {
       "id": "SessionModes",
       "label": "src/thread/features/session/modes.rs",
       "kind": "file",
@@ -232,6 +232,12 @@
       "label": "src/thread/features/session/events.rs",
       "kind": "file",
       "path": "src/thread/features/session/events.rs"
+    },
+    {
+      "id": "SessionView",
+      "label": "src/thread/session/view.rs",
+      "kind": "file",
+      "path": "src/thread/session/view.rs"
     },
     {
       "id": "StatusMapping",
@@ -268,6 +274,12 @@
       "label": "src/thread/features/tool_call_ui/kind.rs",
       "kind": "file",
       "path": "src/thread/features/tool_call_ui/kind.rs"
+    },
+    {
+      "id": "ToolUiLocation",
+      "label": "src/thread/features/tool_call_ui/location.rs",
+      "kind": "file",
+      "path": "src/thread/features/tool_call_ui/location.rs"
     },
     {
       "id": "ToolUiRaw",
@@ -313,14 +325,6 @@
     {
       "from": "PromptFlow",
       "to": "PromptCommands"
-    },
-    {
-      "from": "PromptFlow",
-      "to": "ResumeListing"
-    },
-    {
-      "from": "PromptFlow",
-      "to": "ResumeSelector"
     },
     {
       "from": "PromptFlow",
@@ -430,6 +434,10 @@
     },
     {
       "from": "ToolEventsCommand",
+      "to": "ToolUiLocation"
+    },
+    {
+      "from": "ToolEventsCommand",
       "to": "ToolUiTitle"
     },
     {
@@ -473,11 +481,19 @@
       "to": "AppServerPolicy"
     },
     {
-      "from": "ResumeSelector",
-      "to": "ResumeApply"
+      "from": "CodexAgent",
+      "to": "SessionLifecycle"
     },
     {
-      "from": "ResumeApply",
+      "from": "SessionLifecycle",
+      "to": "ResumeCommon"
+    },
+    {
+      "from": "CodexAgent",
+      "to": "SessionView"
+    },
+    {
+      "from": "SessionView",
       "to": "Replay"
     },
     {

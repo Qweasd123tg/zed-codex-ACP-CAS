@@ -33,7 +33,7 @@ use super::{
 use crate::thread::session_selector_preferences::SlashCommandPreferences;
 use agent_client_protocol::schema::v1::{
     Content, ContentBlock, PermissionOptionKind, Plan, PlanEntry, PlanEntryPriority,
-    PlanEntryStatus, ResourceLink, ToolCallContent, ToolCallStatus, ToolKind,
+    PlanEntryStatus, ToolCallContent, ToolCallStatus, ToolKind,
 };
 use codex_app_server_protocol::{
     CollabAgentState, CollabAgentStatus, CollabAgentTool, CollabAgentToolCallStatus, CommandAction,

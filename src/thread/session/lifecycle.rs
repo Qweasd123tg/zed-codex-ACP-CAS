@@ -371,7 +371,7 @@ async fn retry_thread_resume_with_discovered_path(
                 error = %path_error,
                 "thread/resume by discovered rollout path failed"
             );
-            Err(original_error)
+            Err(path_error)
         }
     }
 }

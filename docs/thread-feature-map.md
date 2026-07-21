@@ -4,7 +4,7 @@
 
 Цель: быстро понять, какие файлы нужно менять вместе, чтобы локальная правка в одной ветке не ломала соседние части пайплайна.
 
-Обновлено: `2026-07-20` (`session/fork` surfaced in `CodexAgent`, app-server transport split into reader/request-policy modules, `fast_mode` is surfaced as `Speed`, failed resume-by-id can recover through `thread/read` path discovery, generated-image tool events are routed through `tool_events`, and the Codex config boundary accepts open reasoning-effort values).
+Обновлено: `2026-07-22` (`session/fork` surfaced in `CodexAgent`, app-server transport split into reader/request-policy modules, `fast_mode` is surfaced as `Speed`, missing-rollout resume now retries a `thread/read`-discovered path before the narrowly classified fresh-thread fallback, generated-image tool events are routed through `tool_events`, and the Codex config boundary accepts open reasoning-effort values).
 
 Важно: `collab/subagents` не отдельная архитектура.
 Это обычная ветка `ThreadItem::CollabAgentToolCall` внутри общего event-pipeline.
@@ -90,7 +90,10 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    SessionLoad[src/thread/session/view.rs] --> Replay[src/thread/core/replay.rs]
+    CodexAgent[src/codex_agent.rs] --> SessionLifecycle[src/thread/session/lifecycle.rs]
+    SessionLifecycle --> ResumeCommon[src/thread/features/resume/common.rs]
+    CodexAgent --> SessionView[src/thread/session/view.rs]
+    SessionView --> Replay[src/thread/core/replay.rs]
 
     Replay --> SessionReplay[src/thread/features/session/events.rs]
     Replay --> FileReplay[src/thread/features/file/events.rs]
@@ -105,7 +108,7 @@ flowchart LR
 Native Zed restore при этом предпочитает `thread.name`, если тред был явно переименован через `/rename`, и только потом показывает `preview`.
 После успешного restore текущая ACP-сессия получает `SessionInfoUpdate` с `title` и `updated_at`, чтобы history/recent списки не деградировали в `Unknown`.
 При этом live `ThreadNameUpdated` во время активного turn теперь не форсит ACP `title` мгновенно: автообновление имени буферизуется и публикуется уже после завершения turn, чтобы не сбивать client-side provisional-title / generating UX в `Zed`.
-При восстановлении history из Zed `load_session` / `resume_session` сначала идут через normal backend restore. `src/thread/session/lifecycle.rs` делает startup retry, затем пробует `thread/read(include_turns=false)` как path-discovery recovery и повторяет `thread/resume` по найденному rollout path. Если backend всё равно отвечает `no rollout found`, `src/codex_agent.rs` считает это невозможным restore для данной Zed history row и поднимает fresh backend-thread под тем же ACP session handle без history replay. Остальные ошибки restore не скрываются этим fallback.
+При восстановлении history из Zed `src/codex_agent.rs` владеет `load_session` / `resume_session` lifecycle, а `src/thread/session/lifecycle.rs` выполняет normal backend restore и startup retry. Только для классифицированного `no rollout found` lifecycle читает `thread/read(include_turns=false)` для path discovery и повторяет `thread/resume` по найденному rollout path. Если после этой попытки остаётся именно missing-rollout outcome, `CodexAgent` поднимает fresh backend-thread под тем же ACP session handle без history replay; остальные ошибки restore не скрываются этим fallback. `src/thread/features/resume/common.rs` не участвует в restore pipeline: это общие format/list helper-ы для lifecycle и archive/unarchive workflows.
 Для `load_session` и `/undo` history replay теперь дополнительно fenced через `history_replay_in_progress`: pending-состояние выставляется заранее в `src/codex_agent.rs` / `src/thread/session/view.rs`, а `src/thread/prompt/flow.rs` не пускает новый prompt или session command, пока `src/thread/core/replay.rs` ещё восстанавливает историю.
 Это же позволяет не держать `ThreadInner` mutex во время тяжёлого `/undo` replay: `thread_rollback`, label-cache warmup и snapshot нужных полей остаются под lock, а сам `replay::replay_turns(...)` идёт уже после выхода из критической секции.
 При включённом `ACP_DISABLE_AUTO_RESTORE=1` `src/codex_agent.rs` подавляет только самый ранний startup-driven backend-restore в небольшом окне после старта агента: вместо него поднимается fresh backend-thread под тем же ACP session handle. Более поздние явные открытия из history снова идут через нормальный restore-path.
@@ -215,14 +218,14 @@ flowchart LR
   синхронизируется после native resume и in-place `/fork`, а в `src/thread/turn/execution.rs` уходит в каждый новый `turn/start`.
 - Нижние selectors `Model`, `Permissions` и `Status` используют тот же session/config lifecycle. В текущем `Zed` descriptions у config options
   рендерятся как обычный text label, не Markdown, поэтому adapter-side UX держится на коротких option names и ACP grouped select options:
-  `Model` делит пункты на `Models`, `Effort`, `Speed`, `Permissions` — на workflow, guarded и bypass режимы, `Status` — на status, integrations и actions.
+  `Model` делит пункты на `Models`, `Effort`, `Speed`, `Permissions` — на workflow, guarded и bypass режимы, `Status` — на limit-варианты и actions.
   У ACP select есть только один `current_value`, поэтому выбранные nested пункты `Reasoning`/`Speed` помечаются adapter-side через `★` в option label.
 - `~/.codex-cas/selector-preferences.json` теперь читается как JSONC: `//` и `/* ... */` комментарии допустимы, trailing commas тоже поддерживаются. Существующий битый файл считается ошибкой старта session, а не поводом откатиться к defaults или переписать ручной конфиг. Новый generated формат разложен на секции `defaults`, `model_selector`, `layout`, `slash_commands`. `CODEX_CAS_HOME` может переопределить adapter-owned directory; старые `$CODEX_HOME/codex-acp/` и `$CODEX_HOME/memories/codex-acp/` пути больше не сканируются на старте. `defaults` задает `model`, `reasoning_effort` и `service_tier`; выбор model/effort/speed через selector сохраняется как default. Account limit labels вынесены в отдельный `~/.codex-cas/display-maps.json`; `limits.summary` хранит выбранные окна, а `limits.summary_options` задает видимые варианты в нижнем `Status` selector (`5h` или `5h + wk` по умолчанию). Готовые примеры limit `text` / `bars` / `block` вариантов лежат в `examples/display-maps/` и проверяются тестом loader-а. Partial `exact`/`thresholds` карты должны явно задавать `fallback`, иначе config считается ошибочным.
 - `model_selector.models` и `model_selector.reasoning_efforts` — ordered lists: наличие и порядок строк управляют видимостью и порядком меню. `models` поддерживает строковый id и объект `{ "id", "name", "description" }`; `reasoning_efforts` — effort id или такой же объект с override-ами. Adapter запрашивает полный model catalog с `includeHidden`, но пустой/default `models` фильтрует backend-hidden модели; hidden model появляется только при явном id в списке. `ReasoningEffort` — открытая непустая строка: `max` и `ultra` известны текущему baseline, а будущее значение хранится как `Custom(String)` и уходит в wire/config без подмены. `Custom` — имя Rust-варианта, а не литерал конфига. Текущая model/effort всегда остается видимой, чтобы ACP `currentValue` имел matching option. Явно настроенное значение можно surfaced без backend advertisement; конкретная модель всё еще может его отклонить. Правки этого контракта должны совместно проверять `config/reasoning.rs`, `config/model_selector.rs`, `selector_preferences.rs`, `selector_preferences/materialize.rs` и `settings.rs`.
 - `Plan` intentionally живет внутри `Permissions` selector: при выборе `Plan` кнопка показывает `Plan`, но sandbox/approval профиль сохраняется; выбор `Read only` / `Workspace` / `Full access` возвращает session в default chat mode и обновляет permission profile.
 - `Permissions` selector intentionally mirrors real `codex app-server` presets only. Adapter-side `Ask edits` не surfaced: если backend прислал `FileChangeRequestApproval`, адаптер всегда показывает confirmation popup, а не auto-accept; если backend не просит approval для workspace-write edits, адаптер не обещает искусственный per-edit режим.
 - Planned `Auto-review` permission UX не должен смешиваться с bypass: это отдельный guarded/workspace-write режим рядом с `Workspace`, который меняет reviewer/routing approval-запросов на auto-reviewer subagent. Для реализации нужны protocol fields вроде `ApprovalsReviewer::AutoReview`, прокидывание policy через session/turn params и отдельный render lifecycle для `item/autoApprovalReview/*`.
-- Старые context usage display modes удалены после появления нативного Zed context donut для external ACP agents. Нижний `Status` selector по умолчанию снова показывает limit-варианты, `Session`/`MCP`/`Skills`/`Plugins` и action `Compact now`; `selector-preferences.json` можно использовать только если нужно явно сузить или переупорядочить группы.
+- Старые context usage display modes удалены после появления нативного Zed context donut для external ACP agents. Нижний `Status` selector показывает limit-варианты и action `Compact now`; `Session`/`MCP`/`Skills`/`Plugins` остаются в полном `/status` report. `selector-preferences.json` можно использовать только если нужно явно сузить или переупорядочить группы.
 - `/status` использует компактную структуру `Limits`, `Session`, `Integrations`; context usage не дублируется, потому что Zed показывает его через native donut из ACP `usage_update`.
 - Hover/description у самих selectors собирается из текущего runtime state: `Permissions` показывает active workflow и сохраненный sandbox/approval профиль, `Model` — текущие model/reasoning/speed, `Status` — только выбранную limit-сводку и reset-время. Полный status report с `Session` и `Integrations` остается в `/status`, чтобы hover нижнего selector-а не превращался в длинный MCP/Skills/Plugins dump.
 - Account limit labels идут через `~/.codex-cas/display-maps.json` как `percent -> label` maps; `limits.summary_options` управляет visible вариантами `Status`, а `limits.summary` хранит текущий выбранный ordered-list (`["primary"]` или `["primary", "secondary"]`). Model labels берутся из `model_selector.models[*].name`, effort labels/descriptions — из `model_selector.reasoning_efforts[*].name` / `description`; если override не задан, используются backend/code defaults. Отдельных model-prefix, effort-icon, speed-glyph и context-display style layers больше нет.
@@ -287,7 +290,10 @@ Startup/resume/thread-switch snapshots account rate limits должны толь
 Нативный Zed thinking/effort split-button с иконкой также Zed-side: adapter может отдавать reasoning values через config options, но не может сам переместить selector в левую toolbar-зону или выбрать `IconName::ThinkingMode`.
 
 ### Replay/Resume
-- `src/thread/features/resume/*`
+- `src/codex_agent.rs`
+- `src/thread/session/lifecycle.rs`
+- `src/thread/session/view.rs`
+- `src/thread/features/resume/common.rs`
 - `src/thread/core/replay.rs`
 - `src/thread/core/inner_state.rs`
 - `src/app_server.rs`
@@ -347,8 +353,8 @@ Command approval title не должен оставаться generic `Details` 
 | `src/thread/features/notification/*` | Доменные обработчики notification-событий, включая usage/reconnect/warning forwarding |
 | `src/thread/features/plan/*` | Plan parsing, fallback state-machine, plan item события |
 | `src/thread/prompt/*` | Парсинг slash-команд, fixed prompt-turn override-ы (`/init`, `/plan <prompt>`), routing в review/session-turn flow |
-| `src/thread/features/resume/*` | Общие helper-ы thread-list based workflows: форматирование названий/времени и paginated list для archive/unarchive |
-| `src/thread/session/config/*` | Runtime построение lower selectors, permission/model/context групп, layout ordering и formatter-ы статусов |
+| `src/thread/features/resume/common.rs` | Общие format/list helper-ы для session lifecycle и archive/unarchive workflows; restore/replay pipeline здесь не живет |
+| `src/thread/session/config/*` | Runtime построение lower `Permissions` / `Model` / `Status` selectors, status/integration summaries, layout ordering и formatter-ы |
 | `src/thread/session/selector_preferences*` | Schema, materialization, persistence и JSONC parser/writer для `~/.codex-cas/selector-preferences.json` |
 | `src/thread/session/display_maps*` | Schema, materialization, persistence и JSONC parser/writer для `~/.codex-cas/display-maps.json` |
 | `src/thread/features/session/*` | `/compact`, `/undo`, `/plan on/off`, `/rename`, `/archive`, `/unarchive`, archive/unarchive picker UI, ACP `session/fork` bootstrap helper, session replay события, `SessionInfoUpdate` (`title` + `updated_at`), history replay fencing и runtime handling нижнего `Speed` selector |

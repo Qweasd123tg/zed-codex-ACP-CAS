@@ -7,6 +7,7 @@ flowchart TD
     ApprovalsFile[src/thread/features/approvals/file_change.rs]
     ApprovalsPermissions[src/thread/features/approvals/permissions.rs]
     ApprovalsUserInput[src/thread/features/approvals/user_input.rs]
+    CodexAgent[src/codex_agent.rs]
     CollabContent[CollabContent]
     CollabRender[src/thread/features/collab/render.rs]
     CollabReplay[src/thread/features/collab/render.rs]
@@ -30,20 +31,21 @@ flowchart TD
     PromptFlow[src/thread/prompt/flow.rs]
     ReconnectGuard[src/thread/turn/execution.rs]
     Replay[src/thread/core/replay.rs]
-    ResumeApply[src/thread/features/resume/apply.rs]
-    ResumeListing[src/thread/features/resume/listing.rs]
-    ResumeSelector[src/thread/features/resume/selector.rs]
+    ResumeCommon[src/thread/features/resume/common.rs]
     ServerRequests[src/thread/core/server_requests.rs]
     SessionControls[src/thread/features/session/controls.rs]
     SessionEvents[src/thread/features/session/events.rs]
+    SessionLifecycle[src/thread/session/lifecycle.rs]
     SessionModes[src/thread/features/session/modes.rs]
     SessionReplay[src/thread/features/session/events.rs]
+    SessionView[src/thread/session/view.rs]
     StatusMapping[src/thread/features/status_mapping.rs]
     TerminalUpdates[src/thread/core/terminal_updates.rs]
     ToolEventsCommand[src/thread/features/tool_events/command.rs]
     ToolEventsMcp[src/thread/features/tool_events/mcp.rs]
     ToolEventsWebImage[src/thread/features/tool_events/web_image.rs]
     ToolUiKind[src/thread/features/tool_call_ui/kind.rs]
+    ToolUiLocation[src/thread/features/tool_call_ui/location.rs]
     ToolUiRaw[src/thread/features/tool_call_ui/raw.rs]
     ToolUiTitle[src/thread/features/tool_call_ui/title.rs]
     TurnDiff[src/thread/turn/diff.rs]
@@ -53,8 +55,6 @@ flowchart TD
 
     UserClient --> PromptFlow
     PromptFlow --> PromptCommands
-    PromptFlow --> ResumeListing
-    PromptFlow --> ResumeSelector
     PromptFlow --> SessionControls
     PromptFlow --> SessionModes
     PromptFlow --> TurnExecution
@@ -81,6 +81,7 @@ flowchart TD
     ItemHandlers --> CollabRender
     ItemHandlers --> SessionEvents
     ToolEventsCommand --> ToolUiKind
+    ToolEventsCommand --> ToolUiLocation
     ToolEventsCommand --> ToolUiTitle
     ToolEventsCommand --> ToolUiRaw
     ToolEventsCommand --> StatusMapping
@@ -92,8 +93,10 @@ flowchart TD
     TurnExecution --> ReconnectGuard
     AppServer --> AppServerReader
     AppServer --> AppServerPolicy
-    ResumeSelector --> ResumeApply
-    ResumeApply --> Replay
+    CodexAgent --> SessionLifecycle
+    SessionLifecycle --> ResumeCommon
+    CodexAgent --> SessionView
+    SessionView --> Replay
     Replay --> SessionReplay
     Replay --> FileReplay
     Replay --> CommandReplay

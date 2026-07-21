@@ -31,14 +31,16 @@ jobs:
       - name: Get version from Cargo.toml
         id: get_version
         shell: bash
+        env:
+          INPUT_TAG_NAME: ${{ github.event.inputs.tag_name }}
         run: |
           CARGO_VERSION=$(grep -m1 "^version" Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
 
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
             TAG_NAME="${GITHUB_REF_NAME}"
             VERSION="${TAG_NAME#v}"
-          elif [ -n "${{ github.event.inputs.tag_name }}" ]; then
-            TAG_NAME="${{ github.event.inputs.tag_name }}"
+          elif [ -n "$INPUT_TAG_NAME" ]; then
+            TAG_NAME="$INPUT_TAG_NAME"
             VERSION="${TAG_NAME#v}"
           else
             VERSION="$CARGO_VERSION"
@@ -58,32 +60,15 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
-  build-binaries:
-    name: Build ${{ matrix.target }}
+  build-linux-x86_64:
+    name: Build Linux x86_64 GNU
     needs: get-version
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            artifact_suffix: linux-x86_64-gnu
-            binary_path: target/x86_64-unknown-linux-gnu/release/codex-acp
-          - os: macos-14
-            target: aarch64-apple-darwin
-            artifact_suffix: macos-aarch64-apple-darwin
-            binary_path: target/aarch64-apple-darwin/release/codex-acp
-          - os: windows-2022
-            target: x86_64-pc-windows-msvc
-            artifact_suffix: windows-x86_64-pc-windows-msvc
-            binary_path: target/x86_64-pc-windows-msvc/release/codex-acp.exe
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v6
 
       - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update
@@ -92,45 +77,48 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-unknown-linux-gnu
 
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-${{ matrix.target }}
+          shared-key: release-linux-x86_64-gnu
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target x86_64-unknown-linux-gnu
 
-      - name: Prepare Unix release files
-        if: runner.os != 'Windows'
+      - name: Test release target
+        run: cargo test --release --target x86_64-unknown-linux-gnu
+
+      - name: Verify installer against release binary
+        shell: bash
+        run: >-
+          ./install.sh
+          --from-binary target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
+          --config-home /tmp/codex-acp-release-config
+          /tmp/codex-acp-release
+          ${{ env.BINARY_NAME }}
+
+      - name: Prepare Linux release files
         shell: bash
         run: |
-          release_binary="${BINARY_NAME}-${{ matrix.artifact_suffix }}"
-          cp "${{ matrix.binary_path }}" "$release_binary"
+          release_binary="${BINARY_NAME}-linux-x86_64-gnu"
+          cp "target/x86_64-unknown-linux-gnu/release/${BINARY_NAME}" "$release_binary"
           shasum -a 256 "$release_binary" > "$release_binary.sha256"
-
-      - name: Prepare Windows release files
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $releaseBinary = "${env:BINARY_NAME}-${{ matrix.artifact_suffix }}.exe"
-          Copy-Item "${{ matrix.binary_path }}" $releaseBinary
-          $hash = (Get-FileHash -Algorithm SHA256 $releaseBinary).Hash.ToLowerInvariant()
-          "$hash  $releaseBinary" | Out-File -Encoding ascii "$releaseBinary.sha256"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:
-          name: codex-acp-${{ matrix.artifact_suffix }}
+          name: codex-acp-linux-x86_64-gnu
           if-no-files-found: error
           path: |
-            codex-acp-${{ matrix.artifact_suffix }}*
+            codex-acp-linux-x86_64-gnu
+            codex-acp-linux-x86_64-gnu.sha256
           retention-days: 7
 
   create-release:
     name: Create Release
-    needs: [get-version, build-binaries]
+    needs: [get-version, build-linux-x86_64]
     runs-on: ubuntu-latest
 
     steps:
@@ -176,5 +164,5 @@ jobs:
           files: |
             install.sh
             install.sh.sha256
-            artifacts/**/codex-acp-*
-            artifacts/**/*.sha256
+            artifacts/codex-acp-linux-x86_64-gnu/codex-acp-linux-x86_64-gnu
+            artifacts/codex-acp-linux-x86_64-gnu/codex-acp-linux-x86_64-gnu.sha256

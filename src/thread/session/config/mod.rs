@@ -45,17 +45,12 @@ pub(in crate::thread) struct ConfigOptionsInput<'a> {
     pub(in crate::thread) model_selector: &'a ModelSelectorPreferences,
     pub(in crate::thread) display_maps: &'a crate::thread::session_display_maps::DisplayMapsConfig,
     pub(in crate::thread) workspace_cwd: &'a Path,
-    pub(in crate::thread) backend_cli_version: &'a str,
-    pub(in crate::thread) account_status: &'a context::AccountStatus,
     pub(in crate::thread) current_account_rate_limits:
         Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
     pub(in crate::thread) compaction_in_progress: bool,
     pub(in crate::thread) approval: AppAskForApproval,
     pub(in crate::thread) sandbox: AppSandboxMode,
     pub(in crate::thread) collaboration_mode_kind: ModeKind,
-    pub(in crate::thread) session_mcp_summary: &'a context::ContextSelectorSummary,
-    pub(in crate::thread) session_skills_summary: &'a context::ContextSelectorSummary,
-    pub(in crate::thread) session_plugins_summary: &'a context::ContextSelectorSummary,
     pub(in crate::thread) selector_layout: &'a SelectorLayoutPreferences,
 }
 
@@ -68,16 +63,11 @@ pub(in crate::thread) fn config_options_input(inner: &ThreadInner) -> ConfigOpti
         model_selector: &inner.model_selector,
         display_maps: &inner.display_maps,
         workspace_cwd: &inner.workspace_cwd,
-        backend_cli_version: &inner.backend_cli_version,
-        account_status: &inner.account_status,
         current_account_rate_limits: inner.account_rate_limits.as_ref(),
         compaction_in_progress: inner.compaction_in_progress,
         approval: inner.approval_policy,
         sandbox: inner.sandbox_mode,
         collaboration_mode_kind: inner.collaboration_mode_kind,
-        session_mcp_summary: &inner.session_mcp_summary,
-        session_skills_summary: &inner.session_skills_summary,
-        session_plugins_summary: &inner.session_plugins_summary,
         selector_layout: &inner.selector_layout,
     }
 }
@@ -91,16 +81,11 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
         model_selector,
         display_maps,
         workspace_cwd,
-        backend_cli_version,
-        account_status,
         current_account_rate_limits,
         compaction_in_progress,
         approval,
         sandbox,
         collaboration_mode_kind,
-        session_mcp_summary,
-        session_skills_summary,
-        session_plugins_summary,
         selector_layout,
     } = input;
 
@@ -208,13 +193,7 @@ pub(super) fn config_options(input: ConfigOptionsInput<'_>) -> Vec<SessionConfig
                 context::status_control_option_groups(
                     current_account_rate_limits,
                     display_maps,
-                    workspace_cwd,
-                    backend_cli_version,
-                    account_status,
                     compaction_in_progress,
-                    session_mcp_summary,
-                    session_skills_summary,
-                    session_plugins_summary,
                 ),
             ),
         )
@@ -258,10 +237,9 @@ fn current_permission_mode_description(
 }
 
 pub(super) use context::{
-    AccountStatus, ContextSelectorSummary, MCP_STATUS_VALUE, PLUGINS_STATUS_VALUE,
-    SESSION_STATUS_VALUE, SKILLS_STATUS_VALUE, STATUS_COMPACT_VALUE, STATUS_LIMITS_VALUE,
-    build_account_status, build_mcp_summary, build_plugins_summary, build_skills_summary,
-    full_status_report, parse_limits_summary_value,
+    AccountStatus, ContextSelectorSummary, STATUS_COMPACT_VALUE, build_account_status,
+    build_mcp_summary, build_plugins_summary, build_skills_summary, full_status_report,
+    parse_limits_summary_value,
 };
 pub(super) use fast_mode::{service_tier_override_from_config, service_tier_override_from_session};
 pub(super) use limits::{
@@ -290,8 +268,7 @@ mod tests {
     use agent_client_protocol::schema::v1::{
         SessionConfigKind, SessionConfigOptionCategory, SessionConfigSelectOptions,
     };
-    use codex_app_server_protocol::{Account, ReasoningEffortOption};
-    use codex_protocol::account::PlanType;
+    use codex_app_server_protocol::ReasoningEffortOption;
     use std::path::Path;
 
     #[test]
@@ -332,11 +309,6 @@ mod tests {
             default_service_tier: None,
             is_default: true,
         }];
-        let account_status = super::build_account_status(Some(Account::Chatgpt {
-            email: Some("tester@example.com".to_string()),
-            plan_type: PlanType::Team,
-        }));
-
         let options = config_options(ConfigOptionsInput {
             models: &models,
             current_model: "gpt-5.5",
@@ -345,13 +317,8 @@ mod tests {
             model_selector: &Default::default(),
             display_maps: &Default::default(),
             workspace_cwd: Path::new("/workspace/project"),
-            backend_cli_version: "0.142.5",
-            account_status: &account_status,
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            session_mcp_summary: &Default::default(),
-            session_skills_summary: &Default::default(),
-            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
             collaboration_mode_kind: ModeKind::Default,
@@ -447,9 +414,9 @@ mod tests {
                 .iter()
                 .map(|group| group.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["Status", "Integrations", "Actions"]
+            vec!["Status", "Actions"]
         );
-        assert_eq!(groups[0].options.len(), 3);
+        assert_eq!(groups[0].options.len(), 2);
         assert!(groups[0].options.iter().any(|option| {
             option.value.0.as_ref() == "limits_summary:primary" && option.name == "5h --"
         }));
@@ -457,25 +424,7 @@ mod tests {
             option.value.0.as_ref() == "limits_summary:primary_secondary"
                 && option.name == "5h -- · wk --"
         }));
-        assert!(groups[0].options.iter().any(|option| {
-            option.value.0.as_ref() == "session_status" && option.name == "Session"
-        }));
-        let session_option = groups[0]
-            .options
-            .iter()
-            .find(|option| option.value.0.as_ref() == "session_status")
-            .expect("session option exists");
-        assert_eq!(
-            session_option.description.as_deref(),
-            Some(concat!(
-                "Adapter: codex-acp-cas ",
-                env!("CARGO_PKG_VERSION"),
-                "\nBackend: codex 0.142.5",
-                "\nWorkspace: /workspace/project",
-                "\nAccount: tester@example.com · ChatGPT Team"
-            ))
-        );
-        assert!(groups[2].options.iter().any(|option| {
+        assert!(groups[1].options.iter().any(|option| {
             option.value.0.as_ref() == "compact_now" && option.name == "Compact now"
         }));
     }
@@ -513,13 +462,8 @@ mod tests {
             model_selector: &Default::default(),
             display_maps: &Default::default(),
             workspace_cwd: Path::new("/tmp/workspace"),
-            backend_cli_version: "0.0.0",
-            account_status: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            session_mcp_summary: &Default::default(),
-            session_skills_summary: &Default::default(),
-            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
             collaboration_mode_kind: ModeKind::Default,
@@ -630,13 +574,8 @@ mod tests {
             model_selector: &model_selector,
             display_maps: &Default::default(),
             workspace_cwd: Path::new("/tmp/workspace"),
-            backend_cli_version: "0.0.0",
-            account_status: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            session_mcp_summary: &Default::default(),
-            session_skills_summary: &Default::default(),
-            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
             collaboration_mode_kind: ModeKind::Default,
@@ -712,13 +651,8 @@ mod tests {
             model_selector: &Default::default(),
             display_maps: &Default::default(),
             workspace_cwd: Path::new("/tmp/workspace"),
-            backend_cli_version: "0.0.0",
-            account_status: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            session_mcp_summary: &Default::default(),
-            session_skills_summary: &Default::default(),
-            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::Never,
             sandbox: AppSandboxMode::ReadOnly,
             collaboration_mode_kind: ModeKind::Plan,
@@ -792,13 +726,8 @@ mod tests {
             model_selector: &Default::default(),
             display_maps: &Default::default(),
             workspace_cwd: Path::new("/tmp/workspace"),
-            backend_cli_version: "0.0.0",
-            account_status: &Default::default(),
             current_account_rate_limits: None,
             compaction_in_progress: false,
-            session_mcp_summary: &Default::default(),
-            session_skills_summary: &Default::default(),
-            session_plugins_summary: &Default::default(),
             approval: AppAskForApproval::OnRequest,
             sandbox: AppSandboxMode::WorkspaceWrite,
             collaboration_mode_kind: ModeKind::Default,

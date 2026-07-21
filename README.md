@@ -8,12 +8,11 @@ This fork is focused on real daily use: better startup diagnostics, better sessi
 
 This project is usable, but still beta.
 
-- Main real-world target today: Linux on `x86_64-unknown-linux-gnu`
+- Supported release platform: Linux x86_64 GNU
 - Fedora is the most tested environment today
-- GitHub Releases are intended to ship:
-  - Linux `x86_64-unknown-linux-gnu`
-  - macOS Apple Silicon `aarch64-apple-darwin`
-  - Windows `x86_64-pc-windows-msvc`
+- GitHub Releases ship the `codex-acp-linux-x86_64-gnu` binary
+- macOS and Windows binary releases are deferred until those platforms have
+  maintainers and runtime coverage; users may attempt source builds themselves
 - Behavior may still change between releases
 
 ## Screenshots
@@ -88,8 +87,7 @@ Sub-agent and collaboration tool-call rendering:
 - Approval previews for those recognized shell-backed file/fetch commands use the same specific tool kinds, so Zed no longer labels them as generic `Run Command` cards
 - Generated images are also surfaced as inline markdown images and saved under `~/.codex-cas/generated-images/`.
   This is a pragmatic adapter-side rendering path for current Zed/ACP behavior, not the ideal final contract; a future protocol/Zed path should surface generated images and saved-file links natively.
-- Clearer status surfacing through `/status`, the `Status` selector, and native Zed context donut, including adapter/backend version and richer account-limit details when available
-- Compact `Status` selector summaries for account limits, session status, MCP, skills, plugins, and compaction
+- Clearer status surfacing through the full `/status` report, a focused `Status` selector for account limits and compaction, and the native Zed context donut
 - More reliable context compaction in Zed: `/compact` and the `Status` selector action now keep draining background app-server notifications until completion/failure, so the selector should not stay stuck on `Compacting...`
 - Compact chat warnings when account limits cross 75%, 90%, 95%, and exhausted thresholds
 - Command approval popups now follow Codex app-server `available_decisions`, including session/matching-command approvals when the backend offers them
@@ -154,8 +152,7 @@ Current strengths of this fork:
 - Inline review flows backed by native `review/start`
 - Practical thread switching with native `Zed` `New Thread`, `/fork`, and archive-triggered replacement
 - Standard ACP `session/fork` surfaced separately from the in-place slash `/fork` flow
-- Canonical session status surfacing through `/status` plus the compact context `%` selector
-- `plugins` now sit alongside `status`, `MCP`, `skills`, and limits in the context selector UX
+- Canonical session status surfacing through `/status`; the compact context `%` selector stays focused on account limits and compaction
 - `Speed` is surfaced inside the grouped `Model` selector over Codex `service_tier` and carried through start, resume, fork, and future turns
 - More complete collab and sub-agent UI mapping
 
@@ -183,25 +180,24 @@ Current gaps:
 - Zed `1.3.0` / `zed-industries/zed#56446` added client-side editing for external-agent thread titles. In current Zed this is stored as Zed sidebar `title_override` metadata for ACP external agents; it does not call back into the adapter to persist the Codex backend thread name. Use `/rename` when the rename must persist in Codex thread history or be visible to other clients.
 - The selected-agent / `New Thread` trigger in current `Zed` can show a visibly odd pulsing state that appears only while the pointer is moving. In practice this looks like a client-side repaint/animation quirk, not an ACP startup stall in the adapter
 - While history replay is restoring after `load_session` or replaying `/undo`, new prompts and session commands are intentionally fenced until replay finishes; this avoids overlapping turn/replay state in one ACP session
-- Linux is the most tested platform right now
-- Multi-platform release artifacts can exist before all platforms are equally tested in real use
+- Linux x86_64 GNU is the only supported binary release platform right now
+- macOS and Windows builds are community/self-build territory for now and may
+  require platform-specific fixes
 
 ## Install
 
 ### From GitHub Releases
 
-Current release artifacts are plain binaries, `.sha256` files, and the Bash installer:
+Current release artifacts are the Linux binary, its checksum, and the Bash installer:
 
 - `codex-acp-linux-x86_64-gnu`
-- `codex-acp-macos-aarch64-apple-darwin`
-- `codex-acp-windows-x86_64-pc-windows-msvc.exe`
-- matching `.sha256` files
+- `codex-acp-linux-x86_64-gnu.sha256`
 - `install.sh`
 - `install.sh.sha256`
 
-On Linux/macOS, the installer can detect the current OS/CPU, download the matching
-GitHub Release artifact, verify its `.sha256`, install it to a stable path, and
-create the adapter config directory:
+On Linux x86_64, the installer downloads the matching GitHub Release artifact,
+verifies its `.sha256`, installs it to a stable path, and creates the adapter
+config directory:
 
 Latest release:
 
@@ -213,7 +209,7 @@ bash install.sh
 Pinned release:
 
 ```bash
-bash install.sh --download 0.23.5
+bash install.sh --download 0.27.1
 ```
 
 Manual artifact install still works if you already downloaded the binary:
@@ -235,39 +231,10 @@ Then configure Zed to use the binary path:
 }
 ```
 
-Windows example:
-
-1. Put `codex-acp-windows-x86_64-pc-windows-msvc.exe` somewhere stable and rename it to `codex-acp.exe` if desired.
-2. Verify the matching `.sha256` file before installing.
-3. Make sure the `codex.exe` that provides `codex app-server` is available to the adapter. You can do that with `PATH`, or set `CODEX_ACP_CODEX_BIN` to the absolute `codex.exe` path.
-4. If you rely on the ChatGPT extension's bundled `codex.exe`, use a small wrapper next to `codex-acp.exe`:
-
-```cmd
-@echo off
-set "CODEX_ACP_CODEX_BIN=C:\Users\LOQ\.vscode\extensions\openai.chatgpt-26.422.71525-win32-x64\bin\windows-x86_64\codex.exe"
-"%~dp0codex-acp.exe" %*
-```
-
-Configure Zed to launch that wrapper through `cmd.exe`:
-
-```json
-{
-  "agent_servers": {
-    "codex-acp-cas": {
-      "type": "custom",
-      "command": "C:\\Windows\\System32\\cmd.exe",
-      "args": [
-        "/d",
-        "/s",
-        "/c",
-        "\"\"C:\\Users\\LOQ\\Desktop\\test\\codex-acp-zed.cmd\"\""
-      ]
-    }
-  }
-}
-```
-
-The double quoting in the final argument is intentional for `cmd.exe /s /c`; it keeps paths with spaces from being split before the adapter starts.
+Prebuilt macOS and Windows artifacts are not currently published. Those
+platforms are not release-blocking and are not covered by the project's support
+policy. Users who need them can attempt a source build and carry any required
+platform-specific fixes locally.
 
 ### Upgrade Notes For 0.25.2
 
@@ -294,10 +261,12 @@ command cards include the command, cwd, parsed actions, status, and a bounded
 head/tail output preview while keeping Raw Input/Raw Output for exact protocol
 payloads.
 
-`/status` and the `Context` selector's session status now include the running
-adapter version and the backend Codex CLI version captured from the app-server
-thread. Account-limit details also surface the limit id/name and credits when
-the current pinned app-server protocol provides them.
+`/status` includes the running adapter version and the backend Codex CLI version
+captured from the app-server thread. Account-limit details also surface the
+limit id/name and credits when the current pinned app-server protocol provides
+them. The lower `Status` selector is intentionally limited to concise limit
+variants and the compaction action; session, MCP, skills, and plugins details
+remain in `/status`.
 
 If session startup takes more than a short threshold, the adapter emits a compact
 system status message after the ACP session is ready. The earlier Zed registry
@@ -432,7 +401,7 @@ Default config:
     "status": {
       "visible": true,
       "name": "Status",
-      "groups": ["status", "integrations", "actions"]
+      "groups": ["status", "actions"]
     }
   },
 
@@ -596,7 +565,7 @@ Known groups:
 
 - `permissions`: `workflow`, `guarded`, `bypass`.
 - `model`: `models`, `effort`, `speed`.
-- `status`: `status`, `integrations`, `actions`.
+- `status`: `status`, `actions`.
 
 Known slash commands:
 
@@ -627,10 +596,12 @@ Requirements:
 - Rust toolchain
 - `codex` available in your environment
 
-The local helper scripts in `script/` are bash-oriented and currently target Linux/macOS-style local development. On Windows, build with Cargo directly:
+The local helper scripts in `script/` are Bash-oriented and maintained for
+Linux. macOS and Windows users can attempt a native Cargo build, but these
+platforms currently have no release or runtime-support guarantee:
 
-```powershell
-cargo build --release --target x86_64-pc-windows-msvc
+```bash
+cargo build --release
 ```
 
 Install from source:
@@ -691,15 +662,14 @@ For a tagged GitHub release, work from `main` and use the release helper after
 the user-facing docs and version are ready:
 
 ```bash
-script/prepare_release.sh 0.23.5
+script/prepare_release.sh 0.27.1
 git push origin main
-git push origin v0.23.5
+git push origin v0.27.1
 ```
 
 The `v*` tag triggers `.github/workflows/release.yml`, which validates the tag
-against `Cargo.toml` and builds the Linux, macOS Apple Silicon, and Windows
-artifacts listed above. The workflow also publishes `install.sh` and
-`install.sh.sha256`. The helper script writes a local bundle under
+against `Cargo.toml` and builds the supported Linux x86_64 GNU artifact. The
+workflow also publishes `install.sh` and `install.sh.sha256`. The helper script writes a local bundle under
 `.releases/v<version>/`; those local filenames include the version and host
 platform, while GitHub Release artifact names intentionally use the stable names
 shown in the install section.
@@ -750,19 +720,10 @@ What they usually mean:
   `unsupported-config-schema-value` usually means the adapter and backend/config schema are from
   different generations. The diagnostic probe is read-only and the adapter never rewrites
   `config.toml` to recover.
-- Timeout during `initialize`, `thread/start`, or `turn/start`: app-server is stuck before the adapter can safely continue, or the bundled `codex.exe` version is incompatible with this adapter's pinned app-server protocol
-- `failed to start 'codex' app-server`: `codex` is missing or not available in `PATH`; on Windows, set `CODEX_ACP_CODEX_BIN` to the intended `codex.exe`
+- Timeout during `initialize`, `thread/start`, or `turn/start`: app-server is stuck before the adapter can safely continue, or the backend Codex version is incompatible with this adapter's pinned app-server protocol
+- `failed to start 'codex' app-server`: `codex` is missing or not available in `PATH`; set `CODEX_ACP_CODEX_BIN` to the intended executable when it is not discoverable
 - `Turn appears stuck after repeated reconnect failures`: the adapter aborted a stalled turn and drained queued tail notifications so the next prompt starts from a clean state
 - Panic backtrace: the adapter or child process crashed directly
-
-On Windows, test the same wrapper that Zed launches:
-
-```cmd
-where codex
-codex --version
-codex app-server --help
-C:\Windows\System32\cmd.exe /d /s /c ""C:\Users\LOQ\Desktop\test\codex-acp-zed.cmd" --help"
-```
 
 Recent hardening in this fork:
 

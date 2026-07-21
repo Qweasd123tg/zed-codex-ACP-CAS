@@ -1787,7 +1787,7 @@ dependencies = [
 
 [[package]]
 name = "codex-acp"
-version = "0.27.0"
+version = "0.27.1"
 dependencies = [
  "agent-client-protocol",
  "anyhow",

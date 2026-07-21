@@ -1,71 +1,23 @@
 use super::*;
 
 #[test]
-fn does_not_parse_threads_command() {
-    let prompt: Vec<ContentBlock> = vec!["/threads".into()];
-    assert_eq!(parse_session_command(&prompt), None);
-}
-
-#[test]
-fn does_not_parse_resume_command_with_thread_id() {
-    let prompt: Vec<ContentBlock> = vec!["/resume thread_123".into()];
-    assert_eq!(parse_session_command(&prompt), None);
-}
-
-#[test]
-fn does_not_parse_resume_command_without_thread_id() {
-    let prompt: Vec<ContentBlock> = vec!["/resume".into()];
-    assert_eq!(parse_session_command(&prompt), None);
-}
-
-#[test]
-fn does_not_parse_resume_command_with_partial_query() {
-    let prompt: Vec<ContentBlock> = vec!["/resume 019c6455".into()];
-    assert_eq!(parse_session_command(&prompt), None);
-}
-
-#[test]
-fn does_not_parse_resume_command_without_space_before_query() {
-    let prompt: Vec<ContentBlock> = vec!["/resumeпривет".into()];
-    assert_eq!(parse_session_command(&prompt), None);
-}
-
-#[test]
-fn does_not_parse_resume_command_with_additional_resource_blocks() {
-    let prompt: Vec<ContentBlock> = vec![
-        "/resume".into(),
-        ContentBlock::ResourceLink(ResourceLink::new("ctx", "file:///tmp/ctx.md")),
-    ];
-    assert_eq!(parse_session_command(&prompt), None);
-}
-
-#[test]
-fn does_not_parse_resume_when_first_text_block_is_command() {
-    let prompt: Vec<ContentBlock> = vec!["/resume".into(), "thread-123".into()];
-    assert_eq!(parse_session_command(&prompt), None);
-}
-
-#[test]
-fn does_not_parse_resume_command_with_history_flag() {
-    let prompt: Vec<ContentBlock> = vec!["/resume --history".into()];
-    assert_eq!(parse_session_command(&prompt), None);
-}
-
-#[test]
-fn does_not_parse_resume_command_with_query_and_history_flag() {
-    let prompt: Vec<ContentBlock> = vec!["/resume 019c6455 --history".into()];
-    assert_eq!(parse_session_command(&prompt), None);
-}
-
-#[test]
-fn does_not_parse_resume_command_with_no_history_flag() {
-    let prompt: Vec<ContentBlock> = vec!["/resume --no-history".into()];
-    assert_eq!(parse_session_command(&prompt), None);
+fn removed_thread_picker_commands_are_not_parsed() {
+    for command in [
+        "/threads",
+        "/resume",
+        "/resume thread_123",
+        "/resume --history",
+        "/resume --no-history",
+        "/resumeпривет",
+    ] {
+        let prompt: Vec<ContentBlock> = vec![command.into()];
+        assert_eq!(parse_session_command(&prompt), None, "{command}");
+    }
 }
 
 #[test]
 fn ignores_command_when_first_text_block_is_not_command() {
-    let prompt: Vec<ContentBlock> = vec!["continue".into(), "/resume".into()];
+    let prompt: Vec<ContentBlock> = vec!["continue".into(), "/status".into()];
     assert_eq!(parse_session_command(&prompt), None);
 }
 
@@ -374,7 +326,7 @@ fn parses_plan_command_with_unknown_single_word_as_prompt() {
 }
 
 #[test]
-fn builtin_commands_include_review_and_fork() {
+fn builtin_commands_include_supported_entries_and_exclude_removed_thread_picker() {
     let names = builtin_commands(&SlashCommandPreferences::default())
         .into_iter()
         .map(|command| command.name)
@@ -384,6 +336,8 @@ fn builtin_commands_include_review_and_fork() {
     assert!(names.contains(&"status".to_string()));
     assert!(names.contains(&"review".to_string()));
     assert!(names.contains(&"fork".to_string()));
+    assert!(!names.contains(&"resume".to_string()));
+    assert!(!names.contains(&"threads".to_string()));
 }
 
 #[test]
