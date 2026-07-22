@@ -126,7 +126,8 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          path: artifacts
+          name: codex-acp-linux-x86_64-gnu
+          path: artifacts/codex-acp-linux-x86_64-gnu
 
       - name: Show downloaded artifacts
         shell: bash
